@@ -1,3 +1,35 @@
+# Agent config (local)
 .agents/
 skills-lock.json
 docs/agents
+
+# Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Local data / env
+.env
+data/
+*.db
+*.sqlite*
+
+# Test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Lock files (optional - team choice)
+# uv.lock

@@ -4,16 +4,28 @@
 - When doing bug fixes always start by reproducing the bug in an end-to-end test setting as closely aligned with the real user workflow as possible
 - Prefer established reputable third party libraries to building functionality from scratch
 - Ensure for any new feature or fix that we add appropriate and complementary unit and end-to-end test coverage
+- Refer to `docs/CODING_STANDARDS.md` for project standards
 
-# Tools
+# Tools and utilities
 
 - Use `uv` to manage Python packages
 - Use `gh-axi` (available on system path) to interact with GitHub
 - Use `lavish-axi` (available on system path) to create interactive local html samples and prototypes for user feedback
 - Use `chrome-devtools-axi` (available on system path) for browser interaction
 - Use `treehouse` (available on system path) for worktree management
-- Use the `ask_question` tool to ask a multi-option question to the user, particularly when there are a series of questions for the user to provide input on during a multi-turn conversation
 - Use the terminal tool to read files outside of the project workspace
+
+# Interrogation protocol
+
+**Every** multi-choice user prompt **must** use the `ask_question` tool. Never present options as markdown/list in assistant messages.
+
+# Session logs
+
+Current session log: `~/.pi/agent/sessions/--workspace-projects-jackrabbit--/<timestamp>_<id>.jsonl`
+
+# Tool economy
+
+Batch related `read`/`bash` calls. Avoid re-reading files within a session — cache in memory.
 
 # Other
 
