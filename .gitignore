@@ -1,5 +1,6 @@
 # Agent config (local)
 .agents/
+.pi/
 skills-lock.json
 docs/agents
 

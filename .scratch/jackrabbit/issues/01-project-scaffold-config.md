@@ -4,12 +4,16 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `pyproject.toml` with dependencies: fastapi, uvicorn, sqlmodel, alembic, httpx, jinja2, python-dotenv, typer, pytest, pytest-asyncio, playwright
-- [ ] `.env.example` with keys: PORT, DATA_DIR, DATABASE_URL, LOG_LEVEL, ENVIRONMENT
-- [ ] Directory structure: `jackrabbit/{config,database,models,services,api,web,cli}.py` + `tests/{unit,integration,e2e}/`
-- [ ] `config.py` using `pydantic-settings` / `python-dotenv` + `typer` for CLI overrides
-- [ ] `cli.py` with `server` command that starts FastAPI + Uvicorn
-- [ ] `uv run server.py --help` shows config options
-- [ ] `uv run server.py` starts server on PORT (default 8080) with empty "/" route
+- [x] `pyproject.toml` with dependencies: fastapi, uvicorn, sqlmodel, alembic, httpx, jinja2, python-dotenv, typer, pytest, pytest-asyncio, playwright
+- [x] `.env.example` with keys: PORT, DATA_DIR, DATABASE_URL, LOG_LEVEL, ENVIRONMENT
+- [x] Directory structure: `jackrabbit/{config,database,models,services,api,web,cli}.py` + `tests/{unit,integration,e2e}/`
+- [x] `config.py` using `pydantic-settings` / `python-dotenv` + `typer` for CLI overrides
+- [x] `cli.py` with `server` command that starts FastAPI + Uvicorn
+- [x] `uv run server.py --help` shows config options
+- [x] `uv run server.py` starts server on PORT (default 8080) with empty "/" route
+
+## Answer
+
+All items completed. Project scaffold with pyproject.toml, .env.example, directory structure, config.py, cli.py, and server entry point all implemented and tested. Unit tests (10 passing), integration tests (9 passing), linting (ruff), and type checking (mypy) all pass. Server starts successfully on port 8080.

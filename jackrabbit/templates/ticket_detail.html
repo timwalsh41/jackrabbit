@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Jackrabbit - Ticket {{ ticket_id }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-6">
+    <div class="flex justify-between items-start">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900" id="ticket-title">Loading...</h1>
+            <p class="text-gray-600 mt-1" id="ticket-meta"></p>
+        </div>
+        <a href="/backlog" class="text-indigo-600 hover:text-indigo-800">← Back to Backlog</a>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-6" id="ticket-content">
+        <div class="text-center text-gray-500 py-8">Loading ticket details...</div>
+    </div>
+</div>
+
+<script>
+    document.body.addEventListener('htmx:load', function() {
+        htmx.ajax('GET', '/api/v1/tickets/{{ ticket_id }}', {
+            target: '#ticket-content',
+            swap: 'innerHTML',
+            handler: function(response) {
+                if (response.target) {
+                    const ticket = JSON.parse(response.target.responseText);
+                    document.getElementById('ticket-title').textContent = ticket.full_id || `Ticket #${ticket.id}`;
+                    document.getElementById('ticket-meta').textContent = `${ticket.type} • ${ticket.status} • ${ticket.priority}`;
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

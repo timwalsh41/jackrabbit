@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Jackrabbit - Dashboard{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div>
+        <h1 class="text-3xl font-bold text-gray-900">Welcome to Jackrabbit</h1>
+        <p class="mt-2 text-gray-600">Ticket tracking and sprint management system</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <a href="/backlog" class="block p-6 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+            <h3 class="text-lg font-semibold text-gray-900">Backlog</h3>
+            <p class="mt-2 text-gray-600">View and manage all tickets across projects</p>
+        </a>
+
+        <a href="/plan" class="block p-6 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+            <h3 class="text-lg font-semibold text-gray-900">Sprint Plan</h3>
+            <p class="mt-2 text-gray-600">View sprint calendar and ticket assignments</p>
+        </a>
+
+        <div class="block p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+            <h3 class="text-lg font-semibold text-gray-900">API</h3>
+            <p class="mt-2 text-gray-600">REST API available at <code class="text-indigo-600">/api/v1/</code></p>
+            <p class="mt-1 text-sm text-gray-500">OpenAPI docs at <code class="text-indigo-600">/docs</code></p>
+        </div>
+    </div>
+
+    <div class="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+        <h2 class="text-xl font-semibold text-gray-900 mb-4">Quick Start</h2>
+        <div class="space-y-2 text-sm">
+            <p><code class="bg-gray-100 px-2 py-1 rounded">uv run server.py</code> - Start the server</p>
+            <p><code class="bg-gray-100 px-2 py-1 rounded">uv run server.py --help</code> - Show CLI options</p>
+            <p><code class="bg-gray-100 px-2 py-1 rounded">uv run server.py init-db</code> - Initialize database</p>
+            <p><code class="bg-gray-100 px-2 py-1 rounded">uv run server.py create-project WEB "Web Project"</code> - Create a project</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

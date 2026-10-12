@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Jackrabbit - Sprint {{ sprint_id }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h1 class="text-2xl font-bold text-gray-900">Sprint {{ sprint_id }}</h1>
+        <a href="/plan" class="text-indigo-600 hover:text-indigo-800">← Back to Plan</a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6" id="sprint-board">
+        <div class="bg-gray-50 rounded-lg p-4 min-h-[400px]">
+            <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">Open</h3>
+            <div class="space-y-2" id="column-open"></div>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-4 min-h-[400px]">
+            <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">In Progress</h3>
+            <div class="space-y-2" id="column-in-progress"></div>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-4 min-h-[400px]">
+            <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">Ready for Review</h3>
+            <div class="space-y-2" id="column-ready-for-review"></div>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-4 min-h-[400px]">
+            <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">Complete</h3>
+            <div class="space-y-2" id="column-complete"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.body.addEventListener('htmx:load', function() {
+        htmx.ajax('GET', '/api/v1/tickets?sprint_id={{ sprint_id }}', {
+            target: '#sprint-board',
+            swap: 'none',
+            handler: function(response) {
+                // Simple rendering - would be enhanced with proper HTMX partials
+                console.log('Tickets loaded for sprint', {{ sprint_id }});
+            }
+        });
+    });
+</script>
+{% endblock %}
