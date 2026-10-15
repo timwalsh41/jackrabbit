@@ -1,7 +1,16 @@
 # ADR-0010: Branch Naming Convention `{project}-{number}-{slug}`
 
 ## Status
-Accepted
+Accepted (amended)
+
+### Amendment (review remediation)
+As implemented (and covered by unit tests since ticket 10), branch names carry
+a **type prefix**: `{type}/{project}-{number}-{slug}` — e.g.
+`feature/UNS-001-fix-login-bug`, `fix/WEB-002-crash`. This ratifies the
+previously rejected "type prefix" alternative: the implemented behavior is
+`generate_branch_name()` in `jackrabbit/services.py`, mapping Epic → `epic/`,
+Story → `feature/`, Bug → `fix/`, Spike → `spike/`. Tests assert the type
+prefix, so it is codified rather than changed.
 
 ## Context
 "In Progress = branch created." Need a naming convention. Options:
@@ -36,6 +45,7 @@ Accepted
 - UI shows branch name on In Progress tickets with "copy" button
 
 ## Alternatives Considered
-- **Type prefix**: Rejected — adds noise (`story/`, `bug/`); ticket type in UI suffices.
+- **Type prefix**: Originally rejected — adds noise (`story/`, `bug/`); ticket type in UI suffices.
+  **Amended**: see Amendment above — implemented with the type prefix (`feature/`, `fix/`, `epic/`, `spike/`) and kept, since the implementation and its tests (ticket 10 onward) codified it.
 - **User-defined**: Rejected — inconsistency, typos, no grep pattern.
 - **UUID**: Rejected — opaque, not grep-friendly, no context.

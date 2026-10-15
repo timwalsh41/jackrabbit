@@ -242,6 +242,9 @@ class TicketUpdate(BaseModel):
     test_plan: str | None = None
     validation_steps: str | None = None
     sprint_id: int | None = None
+    # Audit-trail reason recorded on the Transition when the PATCH also changes
+    # status (status changes go through the guarded TransitionService).
+    transition_reason: str | None = None
 
 
 class TicketRead(TicketBase):

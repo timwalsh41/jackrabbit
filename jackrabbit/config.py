@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,7 +21,16 @@ class Settings(BaseSettings):
     # port=0 is allowed: it means "pick a free port" (used by test fixtures).
     port: Annotated[int, Field(ge=0, le=65535)] = 8080
     data_dir: Path = Path("./data")
-    database_url: str = "sqlite:///./data/jackrabbit.db"
+    # database_url has NO hardcoded default value: when unset (env/CLI), it is
+    # derived from data_dir as ``sqlite:///{data_dir}/jackrabbit.db`` by the
+    # model validator below, so the DB always lives in the data directory
+    # (spec stories 20-21).
+    #
+    # database_url precedence (highest first):
+    #   1. CLI flag --database-url
+    #   2. DATABASE_URL environment variable / .env
+    #   3. derived from data_dir (CLI --data-dir or DATA_DIR, default ./data)
+    database_url: str = ""
     log_level: str = "INFO"
     environment: str = "development"
 
@@ -48,6 +57,18 @@ class Settings(BaseSettings):
     def ensure_data_dir(cls, v: Path) -> Path:
         v.mkdir(parents=True, exist_ok=True)
         return v
+
+    @model_validator(mode="after")
+    def resolve_database_url(self) -> "Settings":
+        """Derive the SQLite path from data_dir when database_url is not set.
+
+        An explicit ``database_url`` (env var DATABASE_URL, .env, or the CLI
+        ``--database-url`` flag) always wins; otherwise the database lives in
+        the data directory so that DATA_DIR / --data-dir actually moves the DB.
+        """
+        if not self.database_url:
+            self.database_url = f"sqlite:///{self.data_dir}/jackrabbit.db"
+        return self
 
 
 def get_settings(

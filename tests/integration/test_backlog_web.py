@@ -55,6 +55,63 @@ async def _get(client: httpx.AsyncClient, path: str, **kwargs) -> httpx.Response
     return await client.get(path, **kwargs)
 
 
+class TestIndexRedirect:
+    async def test_root_redirects_to_backlog(self, client):
+        """Spec Web Routes: GET / must redirect to /backlog (no dashboard)."""
+        r = await _get(client, "/", follow_redirects=False)
+        assert r.status_code in (301, 302, 307)
+        assert r.headers["location"].rstrip("/") == "/backlog"
+
+    async def test_root_follows_redirect_to_backlog(self, client, backlog_tickets):
+        r = await _get(client, "/", follow_redirects=True)
+        assert r.status_code == 200
+        assert 'id="tickets-table-body"' in r.text
+
+
+class TestBacklogPageSizeCap:
+    async def test_page_size_capped_at_100(self, client, backlog_tickets):
+        """Web /backlog caps page_size like the JSON API (no 500/validation blowup)."""
+        r = await _get(client, "/backlog", params={"page_size": 500})
+        assert r.status_code == 200
+        assert "Critical outage" in r.text
+
+    async def test_page_size_min_one(self, client, backlog_tickets):
+        r = await _get(client, "/backlog", params={"page_size": 0})
+        assert r.status_code == 200
+        # page_size=0 clamps to 1 -> 3 tickets over 3 pages
+        assert "Page 1 of 3 (3 total)" in r.text
+
+    def test_build_backlog_context_caps_page_size(self, test_db, client_with_seeds):
+        """The shared builder caps page_size at 100 (unit-level check)."""
+        from jackrabbit.services import ProjectService, SprintService
+        from jackrabbit.web import _build_backlog_context
+
+        ticket_service = TicketService(test_db)
+        from sqlmodel import select as _select
+
+        projects = list(test_db.exec(_select(Project)).all())
+        ticket_service.create_ticket(project_id=projects[1].id, title="cap check")
+        ctx = _build_backlog_context(
+            ticket_service,
+            ProjectService(test_db),
+            SprintService(test_db),
+            project_id=None,
+            status=None,
+            type=None,
+            priority=None,
+            sprint_id=None,
+            q=None,
+            created_after=None,
+            created_before=None,
+            sort="number",
+            order="desc",
+            page=1,
+            page_size=500,
+        )
+        assert ctx["page_size"] == 100
+        assert ctx["total_pages"] == 1
+
+
 class TestBacklogPage:
     async def test_backlog_page_renders(self, client, backlog_tickets):
         r = await _get(client, "/backlog")

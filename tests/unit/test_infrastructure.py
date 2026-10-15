@@ -167,3 +167,57 @@ class TestE2ERunnerOptions:
         assert '"--cdx"' in source
         assert "def cdx_bridge" in source
         assert "ChromeDevToolsAxi" in source
+
+
+class TestEngineCaching:
+    """get_engine() must cache engines per database URL instead of building a
+    new pool on every call (previously: new engine per get_session request)."""
+
+    def test_same_url_returns_same_engine(self, monkeypatch, tmp_path):
+        from pathlib import Path
+
+        from jackrabbit import database
+        from jackrabbit.config import Settings
+
+        monkeypatch.setattr(database, "_engines", {})
+        s1 = Settings(
+            environment="test",
+            database_url=f"sqlite:///{tmp_path}/cache-a.db",
+            data_dir=Path("./data"),
+            port=0,
+        )
+        monkeypatch.setattr(database, "get_settings", lambda: s1)
+        e1 = database.get_engine()
+        e2 = database.get_engine()
+        assert e1 is e2
+
+    def test_changed_url_builds_new_engine(self, monkeypatch, tmp_path):
+        from pathlib import Path
+
+        from jackrabbit import database
+        from jackrabbit.config import Settings
+
+        monkeypatch.setattr(database, "_engines", {})
+        s1 = Settings(
+            environment="test",
+            database_url=f"sqlite:///{tmp_path}/cache-b.db",
+            data_dir=Path("./data"),
+            port=0,
+        )
+        monkeypatch.setattr(database, "get_settings", lambda: s1)
+        e1 = database.get_engine()
+
+        s2 = Settings(
+            environment="test",
+            database_url=f"sqlite:///{tmp_path}/cache-c.db",
+            data_dir=Path("./data"),
+            port=0,
+        )
+        monkeypatch.setattr(database, "get_settings", lambda: s2)
+        e2 = database.get_engine()
+
+        assert e2 is not e1
+        assert str(e1.url) == s1.database_url
+        assert str(e2.url) == s2.database_url
+        e1.dispose()
+        e2.dispose()

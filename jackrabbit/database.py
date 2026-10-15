@@ -17,15 +17,27 @@ def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # type: ig
     cursor.close()  # type: ignore[attr-defined]
 
 
+# Engine cache keyed by database URL. Settings are re-read on every call so
+# env/settings overrides (see tests/conftest.py) are still honored — a changed
+# DATABASE_URL simply builds (and caches) a new engine instead of reusing a
+# stale one. Engines are otherwise pooled objects and must not be recreated per
+# request (get_session used to call get_engine() on every request).
+_engines: dict[str, Engine] = {}
+
+
 def get_engine() -> Engine:
-    """Create database engine from settings."""
+    """Return a cached engine for the current settings' database URL."""
     settings = get_settings()
-    engine = create_engine(settings.database_url, echo=settings.environment == "development")
+    url = settings.database_url
+    engine = _engines.get(url)
+    if engine is None:
+        engine = create_engine(url, echo=settings.environment == "development")
 
-    # Enable WAL mode for SQLite
-    if settings.database_url.startswith("sqlite"):
-        event.listen(engine, "connect", _set_sqlite_pragma)
+        # Enable WAL mode for SQLite
+        if url.startswith("sqlite"):
+            event.listen(engine, "connect", _set_sqlite_pragma)
 
+        _engines[url] = engine
     return engine
 
 

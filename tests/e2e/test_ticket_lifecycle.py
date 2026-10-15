@@ -84,9 +84,9 @@ class TestTicketLifecycle:
         # Branch name should be pre-filled
         branch_input = page.locator("input[name='branch_name']")
         value = branch_input.input_value()
-        assert value and value.startswith(
-            "feature/"
-        ), f"Expected branch to start with feature/, got {value}"
+        assert value and value.startswith("feature/"), (
+            f"Expected branch to start with feature/, got {value}"
+        )
 
         # Confirm
         page.click("button:has-text('Start Work')")
@@ -205,9 +205,9 @@ class TestTicketLifecycle:
 
         def assert_invalid_absent(*labels: str) -> None:
             for label in labels:
-                assert (
-                    buttons().locator(f"button:has-text('{label}')").count() == 0
-                ), f"invalid transition button '{label}' is offered"
+                assert buttons().locator(f"button:has-text('{label}')").count() == 0, (
+                    f"invalid transition button '{label}' is offered"
+                )
 
         page.goto(f"{base_url}/ticket/{tid}")
         page.wait_for_load_state("networkidle")

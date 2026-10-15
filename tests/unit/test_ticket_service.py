@@ -408,3 +408,28 @@ class TestTransitionSideEffects:
         link_service.create_link(bug.id, sample_ticket.id, LinkType.BLOCKS)
         details = ticket_service.get_ticket_with_details(sample_ticket.id, link_service)
         assert len(details["links"]) == 2  # blocks + blocked_by inverse
+
+
+class TestListTicketsSortWhitelist:
+    """`sort` is user-supplied; unknown fields must fall back to the default
+    ("number") instead of raising NotImplementedError -> HTTP 500."""
+
+    def test_bogus_sort_falls_back_to_default_order(self, ticket_service, setup_projects):
+        web_id = setup_projects["web"].id
+        ticket_service.create_ticket(project_id=web_id, title="One")
+        ticket_service.create_ticket(project_id=web_id, title="Two")
+        tickets, total = ticket_service.list_tickets(sort="project", order="asc")
+        assert total == 2
+        # falls back to "number", honoring the requested order
+        assert [t.number for t in tickets] == [1, 2]
+
+    def test_sneaky_sort_falls_back_to_default_order(self, ticket_service, setup_projects):
+        ticket_service.create_ticket(project_id=setup_projects["web"].id, title="One")
+        tickets, _ = ticket_service.list_tickets(sort="__mro__", order="asc")
+        assert len(tickets) == 1
+
+    def test_whitelisted_sort_still_works(self, ticket_service, setup_projects):
+        t1 = ticket_service.create_ticket(project_id=setup_projects["web"].id, title="Beta")
+        t2 = ticket_service.create_ticket(project_id=setup_projects["web"].id, title="Alpha")
+        tickets, _ = ticket_service.list_tickets(sort="title", order="asc")
+        assert [t.id for t in tickets] == [t2.id, t1.id]

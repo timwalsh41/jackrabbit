@@ -19,7 +19,7 @@
                       class="mt-4 space-y-4"
                       hx-headers='{"Content-Type": "application/json"}'
                       hx-ext="json-enc"
-                      hx-on::after-request="if (event.detail.xhr.status === 200) { closeModal(); } else if (!event.detail.successful) { var el = document.getElementById('ticket-edit-error'); if (el) { el.textContent = 'Save failed (' + event.detail.xhr.status + '). Please check your input and try again.'; el.classList.remove('hidden'); } }">
+                      hx-on::after-request="if (event.detail.xhr.status === 200) { closeModal(); } else if (!event.detail.successful) { var el = document.getElementById('ticket-edit-error'); if (el) { var msg = 'Save failed (' + event.detail.xhr.status + '). Please check your input and try again.'; try { var d = JSON.parse(event.detail.xhr.responseText); if (d && typeof d.detail === 'string') { msg = d.detail; } } catch (e) {} el.textContent = msg; el.classList.remove('hidden'); } }">
                     <div id="ticket-edit-error" class="hidden rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700"></div>
 
                     <div>
