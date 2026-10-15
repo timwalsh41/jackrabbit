@@ -651,3 +651,64 @@ async def test_get_sprint_by_status(
     assert len(data["tickets_by_status"]["Groomed"]) == 0
     assert len(data["tickets_by_status"]["Ready for Review"]) == 0
     assert len(data["tickets_by_status"]["Rejected"]) == 0
+
+
+async def test_assign_ticket_htmx_returns_row_partial(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """HTMX assign requests swap the refreshed backlog row in place."""
+    sprint = (await client_with_seeds.post("/api/v1/sprints", json={})).json()
+    ticket = (
+        await client_with_seeds.post(
+            "/api/v1/tickets", json={"project_id": 2, "title": "HTMX Assign"}
+        )
+    ).json()
+
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}",
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert f'id="ticket-row-{ticket["id"]}"' in response.text
+    assert str(sprint["number"]) in response.text
+
+
+async def test_unassign_ticket_htmx_returns_row_partial(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """HTMX unassign requests swap the refreshed backlog row in place."""
+    sprint = (await client_with_seeds.post("/api/v1/sprints", json={})).json()
+    ticket = (
+        await client_with_seeds.post(
+            "/api/v1/tickets", json={"project_id": 2, "title": "HTMX Unassign"}
+        )
+    ).json()
+    await client_with_seeds.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+
+    response = await client_with_seeds.delete(
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}",
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert f'id="ticket-row-{ticket["id"]}"' in response.text
+    assert "Move to Sprint" in response.text
+
+
+async def test_assign_ticket_plain_request_still_json(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Without the HX-Request header the assign endpoint stays JSON."""
+    sprint = (await client_with_seeds.post("/api/v1/sprints", json={})).json()
+    ticket = (
+        await client_with_seeds.post(
+            "/api/v1/tickets", json={"project_id": 2, "title": "JSON Assign"}
+        )
+    ).json()
+
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+    )
+    assert response.status_code == 200
+    assert response.json()["message"] == "Ticket assigned to sprint"

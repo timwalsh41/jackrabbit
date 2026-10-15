@@ -708,5 +708,47 @@ class TestComplexLinkScenarios:
         assert len(spike_links) == 4
 
 
+class TestGetEpicsWithChildren:
+    """Tests for LinkService.get_epics_with_children (Plan view)."""
+
+    def test_returns_epics_with_children(self, link_service, ticket_service, test_project):
+        epic = ticket_service.create_ticket(
+            project_id=test_project.id, title="Epic A", type=TicketType.EPIC
+        )
+        story = ticket_service.create_ticket(
+            project_id=test_project.id, title="Story A1", type=TicketType.STORY
+        )
+        bug = ticket_service.create_ticket(
+            project_id=test_project.id, title="Bug B1", type=TicketType.BUG
+        )
+        ticket_service.create_ticket(
+            project_id=test_project.id, title="Plain Story", type=TicketType.STORY
+        )
+        link_service.create_link(epic.id, story.id, LinkType.PARENT)
+        link_service.create_link(epic.id, bug.id, LinkType.PARENT)
+
+        result = link_service.get_epics_with_children()
+
+        assert len(result) == 1
+        entry = result[0]
+        assert entry["epic"].id == epic.id
+        child_ids = {c.id for c in entry["children"]}
+        assert child_ids == {story.id, bug.id}
+
+    def test_includes_epics_without_children(self, link_service, ticket_service, test_project):
+        epic = ticket_service.create_ticket(
+            project_id=test_project.id, title="Lonely Epic", type=TicketType.EPIC
+        )
+
+        result = link_service.get_epics_with_children()
+
+        assert len(result) == 1
+        assert result[0]["epic"].id == epic.id
+        assert result[0]["children"] == []
+
+    def test_no_epics_returns_empty(self, link_service):
+        assert link_service.get_epics_with_children() == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -532,7 +532,7 @@ class TicketService:
         if ticket.project_id == new_project_id:
             raise ValueError("Ticket is already in this project")
 
-        old_full_id = f"{old_project.prefix}-{ticket.number}"
+        old_full_id = f"{old_project.prefix}-{ticket.number:03d}"
 
         # Preserve original_id on first move
         original_id = ticket.original_id
@@ -569,7 +569,7 @@ class TicketService:
                 if attempt == max_attempts - 1:
                     raise
 
-        new_full_id = f"{new_project.prefix}-{ticket.number}"
+        new_full_id = f"{new_project.prefix}-{ticket.number:03d}"
 
         return {
             "ticket_id": ticket.id,
@@ -1107,6 +1107,33 @@ class LinkService:
 
         self.session.commit()
         return True
+
+    def get_epics_with_children(self) -> list[dict]:
+        """Get every Epic with its child tickets (for the Plan view).
+
+        Returns a list of ``{"epic": Ticket, "children": list[Ticket]}``
+        dicts, one per Epic (childless Epics included with an empty list).
+        Epics are ordered by project prefix, then ticket number; children in
+        link creation order.
+        """
+        epics = self.session.exec(
+            select(Ticket)
+            .join(Project, Ticket.project_id == Project.id)  # type: ignore[arg-type]
+            .where(Ticket.type == TicketType.EPIC)
+            .order_by(Project.prefix, Ticket.number)  # type: ignore[arg-type]
+        ).all()
+
+        result: list[dict] = []
+        for epic in epics:
+            child_links = self.session.exec(
+                select(TicketLink).where(
+                    TicketLink.source_id == epic.id,
+                    TicketLink.link_type == LinkType.PARENT,
+                )
+            ).all()
+            children = [self.session.get(Ticket, link.target_id) for link in child_links]
+            result.append({"epic": epic, "children": [c for c in children if c is not None]})
+        return result
 
     def get_links_for_ticket(self, ticket_id: int) -> list[TicketLink]:
         return list(

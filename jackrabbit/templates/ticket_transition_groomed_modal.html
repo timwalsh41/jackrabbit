@@ -107,9 +107,17 @@
 
 <script>
     function closeModal() {
-        const modalEl = document.querySelector('[aria-modal="true"]');
-        if (modalEl) {
-            modalEl.remove();
+        // Clear the modal container's contents instead of removing the
+        // container itself, so later modals can still open (the container
+        // may itself match [aria-modal="true"], e.g. #ticket-modal).
+        const container = document.getElementById('ticket-modal');
+        if (container) {
+            container.innerHTML = '';
+            return;
+        }
+        const modal = document.querySelector('[aria-modal="true"]');
+        if (modal) {
+            modal.remove();
         }
     }
     

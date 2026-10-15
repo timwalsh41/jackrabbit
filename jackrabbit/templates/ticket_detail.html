@@ -309,7 +309,7 @@
 
     function renderTicket(ticket) {
         const projectPrefix = ticket.project_prefix || '';
-        const fullId = `${projectPrefix}-${ticket.number}`;
+        const fullId = `${projectPrefix}-${String(ticket.number).padStart(3, '0')}`;
         
         // Description and Groomed Fields are server-rendered (markdown-safe,
         // inline-editable) and loaded into this placeholder via HTMX.

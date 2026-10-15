@@ -315,7 +315,7 @@ class TestTicketsTransitions:
         body = response.json()
         assert body["from_status"] == "Open"
         assert body["to_status"] == "Groomed"
-        assert body["full_id"] == "WEB-1"
+        assert body["full_id"] == "WEB-001"
 
         # Groomed -> In Progress auto-generates a branch name
         response = await _transition(client_with_seeds, ticket_id, "In Progress", reason="wip")
@@ -394,14 +394,14 @@ class TestTicketsProjectMove:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["old_full_id"] == "API-1"
-        assert data["new_full_id"] == "WEB-2"
-        assert data["original_id"] == "API-1"
+        assert data["old_full_id"] == "API-001"
+        assert data["new_full_id"] == "WEB-002"
+        assert data["original_id"] == "API-001"
 
         check = await client_with_seeds.get(f"/api/v1/tickets/{moved['id']}")
         assert check.json()["number"] == 2
         assert check.json()["project_id"] == 2
-        assert check.json()["original_id"] == "API-1"
+        assert check.json()["original_id"] == "API-001"
 
     async def test_move_to_same_project_returns_400(self, client_with_seeds: AsyncClient):
         ticket = await _create_ticket(client_with_seeds, 2, "stay put")

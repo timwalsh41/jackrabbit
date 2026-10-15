@@ -142,6 +142,45 @@
         </div>
         </div><!-- /plan-timeline-scroll -->
 
+        <!-- Epics overview: every Epic with its child tickets -->
+        <div class="mt-8" id="plan-epics">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Epics</h2>
+            {% if epics_with_children %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {% for entry in epics_with_children %}
+                {% set epic = entry.epic %}
+                <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <a href="/ticket/{{ epic.id }}" class="font-mono text-sm text-indigo-600 hover:text-indigo-900 font-medium">
+                            {{ epic.project.prefix }}-{{ '%03d'|format(epic.number) }}
+                        </a>
+                        <span class="px-2 py-0.5 text-xs font-medium rounded bg-purple-100 text-purple-800">Epic</span>
+                    </div>
+                    <a href="/ticket/{{ epic.id }}" class="text-sm font-medium text-gray-900 hover:text-indigo-600">{{ epic.title }}</a>
+                    {% if entry.children %}
+                    <ul class="mt-3 space-y-1.5">
+                        {% for child in entry.children %}
+                        <li class="flex items-center gap-2 text-sm">
+                            <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                            <a href="/ticket/{{ child.id }}" class="font-mono text-xs text-indigo-600 hover:text-indigo-900">{{ child.project.prefix }}-{{ '%03d'|format(child.number) }}</a>
+                            <span class="text-gray-700 truncate">{{ child.title }}</span>
+                            <span class="ml-auto text-xs text-gray-400">{{ child.status }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="mt-3 text-sm text-gray-400 italic">No child tickets linked</p>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-6 text-center text-sm text-gray-500">
+                No epics yet. Create an <a href="/tickets/new" class="text-indigo-600 hover:underline">Epic ticket</a> and link stories to it.
+            </div>
+            {% endif %}
+        </div>
+
         <!-- Unsprinted tickets section - show even when no sprints -->
         {% if unsprinted_count > 0 %}
         <div class="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4">

@@ -266,14 +266,37 @@ def get_plan(
     )
 
 
-@router.post("/sprints/{sprint_id}/tickets/{ticket_id}", status_code=200)
+def _ticket_row_response(request: Request, ticket_id: int, session: Session) -> HTMLResponse:
+    """Render the backlog row partial for an HTMX-swapped ticket."""
+    from jackrabbit.services import SprintService, TicketService
+    from jackrabbit.web import templates
+
+    ticket = TicketService(session).get_ticket(ticket_id)
+    sprints = SprintService(session).list_sprints()
+    return templates.TemplateResponse(
+        request,
+        "ticket_row.html",
+        {"ticket": ticket, "sprints": sprints},
+    )
+
+
+@router.post(
+    "/sprints/{sprint_id}/tickets/{ticket_id}",
+    status_code=200,
+    response_model=None,
+)
 def assign_ticket_to_sprint(
     sprint_id: int,
     ticket_id: int,
+    request: Request,
     service: SprintService = Depends(get_sprint_service),
-) -> dict:
+) -> dict | Response:
     try:
         ticket = service.assign_ticket_to_sprint(sprint_id, ticket_id)
+        # HTMX-aware: the Backlog "Move to Sprint" dropdown swaps the refreshed
+        # row in place (same pattern as the HTMX-aware PATCH /tickets).
+        if request.headers.get("HX-Request"):
+            return _ticket_row_response(request, ticket_id, service.session)
         return {
             "message": "Ticket assigned to sprint",
             "ticket_id": ticket.id,
@@ -285,14 +308,22 @@ def assign_ticket_to_sprint(
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@router.delete("/sprints/{sprint_id}/tickets/{ticket_id}", status_code=200)
+@router.delete(
+    "/sprints/{sprint_id}/tickets/{ticket_id}",
+    status_code=200,
+    response_model=None,
+)
 def unassign_ticket_from_sprint(
     sprint_id: int,
     ticket_id: int,
+    request: Request,
     service: SprintService = Depends(get_sprint_service),
-) -> dict:
+) -> dict | Response:
     try:
         ticket = service.unassign_ticket_from_sprint(sprint_id, ticket_id)
+        # HTMX-aware: the Backlog "Remove from Sprint" form swaps the row.
+        if request.headers.get("HX-Request"):
+            return _ticket_row_response(request, ticket_id, service.session)
         return {
             "message": "Ticket removed from sprint",
             "ticket_id": ticket.id,
@@ -539,7 +570,7 @@ def transition_ticket(
             to_status=request.to_status,
             reason=request.reason,
             at=ticket.updated_at,
-            full_id=f"{ticket.project.prefix}-{ticket.number}",
+            full_id=f"{ticket.project.prefix}-{ticket.number:03d}",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -596,13 +627,18 @@ async def _parse_move_payload(request: Request) -> dict[str, Any]:
 
 
 # Link endpoints
-@router.post("/tickets/{source_id}/links", response_model=TicketLinkRead, status_code=201)
+@router.post(
+    "/tickets/{source_id}/links",
+    response_model=None,
+    status_code=201,
+)
 def create_link(
+    request: Request,
     source_id: int,
     link_in: TicketLinkCreate,
     service: LinkService = Depends(get_link_service),
     ticket_service: TicketService = Depends(get_ticket_service),
-) -> TicketLink:
+) -> TicketLink | HTMLResponse:
     # Verify source ticket exists
     source = ticket_service.get_ticket(source_id)
     if not source:
@@ -614,13 +650,27 @@ def create_link(
         raise HTTPException(status_code=404, detail="Target ticket not found")
 
     try:
-        return service.create_link(
+        link = service.create_link(
             source_id=source_id,
             target_id=link_in.target_id,
             link_type=link_in.link_type,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # HTMX-aware: the Add Link modal swaps the refreshed links section in place
+    # (same pattern as the HTMX-aware PATCH /tickets and sprint assign endpoints).
+    if request.headers.get("HX-Request"):
+        from jackrabbit.services import LinkService, TicketService
+        from jackrabbit.web import _links_section_response
+
+        return _links_section_response(
+            request,
+            source_id,
+            TicketService(service.session),
+            LinkService(service.session),
+        )
+    return link
 
 
 @router.delete("/tickets/{source_id}/links/{link_id}", status_code=204)
