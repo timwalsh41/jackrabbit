@@ -364,6 +364,56 @@ class TestTransition:
         assert ticket.status == TicketStatus.COMPLETE
         assert ticket.completed_at is not None
 
+    def test_transition_sets_tz_aware_completed_at(self, ticket_service, test_ticket):
+        """completed_at is an aware UTC datetime, consistent with created_at."""
+        test_ticket.status = TicketStatus.READY_FOR_REVIEW
+        test_ticket.pr_url = "https://github.com/org/repo/pull/123"
+        ticket_service.session.add(test_ticket)
+        ticket_service.session.commit()
+
+        ticket = ticket_service.transition(test_ticket, TicketStatus.COMPLETE, "PR merged")
+
+        assert ticket.completed_at is not None
+        assert ticket.completed_at.tzinfo is not None
+        assert ticket.created_at.tzinfo is not None
+
+    def test_transition_off_complete_clears_completed_at(self, ticket_service, test_ticket):
+        """Leaving Complete (e.g. via Reject) clears completed_at."""
+        test_ticket.status = TicketStatus.READY_FOR_REVIEW
+        test_ticket.pr_url = "https://github.com/org/repo/pull/123"
+        ticket_service.session.add(test_ticket)
+        ticket_service.session.commit()
+        ticket_service.transition(test_ticket, TicketStatus.COMPLETE, "PR merged")
+        assert test_ticket.completed_at is not None
+
+        ticket = ticket_service.transition(test_ticket, TicketStatus.REJECTED, "Bad PR")
+        assert ticket.status == TicketStatus.REJECTED
+        assert ticket.completed_at is None
+
+    def test_completed_at_stays_cleared_after_restore(self, ticket_service, test_ticket):
+        """Reopening a rejected ticket does not resurrect completed_at."""
+        test_ticket.status = TicketStatus.READY_FOR_REVIEW
+        test_ticket.pr_url = "https://github.com/org/repo/pull/123"
+        ticket_service.session.add(test_ticket)
+        ticket_service.session.commit()
+        ticket_service.transition(test_ticket, TicketStatus.COMPLETE, "PR merged")
+        ticket_service.transition(test_ticket, TicketStatus.REJECTED, "Bad PR")
+
+        ticket = ticket_service.transition(test_ticket, TicketStatus.OPEN, "Restore")
+        assert ticket.completed_at is None
+
+    def test_completed_at_roundtrips_tz_aware(self, ticket_service, test_ticket):
+        """completed_at stays aware after refresh from the DB (no naive mixing)."""
+        test_ticket.status = TicketStatus.READY_FOR_REVIEW
+        test_ticket.pr_url = "https://github.com/org/repo/pull/123"
+        ticket_service.session.add(test_ticket)
+        ticket_service.session.commit()
+        ticket_service.transition(test_ticket, TicketStatus.COMPLETE, "PR merged")
+
+        ticket_service.session.refresh(test_ticket)
+        assert test_ticket.completed_at is not None
+        assert test_ticket.completed_at.tzinfo is not None
+
     def test_transition_raises_on_invalid(self, ticket_service, test_ticket):
         """Transition raises ValueError when guard fails."""
         # Try to transition without required fields
@@ -514,9 +564,9 @@ class TestAllTransitionCombinations:
 
         can, error = ticket_service.can_transition(test_ticket, to_status)
         if expected is not None:
-            assert (
-                can == expected
-            ), f"{from_status} -> {to_status}: expected {expected}, got {can}, error: {error}"
+            assert can == expected, (
+                f"{from_status} -> {to_status}: expected {expected}, got {can}, error: {error}"
+            )
 
     def _is_backward(self, from_status, to_status):
         order = [

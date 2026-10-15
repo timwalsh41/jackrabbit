@@ -3,6 +3,8 @@ transitions (guarded/unguarded), links, project move, and branch/PR handling."""
 
 import pytest
 from httpx import AsyncClient
+from jackrabbit.models import Ticket, Transition
+from sqlmodel import select
 
 
 @pytest.fixture
@@ -97,6 +99,201 @@ class TestTicketsCRUD:
     async def test_patch_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
         response = await client_with_seeds.patch("/api/v1/tickets/9999", json={"title": "nope"})
         assert response.status_code == 404
+
+
+class TestPatchStatusIsGuarded:
+    """PATCH with a `status` field must go through the guarded TransitionService
+    (same rules as POST /transition), never the unguarded legacy update_status
+    (ADR-0009): every status change writes a Transition audit record."""
+
+    async def test_patch_guarded_status_rejected_400_and_no_change(
+        self, client_with_seeds: AsyncClient, two_projects, test_db
+    ):
+        """Guard failure: Open ticket without a PR cannot be PATCHed to
+        Ready for Review; 400, ticket unchanged, NO Transition record."""
+        created = await _create_ticket(client_with_seeds, two_projects["web"], "Guard me")
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}",
+            json={"status": "Ready for Review"},
+        )
+        assert response.status_code == 400, response.text
+        # The guard order mirrors POST /transition: Open -> Ready for Review is
+        # rejected as a status skip (through Groomed).
+        assert "Cannot skip statuses" in response.json()["detail"]
+
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        assert data["status"] == "Open"
+        assert data["transitions"] == []
+        rows = list(test_db.exec(select(Transition).where(Transition.ticket_id == created["id"])))
+        assert rows == []
+
+    async def test_patch_allowed_status_succeeds_and_writes_transition(
+        self, client_with_seeds: AsyncClient, two_projects, test_db
+    ):
+        """Allowed guarded change: Open + grooming fields -> Groomed with audit."""
+        created = await _create_ticket(client_with_seeds, two_projects["web"], "Groom via PATCH")
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}",
+            json={
+                "status": "Groomed",
+                "approach": "Do it carefully",
+                "files_to_change": "a.py, b.py",
+                "test_plan": "Unit tests",
+                "validation_steps": "Visual check",
+                "transition_reason": "groomed from edit form",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "Groomed"
+
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        assert data["status"] == "Groomed"
+        assert len(data["transitions"]) == 1
+        assert data["transitions"][0]["to_status"] == "Groomed"
+        assert data["transitions"][0]["reason"] == "groomed from edit form"
+        rows = list(test_db.exec(select(Transition).where(Transition.ticket_id == created["id"])))
+        assert len(rows) == 1
+        assert rows[0].to_status.value == "Groomed"
+
+    async def test_patch_status_sees_latest_ticket_state(
+        self, client_with_seeds: AsyncClient, two_projects, test_db
+    ):
+        """The guarded transition evaluates the ticket's CURRENT persisted state
+        (PR URL set on the record), and a PATCHed status change succeeds when
+        the criteria are already met."""
+        created = await _create_ticket(
+            client_with_seeds,
+            two_projects["api"],
+            "Patch+PR",
+            approach="x",
+            files_to_change="x",
+            test_plan="x",
+            validation_steps="x",
+        )
+        r1 = await _transition(client_with_seeds, created["id"], "Groomed", reason="groom")
+        assert r1.status_code == 200, r1.text
+        r2 = await _transition(client_with_seeds, created["id"], "In Progress", reason="start")
+        assert r2.status_code == 200, r2.text
+        # Set the PR on the record (pr_url is not a PATCH-able field; the
+        # Ready-for-Review modal provides it at transition time).
+        ticket = test_db.get(Ticket, created["id"])
+        ticket.pr_url = "https://github.com/o/r/pull/9"
+        test_db.add(ticket)
+        test_db.commit()
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}",
+            json={"status": "Ready for Review"},
+        )
+        assert response.status_code == 200, response.text
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        assert data["status"] == "Ready for Review"
+        assert data["pr_url"] == "https://github.com/o/r/pull/9"
+
+    async def test_patch_same_status_is_noop_without_transition(
+        self, client_with_seeds: AsyncClient, two_projects, test_db
+    ):
+        created = await _create_ticket(client_with_seeds, two_projects["web"], "Noop status")
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}", json={"status": "Open"}
+        )
+        assert response.status_code == 200
+        rows = list(test_db.exec(select(Transition).where(Transition.ticket_id == created["id"])))
+        assert rows == []
+
+    async def test_patch_backward_status_allowed_with_transition(
+        self, client_with_seeds: AsyncClient, two_projects, test_db
+    ):
+        """Free backward: Groomed -> Open via PATCH writes an audit record."""
+        created = await _create_ticket(
+            client_with_seeds,
+            two_projects["web"],
+            "Backward",
+            approach="x",
+            files_to_change="x",
+            test_plan="x",
+            validation_steps="x",
+        )
+        r1 = await _transition(client_with_seeds, created["id"], "Groomed", reason="groom")
+        assert r1.status_code == 200, r1.text
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}", json={"status": "Open"}
+        )
+        assert response.status_code == 200
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        assert data["status"] == "Open"
+        transitions = [t["to_status"] for t in data["transitions"]]
+        assert transitions == ["Groomed", "Open"]
+
+    async def test_patch_forward_skip_rejected_400(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        created = await _create_ticket(client_with_seeds, two_projects["web"], "Skip")
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}",
+            json={
+                "status": "In Progress",
+                "approach": "x",
+                "files_to_change": "x",
+                "test_plan": "x",
+                "validation_steps": "x",
+            },
+        )
+        assert response.status_code == 400
+        assert "skip statuses" in response.json()["detail"]
+
+    async def test_patch_status_htmx_guard_error_returns_400(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        """HTMX edit form submissions get the 400 (form surfaces detail via JS)."""
+        created = await _create_ticket(client_with_seeds, two_projects["web"], "HTMX guard")
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}",
+            content='{"status": "Ready for Review"}',
+            headers={"Content-Type": "application/json", "HX-Request": "true"},
+        )
+        assert response.status_code == 400
+        assert "Cannot skip statuses" in response.json()["detail"]
+
+    async def test_patch_ready_for_review_without_pr_rejected_400(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        """The PR-URL guard itself (In Progress, no PR -> Ready for Review)."""
+        created = await _create_ticket(
+            client_with_seeds,
+            two_projects["web"],
+            "No PR yet",
+            approach="x",
+            files_to_change="x",
+            test_plan="x",
+            validation_steps="x",
+        )
+        await _transition(client_with_seeds, created["id"], "Groomed", reason="groom")
+        await _transition(client_with_seeds, created["id"], "In Progress", reason="start")
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}", json={"status": "Ready for Review"}
+        )
+        assert response.status_code == 400
+        assert "PR URL is required" in response.json()["detail"]
+
+    async def test_patch_to_rejected_then_restore(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        """Reject/restore semantics through PATCH."""
+        created = await _create_ticket(client_with_seeds, two_projects["web"], "Rejectable")
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}", json={"status": "Rejected"}
+        )
+        assert response.status_code == 200
+        assert (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()[
+            "status"
+        ] == "Rejected"
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}", json={"status": "Open"}
+        )
+        assert response.status_code == 200
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        assert data["status"] == "Open"
+        assert [t["to_status"] for t in data["transitions"]] == ["Rejected", "Open"]
 
     async def test_delete_ticket(self, client_with_seeds: AsyncClient, two_projects):
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Delete me")

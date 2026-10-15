@@ -71,6 +71,67 @@ def test_project(project_service):
     return project_service.create_project(prefix="TEST", name="Test Project")
 
 
+class TestCreateLinkRace:
+    def test_integrity_error_race_resolves_to_existing_link(self, session, link_service):
+        """If a concurrent insert wins the race (pre-check misses, the unique
+        constraint raises IntegrityError on commit), create_link must roll back
+        and return the already-existing link — the same idempotent result as the
+        pre-check path — instead of raising a 500-valued IntegrityError."""
+        from jackrabbit.services import TicketService
+
+        ticket_service = TicketService(session)
+        a = ticket_service.create_ticket(project_id=1, title="A")
+        b = ticket_service.create_ticket(project_id=1, title="B")
+
+        # Simulate the concurrent writer: the link row already exists when
+        # create_link runs, but the pre-check SELECT misses it (stale snapshot).
+        existing = TicketLink(source_id=a.id, target_id=b.id, link_type=LinkType.RELATES_TO)
+        session.add(existing)
+        session.commit()
+
+        # Force the pre-check (first exec in create_link) to return "no match".
+        real_exec = session.exec
+        state = {"first": True}
+
+        class _EmptyResult:
+            def first(self):
+                return None
+
+            def all(self):
+                return []
+
+        def fake_exec(query, *args, **kwargs):
+            if state["first"]:
+                state["first"] = False
+                return _EmptyResult()
+            return real_exec(query, *args, **kwargs)
+
+        monkey_session = session
+        monkey_session.exec = fake_exec  # type: ignore[method-assign]
+        try:
+            link = link_service.create_link(a.id, b.id, LinkType.RELATES_TO)
+        finally:
+            monkey_session.exec = real_exec  # type: ignore[method-assign]
+
+        assert link.id == existing.id
+        # Exactly one a->b row (the rollback discarded the attempted duplicate
+        # and its not-yet-committed symmetric b->a row)
+        links = session.exec(
+            select(TicketLink).where(TicketLink.source_id == a.id, TicketLink.target_id == b.id)
+        ).all()
+        assert len(list(links)) == 1
+
+    def test_normal_duplicate_still_idempotent(self, session, link_service):
+        from jackrabbit.services import TicketService
+
+        ticket_service = TicketService(session)
+        a = ticket_service.create_ticket(project_id=1, title="A")
+        b = ticket_service.create_ticket(project_id=1, title="B")
+        first = link_service.create_link(a.id, b.id, LinkType.RELATES_TO)
+        second = link_service.create_link(a.id, b.id, LinkType.RELATES_TO)
+        assert first.id == second.id
+
+
 @pytest.fixture
 def epic_ticket(ticket_service, test_project):
     """Create an Epic ticket."""
@@ -554,9 +615,9 @@ class TestLinkTypeConstraints:
                 )
 
                 link = link_service.create_link(source.id, target.id, link_type)
-                assert (
-                    link is not None
-                ), f"Failed for {source_type} -> {target_type} with {link_type}"
+                assert link is not None, (
+                    f"Failed for {source_type} -> {target_type} with {link_type}"
+                )
 
                 # Clean up for next iteration
                 link_service.delete_link(link.id)

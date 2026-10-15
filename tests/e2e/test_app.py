@@ -4,21 +4,13 @@ from playwright.sync_api import Page, expect
 
 
 class TestHomePage:
-    """Tests for the home page."""
+    """Tests for the home page (spec: GET / redirects to /backlog)."""
 
-    def test_home_page_loads(self, page: Page, base_url: str):
-        """Test that the home page loads successfully."""
+    def test_home_page_redirects_to_backlog(self, page: Page, base_url: str):
+        """GET / must land on the backlog view (spec Web Routes)."""
         page.goto(base_url)
-        expect(page).to_have_title("Jackrabbit - Dashboard")
-
-    def test_home_page_has_navigation(self, page: Page, base_url: str):
-        """Test that the home page has navigation elements."""
-        page.goto(base_url)
+        expect(page).to_have_title("Jackrabbit - Backlog")
         expect(page.locator("nav")).to_be_visible()
-
-    def test_home_page_shows_projects_link(self, page: Page, base_url: str):
-        """Test that the home page has a link to projects."""
-        page.goto(base_url)
         expect(page.locator("a[href*='projects']")).to_be_visible()
 
 

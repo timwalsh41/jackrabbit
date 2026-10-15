@@ -100,7 +100,9 @@ class Ticket(SQLModel, table=True):
     original_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
-    completed_at: NaiveDatetime | None = None
+    # Aware UTC datetime, consistent with created_at/updated_at (NaiveDatetime
+    # would strip the offset and mix naive/aware values in service code).
+    completed_at: datetime | None = None
 
     project: Project | None = Relationship(back_populates="tickets")
     sprint: Sprint | None = Relationship(back_populates="tickets")
@@ -121,6 +123,14 @@ class Ticket(SQLModel, table=True):
 
 
 class TicketLink(SQLModel, table=True):
+    __table_args__ = (
+        # Matches alembic migration 0001: create_link's IntegrityError-based
+        # race handling depends on this unique constraint existing.
+        UniqueConstraint(
+            "source_id", "target_id", "link_type", name="uq_ticket_link_source_target_type"
+        ),
+    )
+
     id: int | None = Field(default=None, primary_key=True)
     source_id: int = Field(foreign_key="ticket.id", index=True)
     target_id: int = Field(foreign_key="ticket.id", index=True)

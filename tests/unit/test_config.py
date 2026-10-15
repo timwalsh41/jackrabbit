@@ -47,3 +47,43 @@ def test_settings_invalid_environment() -> None:
     """Test that invalid environment raises error."""
     with pytest.raises(ValueError, match="environment must be one of"):
         Settings(environment="invalid")
+
+
+class TestDatabaseUrlResolution:
+    """DATA_DIR / --data-dir must control where the SQLite DB lives (spec
+    stories 20-21). Precedence: explicit DATABASE_URL > data_dir-derived path."""
+
+    def test_data_dir_derives_db_path(self, tmp_path):
+        settings = Settings(data_dir=tmp_path)
+        assert settings.database_url == f"sqlite:///{tmp_path}/jackrabbit.db"
+        assert "jackrabbit.db" in settings.database_url
+
+    def test_default_data_dir_gives_default_db_path(self):
+        settings = Settings()
+        # Path("./data") normalizes to "data"; relative path preserved.
+        assert settings.database_url == "sqlite:///data/jackrabbit.db"
+
+    def test_explicit_database_url_wins_over_data_dir(self, tmp_path):
+        explicit = f"sqlite:///{tmp_path}/elsewhere.db"
+        settings = Settings(data_dir=tmp_path, database_url=explicit)
+        assert settings.database_url == explicit
+
+    def test_database_url_env_var_wins_over_data_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "sqlite:///override.db")
+        settings = Settings(data_dir=tmp_path)
+        assert settings.database_url == "sqlite:///override.db"
+
+    def test_get_settings_cli_data_dir_derives_db_path(self, tmp_path):
+        settings = get_settings(data_dir=tmp_path)
+        assert settings.database_url == f"sqlite:///{tmp_path}/jackrabbit.db"
+
+    def test_get_settings_cli_database_url_wins(self, tmp_path):
+        explicit = f"sqlite:///{tmp_path}/explicit.db"
+        settings = get_settings(data_dir=tmp_path, database_url=explicit)
+        assert settings.database_url == explicit
+
+    def test_get_settings_data_dir_env_derives_db_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        settings = get_settings()
+        assert settings.database_url == f"sqlite:///{tmp_path}/jackrabbit.db"

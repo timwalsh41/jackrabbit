@@ -27,6 +27,30 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+class ConflictError(ValueError):
+    """Raised when an operation conflicts with existing state (maps to HTTP 409)."""
+
+
+# Whitelist of Ticket columns usable as a ``list_tickets`` sort field. Any other
+# value falls back to "number" instead of raising (sort is user-supplied).
+ALLOWED_TICKET_SORT_FIELDS = frozenset(
+    {
+        "id",
+        "number",
+        "title",
+        "type",
+        "status",
+        "priority",
+        "story_points",
+        "created_at",
+        "updated_at",
+        "completed_at",
+        "project_id",
+        "sprint_id",
+    }
+)
+
+
 def _coerce_date(value: date | str) -> date:
     """Accept a ``date`` or an ISO ``YYYY-MM-DD`` string."""
     return value if isinstance(value, date) else date.fromisoformat(value)
@@ -259,10 +283,14 @@ class TicketService:
     def update_status(self, ticket: Ticket, status: TicketStatus) -> Ticket:
         """Legacy method - updates status without guards or audit logging.
         Use transition() for guarded transitions with audit trail."""
+        was_complete = ticket.status == TicketStatus.COMPLETE
         ticket.status = status
         ticket.updated_at = utc_now()
         if status == TicketStatus.COMPLETE:
             ticket.completed_at = utc_now()
+        elif was_complete:
+            # Leaving Complete clears the completion timestamp (same as transition())
+            ticket.completed_at = None
         self.session.add(ticket)
         self.session.commit()
         self.session.refresh(ticket)
@@ -437,6 +465,9 @@ class TicketService:
         ticket.updated_at = utc_now()
         if to_status == TicketStatus.COMPLETE:
             ticket.completed_at = utc_now()
+        elif from_status == TicketStatus.COMPLETE:
+            # Leaving Complete clears the completion timestamp
+            ticket.completed_at = None
 
         # Create transition audit record
         transition = Transition(
@@ -517,8 +548,11 @@ class TicketService:
             query = query.where(Ticket.created_at <= before)
             count_query = count_query.where(Ticket.created_at <= before)
 
-        # Sort
-        sort_column: Any = getattr(Ticket, sort, Ticket.number)
+        # Sort: whitelist the sort field; unknown values fall back to "number"
+        # (sort/order are user-supplied and must never 500).
+        if sort not in ALLOWED_TICKET_SORT_FIELDS:
+            sort = "number"
+        sort_column: Any = getattr(Ticket, sort)
         if order.lower() == "desc":
             query = query.order_by(sort_column.desc())
         else:
@@ -817,7 +851,7 @@ class SprintService:
             raise ValueError(f"Ticket {ticket_id} not found")
 
         if ticket.sprint_id is not None and ticket.sprint_id != sprint_id:
-            raise ValueError(f"Ticket is already assigned to sprint {ticket.sprint_id}")
+            raise ConflictError(f"Ticket is already assigned to sprint {ticket.sprint_id}")
 
         ticket.sprint_id = sprint_id
         ticket.updated_at = utc_now()
@@ -1054,51 +1088,74 @@ class LinkService:
         if existing:
             return existing
 
-        # Create the link
+        # Create the link (plus its inverse if applicable). The pre-check above
+        # can race with a concurrent insert of the same unique key; the uq
+        # constraint turns that into an IntegrityError, which we resolve to the
+        # already-existing link — the same idempotent result as the pre-check
+        # path (mirrors move-project's rollback-and-fresh-read handling).
         link = TicketLink(
             source_id=source_id,
             target_id=target_id,
             link_type=link_type,
         )
         self.session.add(link)
-        self.session.flush()
 
-        # Create inverse link if applicable
-        inverse_type = self._get_inverse_link_type(link_type)
-        if inverse_type and inverse_type != link_type:
-            # For parent/child and blocks/blocked_by, create the inverse
-            inverse_existing = self.session.exec(
+        try:
+            # Flush INSIDE the guarded block: it surfaces a lost race with a
+            # concurrent insert of the same unique key as IntegrityError (the
+            # pending insert would otherwise autoflush at the inverse-check
+            # query below, outside this try).
+            self.session.flush()
+
+            # Create inverse link if applicable
+            inverse_type = self._get_inverse_link_type(link_type)
+            inverse_link: TicketLink | None = None
+            if inverse_type and inverse_type != link_type:
+                # For parent/child and blocks/blocked_by, create the inverse
+                inverse_existing = self.session.exec(
+                    select(TicketLink).where(
+                        TicketLink.source_id == target_id,
+                        TicketLink.target_id == source_id,
+                        TicketLink.link_type == inverse_type,
+                    )
+                ).first()
+                if not inverse_existing:
+                    inverse_link = TicketLink(
+                        source_id=target_id,
+                        target_id=source_id,
+                        link_type=inverse_type,
+                    )
+                    self.session.add(inverse_link)
+            elif inverse_type == link_type:
+                # For relates_to (self-inverse), create the symmetric link
+                inverse_existing = self.session.exec(
+                    select(TicketLink).where(
+                        TicketLink.source_id == target_id,
+                        TicketLink.target_id == source_id,
+                        TicketLink.link_type == link_type,
+                    )
+                ).first()
+                if not inverse_existing:
+                    inverse_link = TicketLink(
+                        source_id=target_id,
+                        target_id=source_id,
+                        link_type=link_type,
+                    )
+                    self.session.add(inverse_link)
+
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            existing = self.session.exec(
                 select(TicketLink).where(
-                    TicketLink.source_id == target_id,
-                    TicketLink.target_id == source_id,
-                    TicketLink.link_type == inverse_type,
-                )
-            ).first()
-            if not inverse_existing:
-                inverse_link = TicketLink(
-                    source_id=target_id,
-                    target_id=source_id,
-                    link_type=inverse_type,
-                )
-                self.session.add(inverse_link)
-        elif inverse_type == link_type:
-            # For relates_to (self-inverse), create the symmetric link
-            inverse_existing = self.session.exec(
-                select(TicketLink).where(
-                    TicketLink.source_id == target_id,
-                    TicketLink.target_id == source_id,
+                    TicketLink.source_id == source_id,
+                    TicketLink.target_id == target_id,
                     TicketLink.link_type == link_type,
                 )
             ).first()
-            if not inverse_existing:
-                inverse_link = TicketLink(
-                    source_id=target_id,
-                    target_id=source_id,
-                    link_type=link_type,
-                )
-                self.session.add(inverse_link)
-
-        self.session.commit()
+            if existing:
+                return existing
+            raise
         self.session.refresh(link)
         return link
 

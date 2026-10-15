@@ -41,6 +41,7 @@ from jackrabbit.schemas import (
     TransitionResponse,
 )
 from jackrabbit.services import (
+    ConflictError,
     LinkService,
     ProjectService,
     SprintService,
@@ -302,9 +303,9 @@ def assign_ticket_to_sprint(
             "ticket_id": ticket.id,
             "sprint_id": sprint_id,
         }
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
-        if "already assigned to sprint" in str(e):
-            raise HTTPException(status_code=409, detail=str(e)) from e
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
@@ -484,12 +485,34 @@ def update_ticket(
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     update_data = ticket_in.model_dump(exclude_unset=True)
-    if "status" in update_data:
-        status = update_data.pop("status")
-        ticket = service.update_status(ticket, status)
 
+    # Status changes go through the guarded TransitionService (same rules as
+    # POST /transition: guarded forward, free backward, reject/restore) so they
+    # never bypass transition guards or the Transition audit trail (ADR-0009).
+    # The unguarded legacy update_status() is no longer used here.
+    new_status = cast(TicketStatus | None, update_data.pop("status", None))
+    transition_reason = update_data.pop("transition_reason", None)
+
+    # Apply non-status field updates FIRST: guards may depend on them (e.g. a
+    # PATCH that sets approach/files/test/validation and Groomed together, or
+    # pr_url + Ready for Review).
     if update_data:
         ticket = service.update_ticket(ticket, **update_data)
+
+    if new_status is not None and new_status != ticket.status:
+        try:
+            ticket = service.transition(
+                ticket,
+                new_status,
+                reason=(
+                    str(transition_reason)
+                    if transition_reason
+                    else "Status changed via ticket edit"
+                ),
+            )
+        except ValueError as e:
+            # Guard failure (or invalid move) -> 400, ticket unchanged in DB
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     # HTMX-aware PATCH: the edit form hx-patches this endpoint directly.
     if request.headers.get("HX-Request"):

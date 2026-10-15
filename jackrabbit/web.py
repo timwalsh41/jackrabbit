@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlmodel import Session
@@ -62,9 +62,10 @@ def get_link_service(session: Session = Depends(get_session)) -> LinkService:
     return LinkService(session)
 
 
-@router.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "index.html", {})
+@router.get("/")
+async def index(request: Request) -> RedirectResponse:
+    """Redirect to the backlog (spec Web Routes: GET / -> /backlog)."""
+    return RedirectResponse(url="/backlog", status_code=307)
 
 
 @router.get("/tickets/new", response_class=HTMLResponse)
@@ -399,6 +400,8 @@ def _build_backlog_context(
     project: Project | None = None,
 ) -> dict:
     """Shared context builder for /backlog and /projects/{id}/tickets."""
+    # Cap page_size like the JSON API (page_size is user-supplied here too).
+    page_size = max(1, min(page_size, 100))
     tickets, total = ticket_service.list_tickets(
         project_id=project_id,
         status=status,
@@ -908,14 +911,7 @@ async def ticket_search(
         q_lower = q.lower()
         filtered = []
         for t in all_tickets:
-            project = (
-                ticket_service.session.get(ticket_service.models.Project, t.project_id)
-                if hasattr(ticket_service, "models")
-                else None
-            )
             # Need to get project for full_id
-            from jackrabbit.models import Project
-
             project = ticket_service.session.get(Project, t.project_id)
             full_id = f"{project.prefix}-{t.number:03d}" if project else f"UNK-{t.number:03d}"
             if q_lower in full_id.lower() or q_lower in t.title.lower():
