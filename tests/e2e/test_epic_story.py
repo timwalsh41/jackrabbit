@@ -8,6 +8,28 @@ import pytest
 from playwright.sync_api import Page, expect
 
 
+def _wait_modal_settled(page: Page) -> None:
+    """Wait until htmx has fully processed the freshly inserted link modal.
+
+    htmx swaps content into the DOM *before* it initializes it: processNode
+    (which attaches the keyup listener on #target_search) only runs in the
+    settle task, deferred by htmx's default settle delay. htmx marks freshly
+    inserted top-level nodes with the `htmx-added` class and removes it right
+    before running processNode, so its absence on #link-modal guarantees the
+    search input is wired up.
+
+    Interacting before that can seed htmx's `changed` bookkeeping: initNode
+    stores `lastValue = elt.value`, so if the test fills the field during the
+    settle window, the dispatched keyup is treated as "not changed" and the
+    search request is never issued (intermittent modal-dead-in-10s flake).
+    """
+    page.wait_for_function(
+        "() => { const m = document.getElementById('link-modal');"
+        " return m !== null && !m.classList.contains('htmx-added'); }",
+        timeout=10000,
+    )
+
+
 class TestEpicStoryLinking:
     """Tests for Epic -> Story linking flow."""
 
@@ -79,6 +101,7 @@ class TestEpicStoryLinking:
             # Open the link modal (rendered into #link-modal-container)
             page.click("button:has-text('Add Link')")
             page.wait_for_selector("#link-modal form", state="visible", timeout=10000)
+            _wait_modal_settled(page)
 
             # Epic is the parent; story is the child target
             page.select_option("#link-modal select[name='link_type']", "parent")
