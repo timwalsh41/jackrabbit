@@ -1,6 +1,7 @@
 """FastAPI API routes for Jackrabbit."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from jackrabbit.database import get_session
@@ -129,13 +130,20 @@ def create_sprint(
     sprint_in: SprintCreate,
     service: SprintService = Depends(get_sprint_service),
 ) -> Sprint:
-    return service.create_sprint(
-        number=sprint_in.number,
-        name=sprint_in.name,
-        description=sprint_in.description,
-        planned_start=sprint_in.planned_start,
-        planned_end=sprint_in.planned_end,
-    )
+    try:
+        return service.create_sprint(
+            number=sprint_in.number,
+            name=sprint_in.name,
+            description=sprint_in.description,
+            planned_start=sprint_in.planned_start,
+            planned_end=sprint_in.planned_end,
+            planned_duration_days=sprint_in.planned_duration_days,
+            actual_start=sprint_in.actual_start,
+            actual_finish=sprint_in.actual_finish,
+        )
+    except IntegrityError as e:
+        service.session.rollback()
+        raise HTTPException(status_code=409, detail="Sprint number already exists") from e
 
 
 @router.get("/sprints", response_model=list[SprintRead])
@@ -167,8 +175,9 @@ def get_sprint(
         description=sprint.description,
         planned_start=sprint.planned_start,
         planned_end=sprint.planned_end,
+        planned_duration_days=sprint.planned_duration_days,
         actual_start=sprint.actual_start,
-        actual_end=sprint.actual_end,
+        actual_finish=sprint.actual_finish,
         created_at=sprint.created_at,
         updated_at=sprint.updated_at,
         tickets=tickets,
@@ -195,8 +204,9 @@ def get_sprint_by_status(
         description=sprint.description,
         planned_start=sprint.planned_start,
         planned_end=sprint.planned_end,
+        planned_duration_days=sprint.planned_duration_days,
         actual_start=sprint.actual_start,
-        actual_end=sprint.actual_end,
+        actual_finish=sprint.actual_finish,
         created_at=sprint.created_at,
         updated_at=sprint.updated_at,
         tickets_by_status=tickets_by_status,
@@ -237,8 +247,9 @@ def get_plan(
                 description=sprint.description,
                 planned_start=sprint.planned_start,
                 planned_end=sprint.planned_end,
+                planned_duration_days=sprint.planned_duration_days,
                 actual_start=sprint.actual_start,
-                actual_end=sprint.actual_end,
+                actual_finish=sprint.actual_finish,
                 ticket_counts=ticket_counts_model,
                 total_tickets=total_tickets,
                 status=status,
@@ -299,6 +310,9 @@ def update_sprint(
         description=sprint_in.description,
         planned_start=sprint_in.planned_start,
         planned_end=sprint_in.planned_end,
+        planned_duration_days=sprint_in.planned_duration_days,
+        actual_start=sprint_in.actual_start,
+        actual_finish=sprint_in.actual_finish,
     )
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")

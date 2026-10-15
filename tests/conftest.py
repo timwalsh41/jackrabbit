@@ -217,7 +217,7 @@ def seeded_sprints(test_db: Session) -> list[Sprint]:
 
     sprints.append(
         sprint_service.create_sprint(
-            number="2601",
+            number=2601,
             name="Sprint 2601",
             description="First sprint of 2026",
         )
@@ -225,7 +225,7 @@ def seeded_sprints(test_db: Session) -> list[Sprint]:
 
     sprints.append(
         sprint_service.create_sprint(
-            number="2602",
+            number=2602,
             name="Sprint 2602",
             description="Second sprint of 2026",
         )

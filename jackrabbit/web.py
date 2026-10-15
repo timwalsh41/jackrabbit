@@ -642,6 +642,7 @@ async def sprint_new(
             "sprint": None,
             "next_number": next_number,
             "action": "/api/v1/sprints",
+            "method": "post",
         },
     )
 
@@ -655,13 +656,19 @@ async def sprint_edit(
     sprint = service.get_sprint(sprint_id)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    # HTMX requests get the modal partial (targeted at the row/modal target);
+    # normal navigation gets the full page. Both PATCH the update endpoint.
+    template_name = (
+        "sprint_form_partial.html" if request.headers.get("HX-Request") else "sprint_form.html"
+    )
     return templates.TemplateResponse(
         request,
-        "sprint_form.html",
+        template_name,
         {
             "sprint": sprint,
             "next_number": None,
             "action": f"/api/v1/sprints/{sprint_id}",
+            "method": "patch",
         },
     )
 

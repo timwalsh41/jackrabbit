@@ -634,18 +634,26 @@ class SprintService:
 
     def create_sprint(
         self,
-        number: str,
+        number: int | None = None,
         name: str = "",
         description: str = "",
         planned_start: datetime | None = None,
         planned_end: datetime | None = None,
+        planned_duration_days: int | None = None,
+        actual_start: datetime | None = None,
+        actual_finish: datetime | None = None,
     ) -> Sprint:
+        if number is None:
+            number = self.get_next_sprint_number()
         sprint = Sprint(
             number=number,
             name=name,
             description=description,
             planned_start=planned_start,
             planned_end=planned_end,
+            planned_duration_days=planned_duration_days,
+            actual_start=actual_start,
+            actual_finish=actual_finish,
         )
         self.session.add(sprint)
         self.session.commit()
@@ -655,11 +663,14 @@ class SprintService:
     def get_sprint(self, sprint_id: int) -> Sprint | None:
         return self.session.get(Sprint, sprint_id)
 
-    def get_sprint_by_number(self, number: str) -> Sprint | None:
+    def get_sprint_by_number(self, number: int) -> Sprint | None:
         return self.session.exec(select(Sprint).where(Sprint.number == number)).first()
 
     def list_sprints(self) -> list[Sprint]:
-        return list(self.session.exec(select(Sprint)).all())
+        """List sprints ordered by number, descending (newest first)."""
+        # Newest sprints first; ignore = mypy plugin mis-flags .desc() on an int column
+        query = select(Sprint).order_by(Sprint.number.desc())  # type: ignore[attr-defined]
+        return list(self.session.exec(query).all())
 
     def get_sprint_with_tickets(self, sprint_id: int) -> dict | None:
         """Get sprint with tickets and derived status."""
@@ -678,38 +689,16 @@ class SprintService:
         }
 
     def _derive_status(self, sprint: Sprint, tickets: list[Ticket]) -> str:
-        """Derive sprint status from dates and tickets.
+        """Derive sprint status from actual dates (spec: planned vs reality tracking).
 
-        - Planned: planned_start is in the future (or None), or no tickets and dates not started
-        - Active: planned_start <= today <= planned_end (or planned_start if no planned_end)
-        - Complete: planned_end < today, or all tickets Complete
+        - Planned: no actual_start yet
+        - Active: actual_start set, actual_finish not set
+        - Complete: actual_finish set
         """
-        from datetime import date
-
-        today = date.today()
-
-        # If all tickets are complete, sprint is complete
-        if tickets and all(t.status == TicketStatus.COMPLETE for t in tickets):
+        if sprint.actual_finish is not None:
             return "Complete"
-
-        # Check planned dates
-        if sprint.planned_start and sprint.planned_end:
-            planned_start = sprint.planned_start.date()
-            planned_end = sprint.planned_end.date()
-            if today < planned_start:
-                return "Planned"
-            elif today > planned_end:
-                return "Complete"
-            else:
-                return "Active"
-        elif sprint.planned_start:
-            planned_start = sprint.planned_start.date()
-            if today < planned_start:
-                return "Planned"
-            else:
-                return "Active"
-
-        # No dates - planned regardless of tickets (no timeframe defined)
+        if sprint.actual_start is not None:
+            return "Active"
         return "Planned"
 
     def update_sprint(
@@ -719,6 +708,9 @@ class SprintService:
         description: str | None = None,
         planned_start: datetime | None = None,
         planned_end: datetime | None = None,
+        planned_duration_days: int | None = None,
+        actual_start: datetime | None = None,
+        actual_finish: datetime | None = None,
     ) -> Sprint | None:
         sprint = self.get_sprint(sprint_id)
         if not sprint:
@@ -731,6 +723,12 @@ class SprintService:
             sprint.planned_start = planned_start
         if planned_end is not None:
             sprint.planned_end = planned_end
+        if planned_duration_days is not None:
+            sprint.planned_duration_days = planned_duration_days
+        if actual_start is not None:
+            sprint.actual_start = actual_start
+        if actual_finish is not None:
+            sprint.actual_finish = actual_finish
         sprint.updated_at = utc_now()
         self.session.add(sprint)
         self.session.commit()
@@ -810,17 +808,10 @@ class SprintService:
             "status": status,
         }
 
-    def get_next_sprint_number(self) -> str:
+    def get_next_sprint_number(self) -> int:
         """Get next sprint number (MAX(number)+1 starting at 2601)."""
         max_num = self.session.exec(select(func.max(Sprint.number))).first()
-        if max_num:
-            try:
-                next_num = int(max_num) + 1
-            except ValueError:
-                next_num = 2601
-        else:
-            next_num = 2601
-        return str(next_num)
+        return (max_num + 1) if max_num else 2601
 
     def get_plan_data(self, project_id: int | None = None) -> dict:
         """Get plan data for calendar/roadmap view.

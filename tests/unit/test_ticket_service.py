@@ -233,7 +233,7 @@ class TestListTickets:
     def test_filter_by_sprint(self, ticket_service, setup_projects, many_tickets):
         from jackrabbit.services import SprintService
 
-        sprint = SprintService(ticket_service.session).create_sprint(number="2601")
+        sprint = SprintService(ticket_service.session).create_sprint(number=2601)
         ticket_service.update_ticket(many_tickets[0], sprint_id=sprint.id)
         tickets, total = ticket_service.list_tickets(sprint_id=sprint.id)
         assert total == 1

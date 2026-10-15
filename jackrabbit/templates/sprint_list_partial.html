@@ -12,24 +12,21 @@
             <p class="text-xs text-gray-500 truncate max-w-xs">{{ sprint.description }}</p>
             {% endif %}
         </td>
-        <td class="px-6 py-4 whitespace-nowrap">
-            {% if sprint.planned_start or sprint.planned_end %}
+                <td class="px-6 py-4 whitespace-nowrap">
             <div class="text-sm text-gray-700">
-                {% if sprint.planned_start %}
-                {{ sprint.planned_start.strftime('%Y-%m-%d') }}
-                {% else %}
-                —
-                {% endif %}
-                {% if sprint.planned_start and sprint.planned_end %} to {% endif %}
-                {% if sprint.planned_end %}
-                {{ sprint.planned_end.strftime('%Y-%m-%d') }}
-                {% elif sprint.planned_start %}
-                —
-                {% endif %}
+                <div>
+                    <span class="text-gray-400 text-xs">Planned:</span>
+                    {% if sprint.planned_start %}{{ sprint.planned_start.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+                    {% if sprint.planned_start or sprint.planned_end %} to {% endif %}
+                    {% if sprint.planned_end %}{{ sprint.planned_end.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+                </div>
+                <div>
+                    <span class="text-gray-400 text-xs">Actual:</span>
+                    {% if sprint.actual_start %}{{ sprint.actual_start.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+                    {% if sprint.actual_start or sprint.actual_finish %} to {% endif %}
+                    {% if sprint.actual_finish %}{{ sprint.actual_finish.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+                </div>
             </div>
-            {% else %}
-            <span class="text-gray-400 text-sm">—</span>
-            {% endif %}
         </td>
         <td class="px-6 py-4 whitespace-nowrap">
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
@@ -47,8 +44,8 @@
             <a href="/sprints/{{ sprint.id }}/edit"
                class="text-indigo-600 hover:text-indigo-900"
                hx-get="/sprints/{{ sprint.id }}/edit"
-               hx-target="#sprint-row-{{ sprint.id }}"
-               hx-swap="outerHTML">
+               hx-target="#sprint-modal"
+               hx-swap="innerHTML">
                 Edit
             </a>
             <button hx-delete="/api/v1/sprints/{{ sprint.id }}"

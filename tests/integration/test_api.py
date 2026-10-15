@@ -84,11 +84,11 @@ def test_create_sprint(client_with_seeds: TestClient) -> None:
     """Test creating a sprint via API."""
     response = client_with_seeds.post(
         "/api/v1/sprints",
-        json={"number": "2601", "name": "Sprint 1"},
+        json={"number": 2601, "name": "Sprint 1"},
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["number"] == "2601"
+    assert data["number"] == 2601
     assert data["name"] == "Sprint 1"
 
 

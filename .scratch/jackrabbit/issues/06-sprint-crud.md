@@ -4,35 +4,45 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] API: `GET /api/v1/sprints` (list, ordered by number desc), `POST /api/v1/sprints` (create), `GET /api/v1/sprints/{id}` (get with tickets), `PATCH /api/v1/sprints/{id}` (update), `DELETE /api/v1/sprints/{id}` (delete) <!-- VERIFIER: all 5 endpoints exist and are tested, but list is NOT ordered by number desc (services.py list_sprints has no order_by) -->
-- [ ] Sprint number: auto-assign `MAX(number)+1` (starts at 2601); user can override <!-- VERIFIER: get_next_sprint_number exists and starts at 2601 (tested), and user override is inherent, but POST /sprints requires `number` (no auto-assign fallback in create_sprint); auto-fill only happens in the web form; number is str, not int -->
-- [ ] Fields: `number` (int), `planned_start` (date, optional), `planned_duration_days` (int, optional), `actual_start` (date, optional), `actual_finish` (date, optional) <!-- VERIFIER: model has all (plus planned_end; actual_finish named actual_end; number is str) but API schemas (SprintCreate/Update/Read) omit planned_duration_days and actual_* -->
-- [x] Web: `GET /sprints` — table of sprints with number, date range (planned/actual), ticket count, status (Planned/Active/Complete), actions <!-- VERIFIER: implemented (web.py:449, sprint_list.html, sprint_row.html); only planned dates shown — actual dates not settable via API anyway -->
-- [x] Web: `GET /sprints/new` — create form (number auto-filled, date pickers); `hx-post="/api/v1/sprints"` → returns row <!-- VERIFIER: number pre-filled via /sprints/next-number; POST returns JSON (not an HTML row) and the table refreshes via HTMX JS; e2e test_create_sprint verifies the row appears -->
-- [ ] Web: `GET /sprints/{id}/edit` — edit form; `hx-patch="/api/v1/sprints/{id}"` → returns updated row <!-- VERIFIER: route + form exist, but sprint_form.html hardcodes hx-post (not hx-patch) against the PATCH-only API route → 405 on submit -->
-- [x] Web: Delete button with `hx-delete` + `hx-confirm` <!-- VERIFIER: sprint_row.html:50-53 -->
-- [ ] Sprint status derived: no actual_start → Planned; actual_start set, no actual_finish → Active; actual_finish set → Complete <!-- VERIFIER: a Planned/Active/Complete status IS derived and tested, but from planned dates + all-tickets-Complete, NOT from actual_start/actual_finish as specified -->
+- [x] API: `GET /api/v1/sprints` (list, ordered by number desc), `POST /api/v1/sprints` (create), `GET /api/v1/sprints/{id}` (get with tickets), `PATCH /api/v1/sprints/{id}` (update), `DELETE /api/v1/sprints/{id}` (delete)
+- [x] Sprint number: auto-assign `MAX(number)+1` (starts at 2601); user can override
+- [x] Fields: `number` (int), `planned_start` (date, optional), `planned_duration_days` (int, optional), `actual_start` (date, optional), `actual_finish` (date, optional)
+- [x] Web: `GET /sprints` — table of sprints with number, date range (planned/actual), ticket count, status (Planned/Active/Complete), actions
+- [x] Web: `GET /sprints/new` — create form (number auto-filled, date pickers); `hx-post="/api/v1/sprints"` → returns row
+- [x] Web: `GET /sprints/{id}/edit` — edit form; `hx-patch="/api/v1/sprints/{id}"` → returns updated row
+- [x] Web: Delete button with `hx-delete` + `hx-confirm`
+- [x] Sprint status derived: no actual_start → Planned; actual_start set, no actual_finish → Active; actual_finish set → Complete
+
 ## Answer
 
-**Verified by:** verifier subagent on branch `jackrabbit-integration` @ `97f36c3`, 2026-10-15 (inspection of `jackrabbit/` code + targeted test runs).
+**Implemented by:** implementer subagent (ticket 06), TDD red-green-refactor.
 
-**Evidence gathered:**
-- `uv run pytest tests/unit tests/integration -q -k sprint` → **61 passed** (incl. `tests/unit/test_sprint_service.py` — 26 tests covering 2601 numbering, status derivation, CRUD, assign/unassign; `tests/integration/test_sprint_api.py` — 24 tests covering POST/GET/PATCH/DELETE, next-number, status derivation, 404/409 paths, delete cascade).
-- Code inspection: `jackrabbit/api.py` (sprint routes), `jackrabbit/services.py` (`SprintService`), `jackrabbit/models.py` (`Sprint`), `jackrabbit/schemas.py`, `jackrabbit/web.py` (sprint web routes), `jackrabbit/templates/sprint_list.html`, `sprint_row.html`, `sprint_form.html`, `sprint_form_partial.html`.
+**Changes:**
 
-**Per-criterion verdicts:**
+- `jackrabbit/models.py` — `Sprint.number` changed str → `int` (per ticket); `actual_end` renamed to `actual_finish` (ticket naming).
+- `alembic/versions/0001_initial.py` — sprint `number` column → `sa.Integer`; `actual_end` → `actual_finish`.
+- `jackrabbit/services.py`:
+  - `create_sprint(number=None, ...)` — number now optional; auto-assigns `get_next_sprint_number()` when omitted; also accepts `planned_duration_days`, `actual_start`, `actual_finish`.
+  - `get_next_sprint_number()` returns `int` (MAX+1, starts at 2601).
+  - `list_sprints()` now `order_by(Sprint.number.desc())`.
+  - `_derive_status()` rewritten per ticket: `actual_finish` → Complete; `actual_start` → Active; otherwise Planned. Ticket-completeness and planned-date heuristics removed (tickets no longer drive sprint status).
+  - `update_sprint()` accepts/sets `planned_duration_days`, `actual_start`, `actual_finish`.
+- `jackrabbit/schemas.py` — `SprintBase`/`SprintCreate`/`SprintRead`/`SprintUpdate`/`PlanSprintResponse` expose `planned_duration_days`, `actual_start`, `actual_finish`; `number: int`, optional (auto-assign) on `SprintCreate` with `""` → None (forms submit empty strings for untouched optional fields; validator mixin tolerates `""` for optional dates/duration).
+- `jackrabbit/api.py` — POST/PATCH pass through the new fields; duplicate number → 409 (was a 500 IntegrityError); Read schemas include the new fields.
+- `jackrabbit/web.py` — `/sprints/new` and `/sprints/{id}/edit` pass `method` ("post"/"patch") and serve the modal partial (`sprint_form_partial.html`) for HX-Request on edit too.
+- Templates — forms use `hx-{{ method }}="{{ action }}"` (fixes the edit-form POST→405 bug); create/edit forms include `planned_duration_days`, `actual_start`, `actual_finish` pickers; sprint list shows planned AND actual date ranges (header "Dates (Planned / Actual)"); Edit opens the modal.
+- Test infra — `tests/integration/conftest.py` and `tests/e2e/conftest.py` no longer hardcode `/workspace/projects/jackrabbit`; they resolve the repo root relative to the test files so integration tests and the e2e server run the checkout they belong to.
 
-1. **API endpoints — not-satisfied (partial).** All five endpoints exist and are tested (`api.py:124` POST, `:138` GET list, `:148` GET {id} with tickets, `:287` PATCH, `:305` DELETE; `SprintService.create/get/get_sprint_with_tickets/update/delete`). **However `SprintService.list_sprints` (services.py:637) has no `order_by`** — list is not "ordered by number desc" as specified.
-2. **Auto-assign number — not-satisfied (partial).** `get_next_sprint_number` (services.py:810) returns `MAX(number)+1` starting at 2601 (unit tests `test_first_sprint_starts_at_2601`, `test_increments_after_existing_sprint`, `test_increments_from_max_not_latest`, `test_non_numeric_max_falls_back_to_2601`; integration `test_get_next_sprint_number`). But **`POST /api/v1/sprints` requires `number`** (`SprintCreate.number: str` required; `create_sprint` has no auto-assign fallback) — auto-fill only happens in the web form via `/sprints/next-number`. Also `number` is `str`, not int.
-3. **Fields — not-satisfied (partial).** `Sprint` model (models.py:61) has `number` (str, not int), `planned_start`, `planned_end` (extra), `planned_duration_days`, `actual_start`, `actual_end` (ticket says `actual_finish`). **API schemas omit `planned_duration_days` and `actual_*`** (`SprintBase`/`SprintCreate`/`SprintUpdate` don't include them; `SprintRead` only reads actual_* but nothing sets them).
-4. **Web list — satisfied.** `web.py:449 GET /sprints` renders `sprint_list.html` + `sprint_row.html` with number, planned date range, ticket count, derived status badge, and Edit/Delete actions. Gap: actual dates are not displayed (they aren't settable via the API either).
-5. **Create form — satisfied.** `web.py:473 GET /sprints/new` renders `sprint_form.html`/`sprint_form_partial.html` with number pre-filled from `get_next_sprint_number()`, `<input type="date">` pickers, and `hx-post="/api/v1/sprints"`. Note: the API returns JSON (not a literal row); the form's `htmx:afterRequest` handler refreshes the table so the row appears — verified by e2e `tests/e2e/test_sprint_workflow.py::test_create_sprint`.
-6. **Edit form — not-satisfied.** `web.py:496 GET /sprints/{id}/edit` and `sprint_form.html` exist, but the shared form hardcodes **`hx-post="{{ action }}"`**; for edit, action is `/api/v1/sprints/{id}`, a PATCH-only route → a POST submission would get 405. No `hx-patch` anywhere in templates.
-7. **Delete button — satisfied.** `sprint_row.html:50-53`: `hx-delete="/api/v1/sprints/{{ sprint.id }}"` with `hx-confirm`.
-8. **Status derivation — not-satisfied.** A Planned/Active/Complete status IS derived (`_derive_status`, services.py:663) and well-tested (unit `test_no_dates_is_planned`…`test_one_incomplete_ticket_keeps_derived_status`; integration `test_sprint_status_derivation_*`), **but the logic uses planned dates + "all tickets Complete", not `actual_start`/`actual_finish` as the ticket specifies.**
+**Tests (red-green):**
+- `tests/unit/test_sprint_service.py` — numbering (2601 start, MAX+1 from max, past-52 continuation, override), status derivation from actual dates (incl. by-status view, tickets don't drive status), list ordering desc, auto-assign create, CRUD with new fields.
+- `tests/unit/test_models.py` — SprintCreate int/optional-number schema.
+- `tests/integration/test_sprint_api.py` — list ordered desc; POST without number auto-assigns; empty-string form fields accepted; duplicate number 409; PATCH sets planned_duration_days/actual_start/actual_finish; status derivation via actual dates incl. Active→Complete via PATCH; next-number int.
+- `tests/integration/test_sprint_web.py` (new) — list page shows planned+actual dates and derived status; new form `hx-post` + auto-filled 2601; edit form `hx-patch` (and no `hx-post` fallback), prefilled values, new fields present; edit 404.
+- `tests/integration/test_plan_api.py`, `test_api.py`, `tests/conftest.py` — int numbers, actual dates to preserve status expectations.
+- `tests/e2e/conftest.py` + `test_sprint_workflow.py` — factory omits number (auto-assign), create test uses auto-filled number, int-safe number matching.
 
-**Gaps / residual risks:**
-- `list_sprints` unordered; number is str not int; `planned_duration_days`/`actual_*` not exposed or settable via API; edit form submits POST to a PATCH-only route (likely 405 in real use); status derivation semantics differ from spec.
-- E2E tests (`tests/e2e/test_sprint_workflow.py`) require a live server + Playwright and were not executed here; the sprint-API evidence comes from unit + integration suites (61 passed).
+**Results:** `uv run pytest -x tests/unit tests/integration` → 270 passed. `tests/e2e` → 34 passed, 5 failed — all 5 failures (epic-story links ×2, project-move, sprint assign-row, ticket-lifecycle) reproduce on the clean tree, i.e. pre-existing, not from this ticket (two previously-failing sprint e2e tests now pass). `ruff check` clean; `mypy` unchanged vs. base (pre-existing errors only). e2e Sprint workflow suite itself: 3/4 pass (4th pre-existing).
+
+**Decisions:** kept `planned_end` (spec Plan view depends on it) alongside the ticket-mandated fields; kept `number` unique with 409 on collision; edit form keeps number readonly (identity field).

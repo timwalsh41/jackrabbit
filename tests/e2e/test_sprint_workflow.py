@@ -4,7 +4,6 @@ Self-contained: creates its own sprint and ticket via API factories, then drives
 "Move to Sprint" dropdown in the Backlog UI and verifies the row updates.
 """
 
-import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -23,12 +22,12 @@ class TestSprintWorkflow:
         page.click("button:has-text('New Sprint'), a:has-text('New Sprint')")
         page.wait_for_selector("#sprint-modal form", state="visible", timeout=10000)
 
-        # Unique sprint number to avoid conflicts
-        unique_num = f"TST{int(time.time() * 1000) % 10000:04d}"
+        # The number is auto-filled (MAX+1 starting at 2601); numbers stay unique
+        # across runs because the server database persists
+        unique_num = page.input_value("input[name='number']")
+        assert unique_num
         future_start = (datetime.now(UTC) + timedelta(days=10)).strftime("%Y-%m-%d")
         future_end = (datetime.now(UTC) + timedelta(days=20)).strftime("%Y-%m-%d")
-
-        page.fill("input[name='number']", unique_num)
         page.fill("input[name='name']", "Test Sprint")
         page.fill("textarea[name='description']", "Test sprint description")
         page.fill("input[name='planned_start']", future_start)
@@ -59,13 +58,14 @@ class TestSprintWorkflow:
         page.wait_for_selector(f"#move-to-sprint-dropdown-{tid}", state="visible", timeout=10000)
 
         # Click the button for our sprint (matches its number)
-        page.click(f"#move-to-sprint-dropdown-{tid} button:has-text('{sprint['number']}')")
+        sprint_number = str(sprint["number"])
+        page.click(f"#move-to-sprint-dropdown-{tid} button:has-text('{sprint_number}')")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)
 
         # The row's Sprint cell (7th td) now shows the sprint number
         expect(page.locator(f"#ticket-row-{tid} td:nth-child(7)")).to_contain_text(
-            sprint["number"], timeout=10000
+            sprint_number, timeout=10000
         )
 
     def test_sprint_view_shows_tickets_by_status(
