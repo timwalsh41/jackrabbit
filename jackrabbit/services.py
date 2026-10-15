@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +25,21 @@ from jackrabbit.models import (
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _coerce_date(value: date | str) -> date:
+    """Accept a ``date`` or an ISO ``YYYY-MM-DD`` string."""
+    return value if isinstance(value, date) else date.fromisoformat(value)
+
+
+def _start_of_day(value: date | str) -> datetime:
+    """Inclusive lower bound (midnight UTC) for a calendar-date filter."""
+    return datetime.combine(_coerce_date(value), time.min, tzinfo=UTC)
+
+
+def _end_of_day(value: date | str) -> datetime:
+    """Inclusive upper bound (23:59:59.999999 UTC) for a calendar-date filter."""
+    return datetime.combine(_coerce_date(value), time.max, tzinfo=UTC)
 
 
 def slugify(text: str, max_length: int = 50) -> str:
@@ -252,7 +268,7 @@ class TicketService:
         self.session.refresh(ticket)
         return ticket
 
-    def update_ticket(self, ticket: Ticket, **kwargs) -> Ticket:
+    def update_ticket(self, ticket: Ticket, **kwargs: Any) -> Ticket:
         for field, value in kwargs.items():
             setattr(ticket, field, value)
         ticket.updated_at = utc_now()
@@ -424,7 +440,7 @@ class TicketService:
 
         # Create transition audit record
         transition = Transition(
-            ticket_id=ticket.id,
+            ticket_id=cast(int, ticket.id),
             from_status=from_status,
             to_status=to_status,
             reason=reason,
@@ -453,6 +469,8 @@ class TicketService:
         priority: Priority | None = None,
         sprint_id: int | None = None,
         q: str | None = None,
+        created_after: date | str | None = None,
+        created_before: date | str | None = None,
         sort: str = "number",
         order: str = "desc",
         page: int = 1,
@@ -462,9 +480,11 @@ class TicketService:
 
         ``sprint_id=0`` is the "No Sprint" sentinel: it selects only tickets
         whose sprint_id is NULL. ``sprint_id=None`` applies no sprint filter.
+        ``created_after``/``created_before`` are inclusive calendar-date bounds
+        on ``Ticket.created_at``; ``None`` applies no date filter.
         """
         query = select(Ticket)
-        count_query = select(func.count(Ticket.id))
+        count_query = select(func.count(Ticket.id))  # type: ignore[arg-type]
 
         if project_id:
             query = query.where(Ticket.project_id == project_id)
@@ -486,11 +506,19 @@ class TicketService:
             query = query.where(Ticket.sprint_id == sprint_id)
             count_query = count_query.where(Ticket.sprint_id == sprint_id)
         if q:
-            query = query.where(Ticket.title.ilike(f"%{q}%"))
-            count_query = count_query.where(Ticket.title.ilike(f"%{q}%"))
+            query = query.where(Ticket.title.ilike(f"%{q}%"))  # type: ignore[attr-defined]
+            count_query = count_query.where(Ticket.title.ilike(f"%{q}%"))  # type: ignore[attr-defined]
+        if created_after is not None:
+            after = _start_of_day(created_after)
+            query = query.where(Ticket.created_at >= after)
+            count_query = count_query.where(Ticket.created_at >= after)
+        if created_before is not None:
+            before = _end_of_day(created_before)
+            query = query.where(Ticket.created_at <= before)
+            count_query = count_query.where(Ticket.created_at <= before)
 
         # Sort
-        sort_column = getattr(Ticket, sort, Ticket.number)
+        sort_column: Any = getattr(Ticket, sort, Ticket.number)
         if order.lower() == "desc":
             query = query.order_by(sort_column.desc())
         else:
@@ -827,19 +855,19 @@ class SprintService:
         tickets = list(self.session.exec(select(Ticket).where(Ticket.sprint_id == sprint_id)).all())
 
         # Group tickets by status
-        tickets_by_status = {}
+        tickets_by_status: dict[str, list[Ticket]] = {}
         for status in TicketStatus:
             tickets_by_status[status.value] = []
 
         for ticket in tickets:
             tickets_by_status[ticket.status.value].append(ticket)
 
-        status = self._derive_status(sprint, tickets)
+        sprint_status = self._derive_status(sprint, tickets)
 
         return {
             "sprint": sprint,
             "tickets_by_status": tickets_by_status,
-            "status": status,
+            "status": sprint_status,
         }
 
     def get_next_sprint_number(self) -> int:
@@ -864,7 +892,8 @@ class SprintService:
 
         # Build base query for sprints
         sprint_query = select(Sprint).order_by(
-            Sprint.planned_start.asc().nulls_last(), Sprint.number.asc()
+            Sprint.planned_start.asc().nulls_last(),  # type: ignore[union-attr,attr-defined]
+            Sprint.number.asc(),  # type: ignore[attr-defined]
         )
 
         # If project filter, we need to find sprints that have tickets from that project
@@ -872,11 +901,14 @@ class SprintService:
             # Get sprint IDs that have tickets from this project
             sprint_ids_with_project = self.session.exec(
                 select(Ticket.sprint_id)
-                .where(Ticket.project_id == project_id, Ticket.sprint_id.is_not(None))
+                .where(
+                    Ticket.project_id == project_id,
+                    Ticket.sprint_id.is_not(None),  # type: ignore[union-attr]
+                )
                 .distinct()
             ).all()
             if sprint_ids_with_project:
-                sprint_query = sprint_query.where(Sprint.id.in_(sprint_ids_with_project))
+                sprint_query = sprint_query.where(Sprint.id.in_(sprint_ids_with_project))  # type: ignore[union-attr]
             else:
                 # No sprints have tickets from this project
                 return {
@@ -890,16 +922,19 @@ class SprintService:
         sprints = list(self.session.exec(sprint_query).all())
 
         # Get unsprinted ticket count
-        unsprinted_query = select(func.count(Ticket.id)).where(Ticket.sprint_id.is_(None))
+        unsprinted_query = select(func.count(Ticket.id)).where(  # type: ignore[arg-type]
+            Ticket.sprint_id.is_(None),  # type: ignore[union-attr]
+        )
         if project_id is not None:
             unsprinted_query = unsprinted_query.where(Ticket.project_id == project_id)
         unsprinted_count = self.session.exec(unsprinted_query).first() or 0
 
         # Calculate date range for timeline
-        sprints_with_dates = [s for s in sprints if s.planned_start and s.planned_end]
-        if sprints_with_dates:
-            earliest_date = min(s.planned_start for s in sprints_with_dates)
-            latest_date = max(s.planned_end for s in sprints_with_dates)
+        starts = [s.planned_start for s in sprints if s.planned_start]
+        ends = [s.planned_end for s in sprints if s.planned_start and s.planned_end]
+        if starts and ends:
+            earliest_date = min(starts)
+            latest_date = max(ends)
         else:
             earliest_date = None
             latest_date = None
@@ -921,8 +956,8 @@ class SprintService:
             status = self._derive_status(sprint, tickets)
 
             # Calculate timeline position if dates available
-            left_pct = 0
-            width_pct = 0
+            left_pct = 0.0
+            width_pct = 0.0
             if earliest_date and latest_date and sprint.planned_start and sprint.planned_end:
                 total_range = (latest_date - earliest_date).total_seconds()
                 if total_range > 0:

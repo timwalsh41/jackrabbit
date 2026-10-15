@@ -1,6 +1,6 @@
 """FastAPI API routes for Jackrabbit."""
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
@@ -414,7 +414,7 @@ def list_tickets(
     )
     total_pages = (total + page_size - 1) // page_size
     return PaginatedResponse(
-        items=tickets,
+        items=[TicketRead.model_validate(t) for t in tickets],
         total=total,
         page=page,
         page_size=page_size,
@@ -564,13 +564,16 @@ def transition_ticket(
             ticket.validation_steps = request.validation_steps
 
         ticket = service.transition(ticket, request.to_status, request.reason)
+        # ticket.project is only None for an uncommitted ticket; it was loaded
+        # from the DB and transitioned, so the relationship is populated.
+        project = cast(Project, ticket.project)
         return TransitionResponse(
-            ticket_id=ticket.id,
+            ticket_id=cast(int, ticket.id),
             from_status=from_status,
             to_status=request.to_status,
             reason=request.reason,
             at=ticket.updated_at,
-            full_id=f"{ticket.project.prefix}-{ticket.number:03d}",
+            full_id=f"{project.prefix}-{ticket.number:03d}",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

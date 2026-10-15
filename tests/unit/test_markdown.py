@@ -89,3 +89,35 @@ class TestMarkdownSafety:
     def test_javascript_scheme_link_is_neutralized(self):
         html = render_markdown("[x](javascript:alert(1))")
         assert 'href="javascript:' not in html
+
+    def test_quote_in_link_url_is_escaped(self):
+        """A double quote in a link URL must not break out of the href attribute.
+
+        Regression test for XSS: the renderer escapes text with
+        quote=False, so a raw `"` inside a URL could previously terminate
+        the href attribute and inject arbitrary event handlers.
+        """
+        html = render_markdown('[click](x"onmouseover="alert(document.cookie))')
+        assert 'onmouseover="alert' not in html
+        # The quote is entity-escaped inside the attribute value.
+        assert (
+            """ in html
+        assert html.count('href="') == 1
+
+    def test_quote_in_link_url_variants(self):
+        for payload in [
+            '[a](x"y)',
+            '[a](x" onclick="alert(1))',
+            '[a]("+autofocus+onfocus=alert(1))',
+        ]:
+            html = render_markdown(payload)
+            assert html.count("<a ") == html.count('<a href="')
+            assert "onclick=" not in html
+            assert "onfocus=" not in html
+
+    def test_normal_link_still_works_after_quote_escaping(self):
+        html = render_markdown("see [docs](https://example.com/?a=1&b=2)")
+        assert 'href="https://example.com/?a=1&b=2"' in html
+        assert """
+            not in html
+        )

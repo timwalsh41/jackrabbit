@@ -50,7 +50,11 @@ def _stash_url(label: str, url: str, placeholders: list[str]) -> str:
     if any(lowered.startswith(scheme) for scheme in _DANGEROUS_URL_SCHEMES):
         # Neutralize the href but keep the label visible.
         return f'<a href="#" rel="noopener noreferrer">{label}</a>'
-    return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+    # The page text is only escaped with quote=False upstream, so a raw `"`
+    # inside a URL must be entity-escaped here or it would terminate the
+    # href attribute and allow event-handler injection (XSS).
+    safe_url = html.escape(url, quote=True)
+    return f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer">{label}</a>'
 
 
 def _stash_code_blocks_back(text: str, placeholders: list[str]) -> str:

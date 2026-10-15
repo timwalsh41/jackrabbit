@@ -119,6 +119,35 @@ class TestBacklogFilters:
         assert rows.count() == 1, f"expected exactly 1 row, got {rows.count()}"
         expect(page.locator(f"#ticket-row-{match['id']}")).to_be_visible()
 
+    def test_filter_by_date(self, page: Page, base_url: str, seeded_projects, make_ticket):
+        """Filtering by created date (US16): bounds are inclusive calendar dates."""
+        from datetime import date, timedelta
+
+        ticket = make_ticket(title="Date Filter Member")
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+
+        # A window ending tomorrow includes the freshly created ticket.
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        page.fill("input[name='created_before']", tomorrow)
+        self._apply(page)
+        expect(page.locator(f"#ticket-row-{ticket['id']}")).to_be_visible(timeout=10000)
+
+        # A window that ended two days ago excludes it (No tickets found).
+        two_days_ago = (date.today() - timedelta(days=2)).isoformat()
+        page.fill("input[name='created_before']", two_days_ago)
+        self._apply(page)
+        assert page.locator(f"#ticket-row-{ticket['id']}").count() == 0
+        expect(page.locator("text=No tickets found")).to_be_visible()
+
+        # created_after today keeps the ticket again.
+        today = date.today().isoformat()
+        page.fill("input[name='created_after']", today)
+        page.fill("input[name='created_before']", "")
+        self._apply(page)
+        expect(page.locator(f"#ticket-row-{ticket['id']}")).to_be_visible(timeout=10000)
+
     def test_clear_filters(self, page: Page, base_url: str, seeded_projects):
         """Test clear filters button works."""
         page.goto(f"{base_url}/backlog")

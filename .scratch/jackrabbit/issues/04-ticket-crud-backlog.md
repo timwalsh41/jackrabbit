@@ -63,3 +63,6 @@ Verified against branch `jackrabbit-integration` by code inspection, targeted un
 - Criterion 10: satisfied — `web.py` computes `uns_project` via `get_project_by_prefix("UNS")` and `ticket_form_partial.html` pre-selects it (`default_project_id`); smoke confirmed UNS id selected.
 
 **Test-suite note:** running the whole suite (`uv run pytest tests/unit tests/integration -q`) yields 3 failures/1 error in `test_move_project.py` and `test_update_project_validation` with `sqlite3.OperationalError: attempt to write a readonly database` / `table project already exists` — a shared-DB test-isolation artifact, not ticket logic; each file passes in isolation (test_api.py: 29 passed; test_move_project.py standalone: some infra errors remain, and move-project is ticket 05+ scope, not this ticket).
+## Review fix (integration branch)
+
+Added the missing **date** filter from User Story 16: `created_after`/`created_before` date inputs on the Backlog filter form (also honored by `/projects/{id}/tickets`), inclusive bounds on `Ticket.created_at`, preserved across sort/pagination `hx-vals`. Service-level `list_tickets(created_after=..., created_before=...)` covered by unit tests, route behavior by integration tests, and the E2E date-filter flow by `tests/e2e/test_backlog_filters.py::test_filter_by_date`.

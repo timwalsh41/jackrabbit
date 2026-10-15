@@ -56,3 +56,7 @@ HTMX-driven: status transitions (`hx-post /api/v1/tickets/{id}/transition` + tra
 - Full-suite combined runs are flaky in this environment: `sqlite3.OperationalError: disk I/O error` intermittently on the session-scoped in-memory `StaticPool` engine (`tests/conftest.py:41-48`) when multiple files run together (e.g. 3-6 failures in `-k "links or move_project or transition"` batches); each affected file passes in isolation. Test-infra flakiness, not a product failure, but it means combined-suite green runs cannot be attested here.
 
 **Bottom line:** the detail page skeleton, links, transitions, and project-move flows are implemented and partially test-covered, but the ticket as specified is not complete: wrong route path, no sprint assignment on the page, no markdown rendering, no collapsible/inline groomed-field editing, no Delete action, no project link, and no HTML 404 handling.
+
+## Review fix (integration branch)
+
+Security fix in `jackrabbit/markdown.py::_stash_url`: link URLs are now entity-escaped (`html.escape(url, quote=True)`) before interpolation into `href`, closing an XSS where a `"` in a link URL broke out of the attribute (e.g. `[click](x"onmouseover=...)`). Regression tests in `tests/unit/test_markdown.py`.
