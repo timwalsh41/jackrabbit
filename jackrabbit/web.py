@@ -2,13 +2,15 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from sqlmodel import Session
 
 from jackrabbit.database import get_session
 from jackrabbit.models import LinkType, Priority, TicketStatus, TicketType
+from jackrabbit.schemas import ProjectCreate, ProjectUpdate
 from jackrabbit.services import LinkService, ProjectService, SprintService, TicketService
 
 router = APIRouter()
@@ -335,6 +337,24 @@ async def ticket_link_modal(
 
 
 # Project web routes
+def _format_validation_error(exc: ValidationError) -> str:
+    """Turn pydantic validation errors into a single friendly message."""
+    parts = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err["loc"]) or "value"
+        msg = err["msg"]
+        if msg.startswith("Value error, "):
+            msg = msg[len("Value error, ") :]
+        parts.append(f"{loc}: {msg}")
+    return "; ".join(parts)
+
+
+def _is_inline_row_request(request: Request) -> bool:
+    """True when an HTMX request targets a project row (inline edit flow)."""
+    target = request.headers.get("HX-Target") or ""
+    return target.startswith("project-row-")
+
+
 @router.get("/projects", response_class=HTMLResponse)
 async def project_list(
     request: Request,
@@ -355,8 +375,77 @@ async def project_list(
 
 @router.get("/projects/new", response_class=HTMLResponse)
 async def project_new(request: Request) -> HTMLResponse:
+    context = {"project": None, "action": "/projects"}
+    # Return the bare form partial for HTMX requests (no full base template)
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(request, "project_form_partial.html", context)
+    return templates.TemplateResponse(request, "project_form.html", context)
+
+
+@router.post("/projects", response_class=HTMLResponse)
+async def project_create_submit(
+    request: Request,
+    prefix: str = Form(...),
+    name: str = Form(...),
+    description: str = Form(""),
+    color: str = Form("#6366f1"),
+    service: ProjectService = Depends(get_project_service),
+) -> HTMLResponse:
+    """HTMX form submit for creating a Project; returns the new row partial."""
+    form_data = {
+        "form_prefix": prefix,
+        "form_name": name,
+        "form_description": description,
+        "form_color": color,
+    }
+    try:
+        project_in = ProjectCreate(prefix=prefix, name=name, description=description, color=color)
+        project = service.create_project(
+            prefix=project_in.prefix,
+            name=project_in.name,
+            description=project_in.description,
+            color=project_in.color,
+        )
+    except ValidationError as e:
+        context = {
+            "project": None,
+            "action": "/projects",
+            "error": _format_validation_error(e),
+            **form_data,
+        }
+        return templates.TemplateResponse(request, "project_form_partial.html", context)
+    except ValueError as e:
+        context = {"project": None, "action": "/projects", "error": str(e), **form_data}
+        return templates.TemplateResponse(request, "project_form_partial.html", context)
+
+    # Success: return the row partial for the newly created Project.
+    # HX-Redirect sends the user to the list where the row is visible.
+    response = templates.TemplateResponse(
+        request,
+        "project_row.html",
+        {"project": project, "ticket_count": 0},
+    )
+    response.headers["HX-Redirect"] = "/projects"
+    return response
+
+
+@router.get("/projects/{project_id}/row", response_class=HTMLResponse)
+async def project_row_partial(
+    request: Request,
+    project_id: int,
+    service: ProjectService = Depends(get_project_service),
+) -> HTMLResponse:
+    """Row partial for a single Project (used by inline-edit cancel/refresh)."""
+    project = service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     return templates.TemplateResponse(
-        request, "project_form.html", {"project": None, "action": "/api/v1/projects"}
+        request,
+        "project_row.html",
+        {
+            "project": project,
+            "ticket_count": service.get_project_ticket_count(project_id),
+        },
     )
 
 
@@ -438,11 +527,75 @@ async def project_edit(
     project = service.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    # Inline edit: HTMX swaps in a row-level form for this project row
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(request, "project_edit_row.html", {"project": project})
     return templates.TemplateResponse(
         request,
         "project_form.html",
-        {"project": project, "action": f"/api/v1/projects/{project_id}"},
+        {"project": project, "action": f"/projects/{project_id}"},
     )
+
+
+@router.patch("/projects/{project_id}", response_class=HTMLResponse)
+async def project_update_submit(
+    request: Request,
+    project_id: int,
+    name: str = Form(...),
+    description: str = Form(""),
+    color: str = Form("#6366f1"),
+    service: ProjectService = Depends(get_project_service),
+) -> HTMLResponse:
+    """HTMX form submit for editing a Project; returns the updated row partial."""
+    project = service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    form_data = {
+        "form_name": name,
+        "form_description": description,
+        "form_color": color,
+    }
+    try:
+        project_in = ProjectUpdate(name=name, description=description, color=color)
+        updated = service.update_project(
+            project_id,
+            name=project_in.name,
+            description=project_in.description,
+            color=project_in.color,
+        )
+    except ValidationError as e:
+        error = _format_validation_error(e)
+        if _is_inline_row_request(request):
+            return templates.TemplateResponse(
+                request,
+                "project_edit_row.html",
+                {"project": project, "error": error, **form_data},
+            )
+        context = {
+            "project": project,
+            "action": f"/projects/{project_id}",
+            "error": error,
+            **form_data,
+        }
+        return templates.TemplateResponse(request, "project_form_partial.html", context)
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Success: return the row partial. Inline edits swap the row in place;
+    # full-page edits redirect back to the list.
+    response = templates.TemplateResponse(
+        request,
+        "project_row.html",
+        {
+            "project": updated,
+            "ticket_count": service.get_project_ticket_count(project_id),
+        },
+    )
+    if not _is_inline_row_request(request):
+        response.headers["HX-Redirect"] = "/projects"
+    return response
 
 
 # Sprint web routes

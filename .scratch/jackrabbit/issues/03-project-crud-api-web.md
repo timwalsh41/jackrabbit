@@ -7,14 +7,16 @@
 **Status:** ready-for-agent
 
 - [x] API: `GET /api/v1/projects` (list), `POST /api/v1/projects` (create), `GET /api/v1/projects/{id}` (get), `PATCH /api/v1/projects/{id}` (update), `DELETE /api/v1/projects/{id}` (delete)
-- [ ] Validation: prefix unique, 2-10 chars uppercase; name required; color hex format
+- [x] Validation: prefix unique, 2-10 chars uppercase; name required; color hex format
 - [x] `DELETE /api/v1/projects/{id}` returns 403 if `is_system=true` (protects UNS)
 - [x] Web: `GET /projects` — table of projects with prefix, name, color badge, ticket count, actions
-- [ ] Web: `GET /projects/new` — create form (HTMX `hx-post` → returns row partial)
-- [ ] Web: `GET /projects/{id}/edit` — edit form (HTMX `hx-patch` → returns row partial)
+- [x] Web: `GET /projects/new` — create form (HTMX `hx-post` → returns row partial)
+- [x] Web: `GET /projects/{id}/edit` — edit form (HTMX `hx-patch` → returns row partial)
 - [x] Web: Delete button with `hx-delete` + `hx-confirm` (disabled for UNS)
-- [ ] Base template `base.html` with HTMX loaded, navigation bar (Backlog, Sprints, Plan, Projects)
+- [x] Base template `base.html` with HTMX loaded, navigation bar (Backlog, Sprints, Plan, Projects)
 - [x] All templates use glossary vocabulary: "Project", "Ticket", "Sprint"
+
+**Status:** resolved
 
 ## Answer
 
@@ -47,3 +49,39 @@
 3. Neither create nor edit HTMX form returns a row partial; after successful create the raw JSON replaces the form DOM.
 4. Nav lacks Sprints link.
 5. Unrelated: 3 failing tests in `test_move_project.py` (belongs to a different ticket).
+
+---
+
+### Implementation (this run) — gaps closed
+
+1. **Prefix uniqueness** — `ProjectService.create_project` now checks for an existing
+   (case-insensitive, uppercase-normalized) prefix and raises `ValueError`; the API
+   endpoint maps it to **409 Conflict** (previously an unhandled IntegrityError → 500).
+   Tests: `tests/unit/test_project_service.py` (dup, case-insensitive dup, system-prefix dup),
+   `tests/integration/test_api.py::test_create_project_duplicate_prefix_conflict` (+case-insensitive).
+2. **Create form (`GET /projects/new`)** — full page form (and bare form partial for
+   `HX-Request`) posts via `hx-post="/projects"` to a new web route `POST /projects`
+   (form-encoded, validated through `ProjectCreate`). Success returns the new
+   `project_row.html` row partial (with `HX-Redirect: /projects`); validation/duplicate
+   errors re-render the form partial with an inline error message.
+3. **Edit form (`GET /projects/{id}/edit`)** — full page form uses
+   `hx-patch="/projects/{id}"` (previously `hx-post` to the API → 405). `HX-Request`
+   returns `project_edit_row.html` (inline row-level form, cancel via `GET /projects/{id}/row`).
+   New web route `PATCH /projects/{id}` validates via `ProjectUpdate` and returns the
+   updated row partial (inline swaps in place; full page sets `HX-Redirect: /projects`).
+4. **base.html** — nav now includes **Sprints** (`/sprints`) alongside Backlog, Plan, Projects; HTMX 1.9.10 already loaded.
+5. **Templates** — new `project_row.html` (row partial, used by list, create, edit,
+   cancel endpoints), `project_form_partial.html`, `project_edit_row.html`; list table
+   de-duplicated to 5 columns (Prefix, Name, Color, Tickets, Actions). Glossary
+   vocabulary maintained.
+6. Added `python-multipart` dependency (required by FastAPI `Form` handling).
+
+### Tests (this run)
+- `tests/unit/test_project_service.py` — 8 unit tests (uniqueness, update, delete guard).
+- `tests/integration/test_project_web.py` — 14 integration tests covering all web criteria.
+- `tests/integration/test_api.py` — +2 duplicate-prefix 409 tests.
+- Full gate: `uv run pytest -x tests/unit tests/integration` → **279 passed**; ruff clean on touched files.
+
+### Remaining notes
+- E2E (Playwright) coverage for project CRUD was not added: project flows are not in the spec's E2E flow list (spec lists ticket lifecycle, sprint workflow, project move, epic links, filters). Integration TestClient tests cover the web routes end-to-end at HTTP level.
+- The pre-existing `sys.path.insert(0, "/workspace/projects/jackrabbit")` in `tests/integration/conftest.py` is dead weight under the editable install (verified the worktree package is imported) but was left untouched as shared test infrastructure.
