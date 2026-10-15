@@ -565,8 +565,11 @@ class ProjectService:
         color: str = "#6366f1",
         is_system: bool = False,
     ) -> Project:
+        normalized_prefix = prefix.upper().strip()
+        if self.get_project_by_prefix(normalized_prefix) is not None:
+            raise ValueError(f"Project prefix '{normalized_prefix}' already exists")
         project = Project(
-            prefix=prefix.upper(),
+            prefix=normalized_prefix,
             name=name,
             description=description,
             color=color,

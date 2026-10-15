@@ -198,6 +198,28 @@ def test_create_project_validation_color(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_create_project_duplicate_prefix_conflict(client_with_seeds: TestClient) -> None:
+    """Duplicate project prefix returns 409, not a 500 IntegrityError."""
+    # WEB is seeded by the fixture
+    response = client_with_seeds.post(
+        "/api/v1/projects",
+        json={"prefix": "WEB", "name": "Duplicate Web", "description": "dup"},
+    )
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
+
+
+def test_create_project_duplicate_prefix_case_insensitive_conflict(
+    client_with_seeds: TestClient,
+) -> None:
+    """Lowercase duplicate prefix is normalized then rejected as 409."""
+    response = client_with_seeds.post(
+        "/api/v1/projects",
+        json={"prefix": "web", "name": "Lowercase Dup"},
+    )
+    assert response.status_code == 409
+
+
 def test_update_project_validation(client: TestClient) -> None:
     """Test project update validation."""
     client.post("/api/v1/projects", json={"prefix": "WEB", "name": "Web Project"})

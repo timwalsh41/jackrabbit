@@ -80,6 +80,8 @@ Core domain: **Projects** (prefixes like `MSC`, `WEB`, `UNS`), **Tickets** (Epic
 - **ADR-0015**: Link types — parent/child, blocks/blocked_by, relates_to (symmetric)
 - **ADR-0016**: Minimal ticket fields — title, description, priority, story_points (+ system: created_at, updated_at, branch_name, pr_url, groomed fields)
 - **ADR-0017**: UNS = real seeded Project record (prefix='UNS', is_system=true)
+- **ADR-0018** (ticket 03): Project prefix uniqueness enforced at the service layer (`ValueError` → API **409 Conflict**), not just a DB constraint, so duplicate prefixes never surface as 500s.
+- **ADR-0019** (ticket 03): HTMX Project forms submit to web routes (`POST /projects`, `PATCH /projects/{id}`, form-encoded, validated via `ProjectCreate`/`ProjectUpdate`) and receive the `project_row.html` row partial back; create success and full-page edit success set `HX-Redirect: /projects`, inline row edits swap the row in place (`HX-Target: project-row-*`).
 
 ### Schema Overview
 ```sql

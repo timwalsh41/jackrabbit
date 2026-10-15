@@ -70,12 +70,15 @@ def create_project(
     project_in: ProjectCreate,
     service: ProjectService = Depends(get_project_service),
 ) -> Project:
-    return service.create_project(
-        prefix=project_in.prefix,
-        name=project_in.name,
-        description=project_in.description,
-        color=project_in.color,
-    )
+    try:
+        return service.create_project(
+            prefix=project_in.prefix,
+            name=project_in.name,
+            description=project_in.description,
+            color=project_in.color,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 @router.get("/projects", response_model=list[ProjectRead])
