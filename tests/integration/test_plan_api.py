@@ -300,6 +300,20 @@ async def test_plan_web_page_project_filter(client_with_seeds: AsyncClient) -> N
     assert 'value="2" selected' in content or 'selected="" value="2"' in content
 
 
+async def test_plan_web_page_horizontal_scroll(client_with_seeds: AsyncClient) -> None:
+    """Test plan page is horizontally scrollable on narrow viewports.
+
+    The timeline container must use overflow-x-auto so narrow viewports
+    scroll horizontally instead of squishing the sprint bars.
+    """
+    response = await client_with_seeds.get("/plan")
+    assert response.status_code == 200
+    content = response.text
+    assert "overflow-x-auto" in content
+    # The scrollable container must wrap the sprint timeline
+    assert 'id="plan-timeline-scroll"' in content
+
+
 async def test_plan_web_page_unsprinted_tickets(client_with_seeds: AsyncClient) -> None:
     """Test GET /plan web page shows unsprinted tickets."""
     await client_with_seeds.post(

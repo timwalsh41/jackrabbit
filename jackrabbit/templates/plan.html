@@ -21,7 +21,9 @@
     </div>
 
     <div id="plan-content">
-        <div class="space-y-4" id="timeline">
+        <!-- Horizontal scroll container: narrow viewports scroll instead of squishing bars -->
+        <div id="plan-timeline-scroll" class="overflow-x-auto">
+        <div class="space-y-4" id="timeline" style="min-width: 640px;">
             {% if sprints %}
             {% for sprint_data in sprints %}
             {% set sprint = sprint_data.sprint %}
@@ -138,6 +140,7 @@
             </div>
             {% endif %}
         </div>
+        </div><!-- /plan-timeline-scroll -->
 
         <!-- Unsprinted tickets section - show even when no sprints -->
         {% if unsprinted_count > 0 %}

@@ -4,7 +4,7 @@
 
 **Blocked by:** 06, 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] API: `GET /api/v1/plan` — returns all sprints with nested ticket counts by status
   - Response: `[{sprint: {...}, counts: {Open: 3, Groomed: 2, "In Progress": 1, ...}, date_range: {planned_start, planned_end, actual_start, actual_finish}}]`
@@ -17,7 +17,7 @@
   - Unsprinted tickets noted at top/bottom
 - [x] HTMX: filter by project (dropdown) → `hx-get="/plan?project_id=..."`
 - [x] Empty state: "No sprints created" with link to `/sprints/new`
-- [ ] Responsive: horizontal scroll on narrow viewports
+- [x] Responsive: horizontal scroll on narrow viewports
 
 ## Answer
 
@@ -54,3 +54,16 @@ Verified against branch `jackrabbit-integration` on 2026 checkout.
 
 **Gaps:** only the horizontal-scroll criterion is unmet; API response shape deviates cosmetically from the ticket sketch (flat list + `unsprinted_count` instead of nested `date_range` entries) but contains all specified data fields.
 **Status:** unchanged (`resolved`).
+## Answer
+
+Plan view was already largely present from an earlier checkpoint (API `GET /api/v1/plan` via `SprintService.get_plan_data`, web `/plan` rendering `plan.html` with HTMX project filter, empty state, and unsprinted-ticket callout). This run verified all previously checked criteria against the passing test suite (`tests/integration/test_plan_api.py`, 8 tests) and completed the one unchecked criterion.
+
+**Implementation (this run):**
+- **Responsive horizontal scroll (criterion 5)**: Added an `overflow-x-auto` scroll container (`#plan-timeline-scroll`) around the sprint timeline in `plan.html`, with `min-width: 640px` on the timeline so narrow viewports scroll horizontally instead of squishing the sprint bars. Base template already has the `viewport` meta tag.
+- TDD: added failing test `test_plan_web_page_horizontal_scroll` (red), then added the scroll container (green).
+
+**Verification:**
+- `uv run pytest -x tests/unit tests/integration` → 332 passed.
+- `ruff check` on touched files → clean. mypy has 31 pre-existing errors in `api.py`/`services.py` (identical count with and without these changes; template/test-only diff).
+
+**Decisions:** Used a plain `overflow-x-auto` wrapper with an inline `min-width: 640px` rather than Tailwind arbitrary values (`min-w-[640px]`), because the project loads the precompiled Tailwind CDN build which does not include arbitrary-value utilities.
