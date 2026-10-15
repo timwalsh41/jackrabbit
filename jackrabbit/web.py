@@ -1,7 +1,9 @@
 """Web/UI routes for Jackrabbit (HTMX + Jinja2)."""
 
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -355,6 +357,16 @@ def _parse_optional_int(value: str | None, field: str = "value") -> int | None:
         raise HTTPException(status_code=422, detail=f"{field} must be an integer") from e
 
 
+def _parse_optional_date(value: str | None, field: str = "value") -> date | None:
+    """Parse an optional ISO date (YYYY-MM-DD) query param; empty means "not set"."""
+    if value is None or value == "":
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"{field} must be a date (YYYY-MM-DD)") from e
+
+
 def _parse_optional_enum[E: StrEnum](
     enum_cls: type[E], value: str | None, field: str = "value"
 ) -> E | None:
@@ -378,6 +390,8 @@ def _build_backlog_context(
     priority: Priority | None,
     sprint_id: int | None,
     q: str | None,
+    created_after: date | None,
+    created_before: date | None,
     sort: str,
     order: str,
     page: int,
@@ -392,6 +406,8 @@ def _build_backlog_context(
         priority=priority,
         sprint_id=sprint_id,
         q=q,
+        created_after=created_after,
+        created_before=created_before,
         sort=sort,
         order=order,
         page=page,
@@ -421,6 +437,8 @@ def _build_backlog_context(
             "priority": priority,
             "sprint_id": sprint_id,
             "q": q,
+            "created_after": created_after,
+            "created_before": created_before,
             "sort": sort,
             "order": order,
         },
@@ -440,6 +458,8 @@ async def backlog(
     priority: str = Query(""),
     sprint_id: str = Query(""),
     q: str = Query(""),
+    created_after: str = Query(""),
+    created_before: str = Query(""),
     sort: str = Query("number"),
     order: str = Query("desc"),
     page: int = Query(1),
@@ -459,6 +479,8 @@ async def backlog(
         # sprint_id=0 is the "No Sprint" sentinel; ""/absent means no filter
         sprint_id=_parse_optional_int(sprint_id, "sprint_id"),
         q=q or None,
+        created_after=_parse_optional_date(created_after, "created_after"),
+        created_before=_parse_optional_date(created_before, "created_before"),
         sort=sort,
         order=order,
         page=page,
@@ -575,6 +597,8 @@ async def project_tickets(
     priority: str = Query(""),
     sprint_id: str = Query(""),
     q: str = Query(""),
+    created_after: str = Query(""),
+    created_before: str = Query(""),
     sort: str = Query("number"),
     order: str = Query("desc"),
     page: int = Query(1),
@@ -597,6 +621,8 @@ async def project_tickets(
         priority=_parse_optional_enum(Priority, priority, "priority"),
         sprint_id=_parse_optional_int(sprint_id, "sprint_id"),
         q=q or None,
+        created_after=_parse_optional_date(created_after, "created_after"),
+        created_before=_parse_optional_date(created_before, "created_before"),
         sort=sort,
         order=order,
         page=page,
@@ -700,7 +726,7 @@ async def sprint_list(
     sprints = service.list_sprints()
     sprint_data = []
     for sprint in sprints:
-        result = service.get_sprint_with_tickets(sprint.id)
+        result = service.get_sprint_with_tickets(cast(int, sprint.id))
         if result:
             sprint_data.append(
                 {

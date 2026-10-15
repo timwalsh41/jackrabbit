@@ -1,5 +1,7 @@
 """Unit tests for TicketService: CRUD, numbering, listing, details, transitions."""
 
+from datetime import UTC, date, datetime, timedelta
+
 import pytest
 from jackrabbit.models import (
     LinkType,
@@ -288,6 +290,49 @@ class TestListTickets:
     def test_search_is_case_insensitive(self, ticket_service, many_tickets):
         tickets, total = ticket_service.list_tickets(q="LOGIN")
         assert total == 2
+
+    def test_filter_created_after(self, ticket_service, many_tickets):
+        """created_after keeps only tickets created on/after the given date."""
+        old = datetime.now(UTC) - timedelta(days=10)
+        recent = datetime.now(UTC) - timedelta(days=1)
+        ticket_service.update_ticket(many_tickets[0], created_at=old)
+        ticket_service.update_ticket(many_tickets[1], created_at=recent)
+
+        # The recent ticket was backdated one day: strictly before today's midnight.
+        today = date.today().isoformat()
+        tickets, total = ticket_service.list_tickets(created_after=today)
+        assert total == 3
+        assert all(t.id not in (many_tickets[0].id, many_tickets[1].id) for t in tickets)
+
+        week_ago = (date.today() - timedelta(days=5)).isoformat()
+        tickets, total = ticket_service.list_tickets(created_after=week_ago)
+        assert total == 4
+        assert all(t.id != many_tickets[0].id for t in tickets)
+
+    def test_filter_created_before(self, ticket_service, many_tickets):
+        """created_before keeps only tickets created on/before the given date."""
+        old = datetime.now(UTC) - timedelta(days=10)
+        ticket_service.update_ticket(many_tickets[0], created_at=old)
+        ticket_service.update_ticket(many_tickets[1], created_at=datetime.now(UTC))
+
+        yesterday = (date.today() - timedelta(days=5)).isoformat()
+        tickets, total = ticket_service.list_tickets(created_before=yesterday)
+        assert total == 1
+        assert tickets[0].id == many_tickets[0].id
+
+    def test_filter_created_after_and_before_combine(self, ticket_service, many_tickets):
+        """Both bounds combine with AND logic and the end date is inclusive."""
+        old = datetime.now(UTC) - timedelta(days=10)
+        ticket_service.update_ticket(many_tickets[0], created_at=old)
+        start = (date.today() - timedelta(days=5)).isoformat()
+        end = (date.today() + timedelta(days=1)).isoformat()
+        tickets, total = ticket_service.list_tickets(created_after=start, created_before=end)
+        assert total == 4
+        assert all(t.id != many_tickets[0].id for t in tickets)
+
+    def test_created_filters_none_returns_all(self, ticket_service, many_tickets):
+        tickets, total = ticket_service.list_tickets(created_after=None, created_before=None)
+        assert total == 5
 
     def test_sortAscending_by_title(self, ticket_service, many_tickets):
         tickets, _total = ticket_service.list_tickets(sort="title", order="asc")

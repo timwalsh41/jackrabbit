@@ -4,6 +4,7 @@ Separate from SQLModel table classes to maintain API-First design.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -197,11 +198,13 @@ class TicketCreate(TicketBase):
     validation_steps: str = ""
     sprint_id: int | None = None
     status: TicketStatus = TicketStatus.OPEN
-    story_points: str | int | None = None
+    # Declared int|None; the before-validator converts "" -> None and numeric
+    # strings -> int so HTMX/API callers submitting form fields still validate.
+    story_points: int | None = None
 
     @field_validator("story_points", mode="before")
     @classmethod
-    def empty_str_to_none(cls, v):
+    def empty_str_to_none(cls, v: Any) -> Any:
         if v == "" or v is None:
             return None
         if isinstance(v, str):
@@ -218,11 +221,13 @@ class TicketUpdate(BaseModel):
     type: TicketType | None = None
     status: TicketStatus | None = None
     priority: Priority | None = None
-    story_points: str | int | None = None
+    # Declared int|None; the before-validator converts "" -> None and numeric
+    # strings -> int so HTMX/API callers submitting form fields still validate.
+    story_points: int | None = None
 
     @field_validator("story_points", mode="before")
     @classmethod
-    def empty_str_to_none(cls, v):
+    def empty_str_to_none(cls, v: Any) -> Any:
         if v == "" or v is None:
             return None
         if isinstance(v, str):
@@ -232,7 +237,6 @@ class TicketUpdate(BaseModel):
                 return None
         return v
 
-    story_points: int | None = None
     approach: str | None = None
     files_to_change: str | None = None
     test_plan: str | None = None

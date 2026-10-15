@@ -164,6 +164,108 @@ class TestBacklogPage:
         assert "Critical outage" in r.text
         assert "Add tooltip" not in r.text
 
+    async def test_backlog_date_filter_inputs_present(self, client, backlog_tickets):
+        """The filter form exposes created_after / created_before date inputs (US16)."""
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        assert 'name="created_after"' in r.text
+        assert 'name="created_before"' in r.text
+        assert 'type="date"' in r.text
+
+    async def test_backlog_filter_created_after(self, client, test_db, backlog_tickets):
+        """created_after excludes tickets created before the given date."""
+        from datetime import UTC, date, datetime, timedelta
+
+        ticket_service = TicketService(test_db)
+        ticket_service.update_ticket(
+            backlog_tickets["high"], created_at=datetime.now(UTC) - timedelta(days=10)
+        )
+        r = await _get(
+            client,
+            "/backlog",
+            params={"created_after": (date.today() - timedelta(days=5)).isoformat()},
+        )
+        assert r.status_code == 200
+        assert "Critical outage" not in r.text
+        assert "Add tooltip" in r.text
+        assert "Investigate flaky test" in r.text
+
+    async def test_backlog_filter_created_before(self, client, test_db, backlog_tickets):
+        """created_before excludes tickets created after the given date."""
+        from datetime import UTC, date, datetime, timedelta
+
+        ticket_service = TicketService(test_db)
+        ticket_service.update_ticket(
+            backlog_tickets["high"], created_at=datetime.now(UTC) - timedelta(days=10)
+        )
+        r = await _get(
+            client,
+            "/backlog",
+            params={"created_before": (date.today() - timedelta(days=5)).isoformat()},
+        )
+        assert r.status_code == 200
+        assert "Critical outage" in r.text
+        assert "Add tooltip" not in r.text
+        assert "Investigate flaky test" not in r.text
+
+    async def test_backlog_date_filters_empty_means_no_filter(
+        self, client, test_db, backlog_tickets
+    ):
+        """Empty-string date params (always-submitted form) must not 422 or filter."""
+        from datetime import UTC, datetime, timedelta
+
+        ticket_service = TicketService(test_db)
+        ticket_service.update_ticket(
+            backlog_tickets["high"], created_at=datetime.now(UTC) - timedelta(days=10)
+        )
+        r = await _get(client, "/backlog", params={"created_after": "", "created_before": ""})
+        assert r.status_code == 200
+        assert "Critical outage" in r.text
+
+    async def test_backlog_invalid_date_returns_422(self, client, backlog_tickets):
+        r = await _get(client, "/backlog", params={"created_after": "not-a-date"})
+        assert r.status_code == 422
+
+    async def test_backlog_date_filters_combined_with_other_filters(
+        self, client, test_db, backlog_tickets
+    ):
+        """Date bounds combine with other filters (AND logic)."""
+        from datetime import UTC, date, datetime, timedelta
+
+        ticket_service = TicketService(test_db)
+        ticket_service.update_ticket(
+            backlog_tickets["high"], created_at=datetime.now(UTC) - timedelta(days=10)
+        )
+        r = await _get(
+            client,
+            "/backlog",
+            params={
+                "created_after": (date.today() - timedelta(days=5)).isoformat(),
+                "type": TicketType.STORY.value,
+            },
+        )
+        assert r.status_code == 200
+        assert "Add tooltip" in r.text
+        assert "Investigate flaky test" not in r.text
+        assert "Critical outage" not in r.text
+
+    async def test_backlog_htmx_date_filter_returns_rows(self, client, test_db, backlog_tickets):
+        from datetime import UTC, date, datetime, timedelta
+
+        ticket_service = TicketService(test_db)
+        ticket_service.update_ticket(
+            backlog_tickets["high"], created_at=datetime.now(UTC) - timedelta(days=10)
+        )
+        r = await _get(
+            client,
+            "/backlog",
+            headers={"HX-Request": "true"},
+            params={"created_after": (date.today() - timedelta(days=5)).isoformat()},
+        )
+        assert r.status_code == 200
+        assert "<html" not in r.text.lower()
+        assert "Critical outage" not in r.text
+
 
 class TestNewTicketForm:
     async def test_new_ticket_modal_htmx(self, client_with_seeds):
