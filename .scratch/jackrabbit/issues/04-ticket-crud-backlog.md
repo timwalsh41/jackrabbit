@@ -4,23 +4,45 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] API: `GET /api/v1/tickets` with query filters: `project_id`, `type`, `status`, `sprint_id`, `q` (title search), `sort`, `order`; returns paginated list
 - [x] API: `POST /api/v1/tickets` — create with `project_id`, `type`, `title`; auto-assigns `number = MAX(number)+1` for that project; defaults `status=Open`
 - [x] API: `GET /api/v1/tickets/{id}` — full ticket with links & transitions
 - [x] API: `PATCH /api/v1/tickets/{id}` — update fields (title, description, priority, story_points, type)
 - [x] API: `DELETE /api/v1/tickets/{id}` — delete ticket
-- [ ] Web: `GET /backlog` — main view, filterable table (project, type, status, priority, sprint)
+- [x] Web: `GET /backlog` — main view, filterable table (project, type, status, priority, sprint)
   - [x] HTMX filter controls: `hx-get="/backlog"` with query params, `hx-target="#tickets-table-body"` (id differs from the ticket text but is consistent across the template)
   - Columns: ID (link), Title, Type, Status, Priority, Points, Sprint, Actions
   - "New Ticket" button → `hx-get="/tickets/new"` → modal/form partial
 - [x] Web: `GET /tickets/new` — create ticket form (project dropdown, type select, title, description, priority, points); `hx-post="/api/v1/tickets"` → closes modal + refreshes table
-- [ ] Web: `GET /tickets/{id}/edit` — edit form; `hx-patch="/api/v1/tickets/{id}"` → returns updated row
+- [x] Web: `GET /tickets/{id}/edit` — edit form; `hx-patch="/api/v1/tickets/{id}"` → returns updated row
 - [x] Ticket ID display format: `{prefix}-{number:03d}` (e.g., `MSC-005`, `UNS-001`)
 - [x] UNS project pre-selected in dropdown for new tickets
 
 ## Answer
+
+**Implementation summary (this pass — closing the remaining web gaps):**
+
+- **`GET /backlog` filters fixed and completed (criterion 6):**
+  - Root cause of broken filters: the filter form always submits every select, so unset filters arrive as empty-string query params, which typed `Optional[int]`/enum params 422 on (verified with a FastAPI probe). Routes (`/backlog`, `/projects/{id}/tickets`) now declare plain-string params and parse via `_parse_optional_int` / `_parse_optional_enum` (422 with friendly detail on garbage).
+  - **Priority filter** was a no-op: added `priority` to `TicketService.list_tickets`, the `/backlog` + `/projects/{id}/tickets` routes, `GET /api/v1/tickets`, `current_filters`, and the sort-header `hx-vals` payloads in `backlog.html`.
+  - **"No Sprint" (`sprint_id=0`) sentinel** never filtered because `if sprint_id:` is falsy for 0: `list_tickets` now treats `sprint_id=0` as `sprint_id IS NULL`, `None` as no filter, other values as exact match; sort/pagination `hx-vals` preserve an explicit `0`.
+  - **HTMX partial**: new `templates/backlog_rows.html` renders only the table-body rows; `/backlog` (and `/projects/{id}/tickets`) return it for `HX-Request` requests instead of the full page, matching `hx-target="#tickets-table-body" hx-swap="innerHTML"`.
+  - Shared context builder `_build_backlog_context` de-duplicates the two backlog routes.
+- **`GET /tickets/{id}/edit` + PATCH flow fixed (criterion 8):** the edit form previously used `hx-post` against the PATCH-only API endpoint (live 405).
+  - Full-page form now uses `hx-patch="/api/v1/tickets/{id}"` (`hx-swap="none"`, redirects to `/backlog` on success via the after-request handler).
+  - New `templates/ticket_edit_modal.html`: HTMX requests to `/tickets/{id}/edit` get a modal form with `hx-patch`, `hx-target="#ticket-row-{id}"`, `hx-swap="outerHTML"`, inline error display on failure.
+  - `PATCH /api/v1/tickets/{id}` is now HTMX-aware: with `HX-Target: ticket-row-*` it returns the rendered updated `ticket_row.html` partial (text/html); any other HTMX request sets `HX-Redirect: /backlog`; plain JSON requests are unchanged.
+- **Decision:** content-negotiation lives in the API PATCH endpoint (by `HX-Request`/`HX-Target` headers) rather than duplicating PATCH on the web router — a same-path/method duplicate would silently shadow the API route depending on router registration order.
+
+**Tests added:** `tests/integration/test_backlog_web.py` (19 tests: backlog page/filters incl. priority + no-sprint + empty-form submit, HTMX rows-only partial, new-ticket modal + UNS preselect, edit full page + modal `hx-patch`, PATCH→row HTML / HX-Redirect / plain JSON, edit 404) and 6 unit tests in `tests/unit/test_ticket_service.py` (priority filter, sprint_id=0 sentinel, sprint filter excludes NULL, no-filter cases).
+
+**Verification:** `uv run pytest -x tests/unit tests/integration` → 331 passed; `ruff check` clean; `mypy` unchanged from baseline (31 pre-existing errors, 0 new).
+
+---
+
+## Prior audit answer (kept for reference)
 
 Verified against branch `jackrabbit-integration` by code inspection, targeted unit/integration tests, and a live TestClient smoke exercise of every endpoint.
 

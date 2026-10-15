@@ -1,6 +1,7 @@
 """FastAPI API routes for Jackrabbit."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
@@ -441,8 +442,9 @@ def get_ticket_by_full_id(
 def update_ticket(
     ticket_id: int,
     ticket_in: TicketUpdate,
+    request: Request,
     service: TicketService = Depends(get_ticket_service),
-) -> Ticket:
+) -> Ticket | Response:
     ticket = service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -454,6 +456,25 @@ def update_ticket(
 
     if update_data:
         ticket = service.update_ticket(ticket, **update_data)
+
+    # HTMX-aware PATCH: the edit form hx-patches this endpoint directly.
+    if request.headers.get("HX-Request"):
+        from jackrabbit.services import SprintService
+        from jackrabbit.web import templates
+
+        target = request.headers.get("HX-Target") or ""
+        if target.startswith("ticket-row-"):
+            # Modal edit: swap the updated ticket row back in place.
+            sprints = SprintService(service.session).list_sprints()
+            return templates.TemplateResponse(
+                request,
+                "ticket_row.html",
+                {"ticket": ticket, "sprints": sprints},
+            )
+        # Full-page edit form: send the user back to the backlog.
+        response = HTMLResponse("")
+        response.headers["HX-Redirect"] = "/backlog"
+        return response
 
     return ticket
 

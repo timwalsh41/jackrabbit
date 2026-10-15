@@ -1,5 +1,6 @@
 """Web/UI routes for Jackrabbit (HTMX + Jinja2)."""
 
+from enum import StrEnum
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -9,7 +10,7 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from jackrabbit.database import get_session
-from jackrabbit.models import LinkType, Priority, TicketStatus, TicketType
+from jackrabbit.models import LinkType, Priority, Project, TicketStatus, TicketType
 from jackrabbit.schemas import ProjectCreate, ProjectUpdate
 from jackrabbit.services import LinkService, ProjectService, SprintService, TicketService
 
@@ -39,70 +40,6 @@ def get_link_service(session: Session = Depends(get_session)) -> LinkService:
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "index.html", {})
-
-
-@router.get("/backlog", response_class=HTMLResponse)
-async def backlog(
-    request: Request,
-    project_id: int | None = Query(None),
-    status: TicketStatus | None = Query(None),
-    type: TicketType | None = Query(None),
-    sprint_id: int | None = Query(None),
-    q: str | None = Query(None),
-    sort: str = Query("number"),
-    order: str = Query("desc"),
-    page: int = Query(1),
-    page_size: int = Query(50),
-    ticket_service: TicketService = Depends(get_ticket_service),
-    project_service: ProjectService = Depends(get_project_service),
-    sprint_service: SprintService = Depends(get_sprint_service),
-) -> HTMLResponse:
-    result = ticket_service.list_tickets(
-        project_id=project_id,
-        status=status,
-        type=type,
-        sprint_id=sprint_id,
-        q=q,
-        sort=sort,
-        order=order,
-        page=page,
-        page_size=page_size,
-    )
-    tickets, total = result
-    total_pages = (total + page_size - 1) // page_size
-
-    projects = project_service.list_projects()
-    sprints = sprint_service.list_sprints()
-
-    # Find UNS project for default selection
-    uns_project = project_service.get_project_by_prefix("UNS")
-
-    return templates.TemplateResponse(
-        request,
-        "backlog.html",
-        {
-            "tickets": tickets,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-            "projects": projects,
-            "sprints": sprints,
-            "uns_project_id": uns_project.id if uns_project else None,
-            "current_filters": {
-                "project_id": project_id,
-                "status": status,
-                "type": type,
-                "sprint_id": sprint_id,
-                "q": q,
-                "sort": sort,
-                "order": order,
-            },
-            "TicketStatus": TicketStatus,
-            "TicketType": TicketType,
-            "Priority": Priority,
-        },
-    )
 
 
 @router.get("/tickets/new", response_class=HTMLResponse)
@@ -156,6 +93,20 @@ async def ticket_edit(
 
     projects = project_service.list_projects()
     sprints = sprint_service.list_sprints()
+
+    # HTMX request (Edit button in a ticket row): return the modal partial
+    # whose form hx-patches the API and swaps the updated row back in place.
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            request,
+            "ticket_edit_modal.html",
+            {
+                "ticket": ticket,
+                "action": f"/api/v1/tickets/{ticket_id}",
+                "TicketType": TicketType,
+                "Priority": Priority,
+            },
+        )
 
     return templates.TemplateResponse(
         request,
@@ -355,6 +306,138 @@ def _is_inline_row_request(request: Request) -> bool:
     return target.startswith("project-row-")
 
 
+def _parse_optional_int(value: str | None, field: str = "value") -> int | None:
+    """Parse an optional integer query param; empty string means "not set".
+
+    The backlog filter form always submits every select, so unset filters
+    arrive as empty strings. Typed Optional[int] params would 422 on "",
+    so filters are declared as plain strings and parsed here.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"{field} must be an integer") from e
+
+
+def _parse_optional_enum[E: StrEnum](
+    enum_cls: type[E], value: str | None, field: str = "value"
+) -> E | None:
+    """Parse an optional str-Enum query param; empty string means "not set"."""
+    if value is None or value == "":
+        return None
+    try:
+        return enum_cls(value)
+    except ValueError as e:
+        valid = ", ".join(m.value for m in enum_cls)
+        raise HTTPException(status_code=422, detail=f"{field} must be one of: {valid}") from e
+
+
+def _build_backlog_context(
+    ticket_service: TicketService,
+    project_service: ProjectService,
+    sprint_service: SprintService,
+    project_id: int | None,
+    status: TicketStatus | None,
+    type: TicketType | None,
+    priority: Priority | None,
+    sprint_id: int | None,
+    q: str | None,
+    sort: str,
+    order: str,
+    page: int,
+    page_size: int,
+    project: Project | None = None,
+) -> dict:
+    """Shared context builder for /backlog and /projects/{id}/tickets."""
+    tickets, total = ticket_service.list_tickets(
+        project_id=project_id,
+        status=status,
+        type=type,
+        priority=priority,
+        sprint_id=sprint_id,
+        q=q,
+        sort=sort,
+        order=order,
+        page=page,
+        page_size=page_size,
+    )
+    total_pages = (total + page_size - 1) // page_size
+
+    projects = project_service.list_projects()
+    sprints = sprint_service.list_sprints()
+
+    # Find UNS project for default selection
+    uns_project = project_service.get_project_by_prefix("UNS")
+
+    return {
+        "tickets": tickets,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "projects": projects,
+        "sprints": sprints,
+        "uns_project_id": uns_project.id if uns_project else None,
+        "current_filters": {
+            "project_id": project_id,
+            "status": status,
+            "type": type,
+            "priority": priority,
+            "sprint_id": sprint_id,
+            "q": q,
+            "sort": sort,
+            "order": order,
+        },
+        "TicketStatus": TicketStatus,
+        "TicketType": TicketType,
+        "Priority": Priority,
+        "project": project,
+    }
+
+
+@router.get("/backlog", response_class=HTMLResponse)
+async def backlog(
+    request: Request,
+    project_id: str = Query(""),
+    status: str = Query(""),
+    type: str = Query(""),
+    priority: str = Query(""),
+    sprint_id: str = Query(""),
+    q: str = Query(""),
+    sort: str = Query("number"),
+    order: str = Query("desc"),
+    page: int = Query(1),
+    page_size: int = Query(50),
+    ticket_service: TicketService = Depends(get_ticket_service),
+    project_service: ProjectService = Depends(get_project_service),
+    sprint_service: SprintService = Depends(get_sprint_service),
+) -> HTMLResponse:
+    context = _build_backlog_context(
+        ticket_service,
+        project_service,
+        sprint_service,
+        project_id=_parse_optional_int(project_id, "project_id"),
+        status=_parse_optional_enum(TicketStatus, status, "status"),
+        type=_parse_optional_enum(TicketType, type, "type"),
+        priority=_parse_optional_enum(Priority, priority, "priority"),
+        # sprint_id=0 is the "No Sprint" sentinel; ""/absent means no filter
+        sprint_id=_parse_optional_int(sprint_id, "sprint_id"),
+        q=q or None,
+        sort=sort,
+        order=order,
+        page=page,
+        page_size=page_size,
+    )
+
+    # HTMX filter/sort/pagination requests swap only the table body rows
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(request, "backlog_rows.html", context)
+
+    return templates.TemplateResponse(request, "backlog.html", context)
+
+
 @router.get("/projects", response_class=HTMLResponse)
 async def project_list(
     request: Request,
@@ -453,10 +536,11 @@ async def project_row_partial(
 async def project_tickets(
     request: Request,
     project_id: int,
-    status: TicketStatus | None = Query(None),
-    type: TicketType | None = Query(None),
-    sprint_id: int | None = Query(None),
-    q: str | None = Query(None),
+    status: str = Query(""),
+    type: str = Query(""),
+    priority: str = Query(""),
+    sprint_id: str = Query(""),
+    q: str = Query(""),
     sort: str = Query("number"),
     order: str = Query("desc"),
     page: int = Query(1),
@@ -469,53 +553,28 @@ async def project_tickets(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    result = ticket_service.list_tickets(
+    context = _build_backlog_context(
+        ticket_service,
+        project_service,
+        sprint_service,
         project_id=project_id,
-        status=status,
-        type=type,
-        sprint_id=sprint_id,
-        q=q,
+        status=_parse_optional_enum(TicketStatus, status, "status"),
+        type=_parse_optional_enum(TicketType, type, "type"),
+        priority=_parse_optional_enum(Priority, priority, "priority"),
+        sprint_id=_parse_optional_int(sprint_id, "sprint_id"),
+        q=q or None,
         sort=sort,
         order=order,
         page=page,
         page_size=page_size,
+        project=project,
     )
-    tickets, total = result
-    total_pages = (total + page_size - 1) // page_size
 
-    projects = project_service.list_projects()
-    sprints = sprint_service.list_sprints()
+    # HTMX filter/sort/pagination requests swap only the table body rows
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(request, "backlog_rows.html", context)
 
-    # Find UNS project for default selection
-    uns_project = project_service.get_project_by_prefix("UNS")
-
-    return templates.TemplateResponse(
-        request,
-        "backlog.html",
-        {
-            "tickets": tickets,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-            "projects": projects,
-            "sprints": sprints,
-            "uns_project_id": uns_project.id if uns_project else None,
-            "current_filters": {
-                "project_id": project_id,
-                "status": status,
-                "type": type,
-                "sprint_id": sprint_id,
-                "q": q,
-                "sort": sort,
-                "order": order,
-            },
-            "TicketStatus": TicketStatus,
-            "TicketType": TicketType,
-            "Priority": Priority,
-            "project": project,
-        },
-    )
+    return templates.TemplateResponse(request, "backlog.html", context)
 
 
 @router.get("/projects/{project_id}/edit", response_class=HTMLResponse)
