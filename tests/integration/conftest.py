@@ -1,28 +1,20 @@
-"""Integration test fixtures - imports from tests.conftest and adds seeded database."""
+"""Integration test fixtures - client wired to a seeded database."""
 
-import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
-# Ensure the repo containing these tests is on sys.path (works from any checkout/
-# worktree location, not just a hardcoded absolute path).
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from tests.conftest import (
-    Generator,
-    Path,
-    ProjectService,
-    Session,
-    Settings,
-    TestClient,
-    create_app,
-    get_settings,
-    pytest,
-)
+import httpx
+import pytest
+from jackrabbit.config import Settings, get_settings
+from jackrabbit.main import create_app
+from jackrabbit.models import Project
+from jackrabbit.services import ProjectService
+from sqlmodel import Session
 
 
 @pytest.fixture
-def client_with_seeds(test_db: Session) -> Generator[TestClient, None, None]:
-    """Create a test client with seeded database (UNS project + sample projects)."""
-    # Seed the database
+async def client_with_seeds(test_db: Session) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """httpx.AsyncClient against the app with a seeded DB (UNS + 2 test projects)."""
     project_service = ProjectService(test_db)
 
     # System project (UNS) - ID will be 1
@@ -34,7 +26,7 @@ def client_with_seeds(test_db: Session) -> Generator[TestClient, None, None]:
         is_system=True,
     )
 
-    # Regular projects
+    # Two regular test projects (WEB=2, API=3)
     project_service.create_project(
         prefix="WEB",
         name="Web Application",
@@ -49,13 +41,6 @@ def client_with_seeds(test_db: Session) -> Generator[TestClient, None, None]:
         color="#10b981",
     )
 
-    project_service.create_project(
-        prefix="MOB",
-        name="Mobile App",
-        description="Mobile application",
-        color="#f59e0b",
-    )
-
     def get_test_session():
         yield test_db
 
@@ -64,6 +49,7 @@ def client_with_seeds(test_db: Session) -> Generator[TestClient, None, None]:
         environment="test",
         database_url="sqlite://",
         data_dir=Path("./data"),
+        port=0,
         log_level="DEBUG",
     )
 
@@ -71,7 +57,16 @@ def client_with_seeds(test_db: Session) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides[get_session] = get_test_session
 
-    with TestClient(app) as test_client:
-        yield test_client
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as async_client:
+        yield async_client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def seeded_projects(test_db: Session) -> list[Project]:
+    """Expose the seeded projects as model objects (UNS, WEB, API)."""
+    from sqlmodel import select
+
+    return list(test_db.exec(select(Project)).all())

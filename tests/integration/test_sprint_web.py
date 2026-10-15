@@ -1,20 +1,20 @@
 """Integration tests for the Sprint web pages (list, new form, edit form)."""
 
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 
-def _create_sprint(client: TestClient, **overrides) -> dict:
+async def _create_sprint(client: AsyncClient, **overrides) -> dict:
     payload = {"number": 2601, "name": "Sprint 1", **overrides}
-    response = client.post("/api/v1/sprints", json=payload)
+    response = await client.post("/api/v1/sprints", json=payload)
     assert response.status_code == 201, response.text
     return response.json()
 
 
-def test_sprint_list_page_shows_planned_and_actual_dates(
-    client_with_seeds: TestClient,
+async def test_sprint_list_page_shows_planned_and_actual_dates(
+    client_with_seeds: AsyncClient,
 ) -> None:
     """GET /sprints table shows planned and actual date ranges, ticket count and status."""
-    _create_sprint(
+    await _create_sprint(
         client_with_seeds,
         number=2601,
         name="Running Sprint",
@@ -22,7 +22,7 @@ def test_sprint_list_page_shows_planned_and_actual_dates(
         actual_start="2026-01-06T00:00:00",
     )
 
-    response = client_with_seeds.get("/sprints")
+    response = await client_with_seeds.get("/sprints")
     assert response.status_code == 200
     content = response.text
     assert "2601" in content
@@ -33,18 +33,22 @@ def test_sprint_list_page_shows_planned_and_actual_dates(
     assert 'href="/sprints/1/edit"' in content
 
 
-def test_new_sprint_form_uses_hx_post(client_with_seeds: TestClient) -> None:
+async def test_new_sprint_form_uses_hx_post(
+    client_with_seeds: AsyncClient,
+) -> None:
     """GET /sprints/new form posts to the create endpoint and auto-fills the number."""
-    response = client_with_seeds.get("/sprints/new")
+    response = await client_with_seeds.get("/sprints/new")
     assert response.status_code == 200
     content = response.text
     assert 'hx-post="/api/v1/sprints"' in content
     assert 'value="2601"' in content  # next number auto-filled
 
 
-def test_edit_sprint_form_uses_hx_patch(client_with_seeds: TestClient) -> None:
+async def test_edit_sprint_form_uses_hx_patch(
+    client_with_seeds: AsyncClient,
+) -> None:
     """GET /sprints/{id}/edit form PATCHes to the update endpoint (not POST -> 405)."""
-    sprint = _create_sprint(
+    sprint = await _create_sprint(
         client_with_seeds,
         number=2601,
         name="Editable",
@@ -52,7 +56,7 @@ def test_edit_sprint_form_uses_hx_patch(client_with_seeds: TestClient) -> None:
         planned_duration_days=14,
     )
 
-    response = client_with_seeds.get(f"/sprints/{sprint['id']}/edit")
+    response = await client_with_seeds.get(f"/sprints/{sprint['id']}/edit")
     assert response.status_code == 200
     content = response.text
     assert f'hx-patch="/api/v1/sprints/{sprint["id"]}"' in content
@@ -65,6 +69,8 @@ def test_edit_sprint_form_uses_hx_patch(client_with_seeds: TestClient) -> None:
     assert 'name="actual_finish"' in content
 
 
-def test_edit_sprint_form_404_for_missing(client_with_seeds: TestClient) -> None:
-    response = client_with_seeds.get("/sprints/999/edit")
+async def test_edit_sprint_form_404_for_missing(
+    client_with_seeds: AsyncClient,
+) -> None:
+    response = await client_with_seeds.get("/sprints/999/edit")
     assert response.status_code == 404

@@ -2,12 +2,14 @@
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 
-def test_create_sprint(client_with_seeds: TestClient) -> None:
+async def test_create_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test creating a sprint via API."""
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints",
         json={"number": 2601, "name": "Sprint 1", "description": "First sprint"},
     )
@@ -19,42 +21,50 @@ def test_create_sprint(client_with_seeds: TestClient) -> None:
     assert data["id"] == 1
 
 
-def test_list_sprints_ordered_by_number_desc(client_with_seeds: TestClient) -> None:
+async def test_list_sprints_ordered_by_number_desc(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test listing sprints via API - ordered by number, descending."""
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2602, "name": "Sprint 2"})
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2605, "name": "Sprint 5"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2602, "name": "Sprint 2"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2605, "name": "Sprint 5"})
 
-    response = client_with_seeds.get("/api/v1/sprints")
+    response = await client_with_seeds.get("/api/v1/sprints")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 3
     assert [s["number"] for s in data] == [2605, 2602, 2601]
 
 
-def test_create_sprint_auto_assigns_number(client_with_seeds: TestClient) -> None:
+async def test_create_sprint_auto_assigns_number(
+    client_with_seeds: AsyncClient,
+) -> None:
     """POST without a number auto-assigns MAX(number)+1 starting at 2601."""
-    response = client_with_seeds.post("/api/v1/sprints", json={"name": "First"})
+    response = await client_with_seeds.post("/api/v1/sprints", json={"name": "First"})
     assert response.status_code == 201
     assert response.json()["number"] == 2601
 
-    response = client_with_seeds.post("/api/v1/sprints", json={"name": "Second"})
+    response = await client_with_seeds.post("/api/v1/sprints", json={"name": "Second"})
     assert response.status_code == 201
     assert response.json()["number"] == 2602
 
 
-def test_create_sprint_auto_assign_continues_past_52(client_with_seeds: TestClient) -> None:
+async def test_create_sprint_auto_assign_continues_past_52(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Numbering continues MAX+1 past 2652 (52 sprints in)."""
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "S1"})
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2652, "name": "S52"})
-    response = client_with_seeds.post("/api/v1/sprints", json={"name": "S53"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "S1"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2652, "name": "S52"})
+    response = await client_with_seeds.post("/api/v1/sprints", json={"name": "S53"})
     assert response.status_code == 201
     assert response.json()["number"] == 2653
 
 
-def test_create_sprint_with_all_date_fields(client_with_seeds: TestClient) -> None:
+async def test_create_sprint_with_all_date_fields(
+    client_with_seeds: AsyncClient,
+) -> None:
     """planned_duration_days and actual_* fields are settable at create."""
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
             "number": 2601,
@@ -72,9 +82,11 @@ def test_create_sprint_with_all_date_fields(client_with_seeds: TestClient) -> No
     assert data["actual_finish"] == "2026-01-20T00:00:00"
 
 
-def test_create_sprint_accepts_empty_string_form_fields(client_with_seeds: TestClient) -> None:
+async def test_create_sprint_accepts_empty_string_form_fields(
+    client_with_seeds: AsyncClient,
+) -> None:
     """HTML forms submit "" for untouched optional fields; these mean 'not set'."""
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
             "number": "",
@@ -95,17 +107,21 @@ def test_create_sprint_accepts_empty_string_form_fields(client_with_seeds: TestC
     assert data["actual_finish"] is None
 
 
-def test_create_sprint_duplicate_number_returns_409(client_with_seeds: TestClient) -> None:
+async def test_create_sprint_duplicate_number_returns_409(
+    client_with_seeds: AsyncClient,
+) -> None:
     """User override colliding with an existing number is a conflict, not a 500."""
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "S1"})
-    response = client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Dup"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "S1"})
+    response = await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Dup"})
     assert response.status_code == 409
 
 
-def test_patch_sprint_sets_actual_dates_and_duration(client_with_seeds: TestClient) -> None:
+async def test_patch_sprint_sets_actual_dates_and_duration(
+    client_with_seeds: AsyncClient,
+) -> None:
     """PATCH can set planned_duration_days, actual_start and actual_finish."""
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
-    response = client_with_seeds.patch(
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
+    response = await client_with_seeds.patch(
         "/api/v1/sprints/1",
         json={
             "planned_duration_days": 10,
@@ -120,11 +136,13 @@ def test_patch_sprint_sets_actual_dates_and_duration(client_with_seeds: TestClie
     assert data["actual_finish"] == "2026-02-12T00:00:00"
 
 
-def test_get_sprint(client_with_seeds: TestClient) -> None:
+async def test_get_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test getting a single sprint with tickets."""
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
 
-    response = client_with_seeds.get("/api/v1/sprints/1")
+    response = await client_with_seeds.get("/api/v1/sprints/1")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == 1
@@ -135,34 +153,38 @@ def test_get_sprint(client_with_seeds: TestClient) -> None:
     assert data["status"] == "Planned"
 
 
-def test_get_sprint_with_tickets(client_with_seeds: TestClient) -> None:
+async def test_get_sprint_with_tickets(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test getting a sprint with tickets."""
     # Create tickets assigned to sprint (WEB project is ID 2)
-    sprint_response = client_with_seeds.post(
+    sprint_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint_id = sprint_response.json()["id"]
 
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 2, "title": "Ticket 1", "sprint_id": sprint_id}
     )
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 2, "title": "Ticket 2", "sprint_id": sprint_id}
     )
 
-    response = client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == sprint_id
     assert len(data["tickets"]) == 2
 
 
-def test_update_sprint(client_with_seeds: TestClient) -> None:
+async def test_update_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test updating a sprint via API."""
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1", "description": "Original"}
     )
-    response = client_with_seeds.patch(
+    response = await client_with_seeds.patch(
         "/api/v1/sprints/1",
         json={"name": "Updated Sprint 1", "description": "Updated description"},
     )
@@ -173,10 +195,12 @@ def test_update_sprint(client_with_seeds: TestClient) -> None:
     assert data["number"] == 2601  # Number unchanged
 
 
-def test_update_sprint_partial(client_with_seeds: TestClient) -> None:
+async def test_update_sprint_partial(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test partially updating a sprint via API."""
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2602, "name": "Sprint 2"})
-    response = client_with_seeds.patch(
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2602, "name": "Sprint 2"})
+    response = await client_with_seeds.patch(
         "/api/v1/sprints/1",
         json={"name": "Sprint 2 Renamed"},
     )
@@ -185,58 +209,70 @@ def test_update_sprint_partial(client_with_seeds: TestClient) -> None:
     assert data["name"] == "Sprint 2 Renamed"
 
 
-def test_delete_sprint(client_with_seeds: TestClient) -> None:
+async def test_delete_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test deleting a sprint via API."""
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2603, "name": "Sprint 3"})
-    response = client_with_seeds.delete("/api/v1/sprints/1")
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2603, "name": "Sprint 3"})
+    response = await client_with_seeds.delete("/api/v1/sprints/1")
     assert response.status_code == 204
     # Verify it's gone
-    response = client_with_seeds.get("/api/v1/sprints/1")
+    response = await client_with_seeds.get("/api/v1/sprints/1")
     assert response.status_code == 404
 
 
-def test_get_nonexistent_sprint(client_with_seeds: TestClient) -> None:
+async def test_get_nonexistent_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test getting a non-existent sprint returns 404."""
-    response = client_with_seeds.get("/api/v1/sprints/999")
+    response = await client_with_seeds.get("/api/v1/sprints/999")
     assert response.status_code == 404
 
 
-def test_update_nonexistent_sprint(client_with_seeds: TestClient) -> None:
+async def test_update_nonexistent_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test updating a non-existent sprint returns 404."""
-    response = client_with_seeds.patch("/api/v1/sprints/999", json={"name": "New Name"})
+    response = await client_with_seeds.patch("/api/v1/sprints/999", json={"name": "New Name"})
     assert response.status_code == 404
 
 
-def test_delete_nonexistent_sprint(client_with_seeds: TestClient) -> None:
+async def test_delete_nonexistent_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test deleting a non-existent sprint returns 404."""
-    response = client_with_seeds.delete("/api/v1/sprints/999")
+    response = await client_with_seeds.delete("/api/v1/sprints/999")
     assert response.status_code == 404
 
 
-def test_get_next_sprint_number(client_with_seeds: TestClient) -> None:
+async def test_get_next_sprint_number(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test getting next sprint number."""
     # No sprints yet - should return 2601
-    response = client_with_seeds.get("/api/v1/sprints/next-number")
+    response = await client_with_seeds.get("/api/v1/sprints/next-number")
     assert response.status_code == 200
     data = response.json()
     assert data["number"] == 2601
 
     # Create sprint 2601
-    client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
+    await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
 
     # Should return 2602
-    response = client_with_seeds.get("/api/v1/sprints/next-number")
+    response = await client_with_seeds.get("/api/v1/sprints/next-number")
     assert response.status_code == 200
     data = response.json()
     assert data["number"] == 2602
 
 
-def test_sprint_status_derivation_planned(client_with_seeds: TestClient) -> None:
+async def test_sprint_status_derivation_planned(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test sprint status derivation - Planned (no actual_start, even with planned dates)."""
     future_start = (datetime.now(UTC) + timedelta(days=10)).isoformat()
     future_end = (datetime.now(UTC) + timedelta(days=20)).isoformat()
 
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
             "number": 2601,
@@ -247,17 +283,19 @@ def test_sprint_status_derivation_planned(client_with_seeds: TestClient) -> None
     )
     sprint_id = response.json()["id"]
 
-    response = client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "Planned"
 
 
-def test_sprint_status_derivation_active(client_with_seeds: TestClient) -> None:
+async def test_sprint_status_derivation_active(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test sprint status derivation - Active (actual_start set, no actual_finish)."""
     past_start = (datetime.now(UTC) - timedelta(days=5)).isoformat()
 
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
             "number": 2601,
@@ -267,18 +305,20 @@ def test_sprint_status_derivation_active(client_with_seeds: TestClient) -> None:
     )
     sprint_id = response.json()["id"]
 
-    response = client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "Active"
 
 
-def test_sprint_status_derivation_complete_by_actual_finish(client_with_seeds: TestClient) -> None:
+async def test_sprint_status_derivation_complete_by_actual_finish(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test sprint status derivation - Complete (actual_finish set)."""
     past_start = (datetime.now(UTC) - timedelta(days=20)).isoformat()
     past_finish = (datetime.now(UTC) - timedelta(days=10)).isoformat()
 
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
             "number": 2601,
@@ -289,18 +329,20 @@ def test_sprint_status_derivation_complete_by_actual_finish(client_with_seeds: T
     )
     sprint_id = response.json()["id"]
 
-    response = client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "Complete"
 
 
-def test_sprint_status_tickets_do_not_drive(client_with_seeds: TestClient) -> None:
+async def test_sprint_status_tickets_do_not_drive(
+    client_with_seeds: AsyncClient,
+) -> None:
     """All tickets Complete does NOT make the sprint Complete without actual_finish."""
     future_start = (datetime.now(UTC) + timedelta(days=10)).isoformat()
     future_end = (datetime.now(UTC) + timedelta(days=20)).isoformat()
 
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
             "number": 2601,
@@ -312,56 +354,62 @@ def test_sprint_status_tickets_do_not_drive(client_with_seeds: TestClient) -> No
     sprint_id = response.json()["id"]
 
     # Create tickets with COMPLETE status (WEB project is ID 2)
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/tickets",
         json={"project_id": 2, "title": "Ticket 1", "sprint_id": sprint_id, "status": "Complete"},
     )
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/tickets",
         json={"project_id": 2, "title": "Ticket 2", "sprint_id": sprint_id, "status": "Complete"},
     )
 
-    response = client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 200
     data = response.json()
     # Even though all tickets are complete, no actual_finish -> not Complete
     assert data["status"] == "Planned"
 
 
-def test_sprint_status_derivation_complete_via_patch(client_with_seeds: TestClient) -> None:
+async def test_sprint_status_derivation_complete_via_patch(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Finishing a sprint: PATCH actual_finish flips status Active -> Complete."""
     past_start = (datetime.now(UTC) - timedelta(days=5)).isoformat()
 
-    response = client_with_seeds.post(
+    response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1", "actual_start": past_start}
     )
     sprint_id = response.json()["id"]
-    assert client_with_seeds.get(f"/api/v1/sprints/{sprint_id}").json()["status"] == "Active"
+    status_response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    assert status_response.json()["status"] == "Active"
 
     past_finish = (datetime.now(UTC) - timedelta(days=1)).isoformat()
-    response = client_with_seeds.patch(
+    response = await client_with_seeds.patch(
         f"/api/v1/sprints/{sprint_id}", json={"actual_finish": past_finish}
     )
     assert response.status_code == 200
-    assert client_with_seeds.get(f"/api/v1/sprints/{sprint_id}").json()["status"] == "Complete"
+    status_response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    assert status_response.json()["status"] == "Complete"
 
 
-def test_assign_ticket_to_sprint(client_with_seeds: TestClient) -> None:
+async def test_assign_ticket_to_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test assigning a ticket to a sprint via API."""
     # Create sprint
-    sprint_response = client_with_seeds.post(
+    sprint_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint_id = sprint_response.json()["id"]
 
     # Create ticket without sprint (UNS project is ID 1)
-    ticket_response = client_with_seeds.post(
+    ticket_response = await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"}
     )
     ticket_id = ticket_response.json()["id"]
 
     # Assign ticket to sprint
-    response = client_with_seeds.post(f"/api/v1/sprints/{sprint_id}/tickets/{ticket_id}")
+    response = await client_with_seeds.post(f"/api/v1/sprints/{sprint_id}/tickets/{ticket_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["message"] == "Ticket assigned to sprint"
@@ -369,28 +417,30 @@ def test_assign_ticket_to_sprint(client_with_seeds: TestClient) -> None:
     assert data["sprint_id"] == sprint_id
 
     # Verify ticket is now in sprint
-    response = client_with_seeds.get(f"/api/v1/tickets/{ticket_id}")
+    response = await client_with_seeds.get(f"/api/v1/tickets/{ticket_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["sprint_id"] == sprint_id
 
 
-def test_unassign_ticket_from_sprint(client_with_seeds: TestClient) -> None:
+async def test_unassign_ticket_from_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test removing a ticket from a sprint via API."""
     # Create sprint
-    sprint_response = client_with_seeds.post(
+    sprint_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint_id = sprint_response.json()["id"]
 
     # Create ticket assigned to sprint (UNS project is ID 1)
-    ticket_response = client_with_seeds.post(
+    ticket_response = await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket", "sprint_id": sprint_id}
     )
     ticket_id = ticket_response.json()["id"]
 
     # Unassign ticket from sprint
-    response = client_with_seeds.delete(f"/api/v1/sprints/{sprint_id}/tickets/{ticket_id}")
+    response = await client_with_seeds.delete(f"/api/v1/sprints/{sprint_id}/tickets/{ticket_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["message"] == "Ticket removed from sprint"
@@ -398,107 +448,117 @@ def test_unassign_ticket_from_sprint(client_with_seeds: TestClient) -> None:
     assert data["sprint_id"] == sprint_id
 
     # Verify ticket is no longer in sprint
-    response = client_with_seeds.get(f"/api/v1/tickets/{ticket_id}")
+    response = await client_with_seeds.get(f"/api/v1/tickets/{ticket_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["sprint_id"] is None
 
 
-def test_assign_ticket_already_in_another_sprint_returns_409(client_with_seeds: TestClient) -> None:
+async def test_assign_ticket_already_in_another_sprint_returns_409(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test that assigning a ticket to a sprint when it's already in another sprint returns 409."""
     # Create two sprints
-    sprint1_response = client_with_seeds.post(
+    sprint1_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint1_id = sprint1_response.json()["id"]
 
-    sprint2_response = client_with_seeds.post(
+    sprint2_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2602, "name": "Sprint 2"}
     )
     sprint2_id = sprint2_response.json()["id"]
 
     # Create ticket assigned to sprint 1 (UNS project is ID 1)
-    ticket_response = client_with_seeds.post(
+    ticket_response = await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket", "sprint_id": sprint1_id}
     )
     ticket_id = ticket_response.json()["id"]
 
     # Try to assign same ticket to sprint 2 - should return 409
-    response = client_with_seeds.post(f"/api/v1/sprints/{sprint2_id}/tickets/{ticket_id}")
+    response = await client_with_seeds.post(f"/api/v1/sprints/{sprint2_id}/tickets/{ticket_id}")
     assert response.status_code == 409
     data = response.json()
     assert "already assigned to sprint" in data["detail"]
 
 
-def test_assign_nonexistent_ticket_to_sprint_returns_404(client_with_seeds: TestClient) -> None:
+async def test_assign_nonexistent_ticket_to_sprint_returns_404(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test that assigning a non-existent ticket to a sprint returns 404."""
-    sprint_response = client_with_seeds.post(
+    sprint_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint_id = sprint_response.json()["id"]
 
-    response = client_with_seeds.post(f"/api/v1/sprints/{sprint_id}/tickets/999")
+    response = await client_with_seeds.post(f"/api/v1/sprints/{sprint_id}/tickets/999")
     assert response.status_code == 404
 
 
-def test_assign_ticket_to_nonexistent_sprint_returns_404(client_with_seeds: TestClient) -> None:
+async def test_assign_ticket_to_nonexistent_sprint_returns_404(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test that assigning a ticket to a non-existent sprint returns 404."""
-    ticket_response = client_with_seeds.post(
+    ticket_response = await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"}
     )
     ticket_id = ticket_response.json()["id"]
 
-    response = client_with_seeds.post(f"/api/v1/sprints/999/tickets/{ticket_id}")
+    response = await client_with_seeds.post(f"/api/v1/sprints/999/tickets/{ticket_id}")
     assert response.status_code == 404
 
 
-def test_sprint_deletion_cascades_unassigns_tickets(client_with_seeds: TestClient) -> None:
+async def test_sprint_deletion_cascades_unassigns_tickets(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test that deleting a sprint unassigns its tickets (sets sprint_id to NULL)."""
-    sprint_response = client_with_seeds.post(
+    sprint_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint_id = sprint_response.json()["id"]
 
     # Create tickets assigned to sprint (UNS project is ID 1)
-    ticket1_response = client_with_seeds.post(
+    ticket1_response = await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 1, "title": "Ticket 1", "sprint_id": sprint_id}
     )
     ticket1_id = ticket1_response.json()["id"]
 
-    ticket2_response = client_with_seeds.post(
+    ticket2_response = await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 1, "title": "Ticket 2", "sprint_id": sprint_id}
     )
     ticket2_id = ticket2_response.json()["id"]
 
     # Delete sprint
-    response = client_with_seeds.delete(f"/api/v1/sprints/{sprint_id}")
+    response = await client_with_seeds.delete(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 204
 
     # Verify tickets no longer have sprint_id
-    response = client_with_seeds.get(f"/api/v1/tickets/{ticket1_id}")
+    response = await client_with_seeds.get(f"/api/v1/tickets/{ticket1_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["sprint_id"] is None
 
-    response = client_with_seeds.get(f"/api/v1/tickets/{ticket2_id}")
+    response = await client_with_seeds.get(f"/api/v1/tickets/{ticket2_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["sprint_id"] is None
 
 
-def test_get_sprint_by_status(client_with_seeds: TestClient) -> None:
+async def test_get_sprint_by_status(
+    client_with_seeds: AsyncClient,
+) -> None:
     """Test getting sprint with tickets grouped by status."""
-    sprint_response = client_with_seeds.post(
+    sprint_response = await client_with_seeds.post(
         "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint_id = sprint_response.json()["id"]
 
     # Create tickets with different statuses (UNS project is ID 1)
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/tickets",
         json={"project_id": 1, "title": "Open Ticket", "sprint_id": sprint_id, "status": "Open"},
     )
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/tickets",
         json={
             "project_id": 1,
@@ -507,7 +567,7 @@ def test_get_sprint_by_status(client_with_seeds: TestClient) -> None:
             "status": "In Progress",
         },
     )
-    client_with_seeds.post(
+    await client_with_seeds.post(
         "/api/v1/tickets",
         json={
             "project_id": 1,
@@ -517,7 +577,7 @@ def test_get_sprint_by_status(client_with_seeds: TestClient) -> None:
         },
     )
 
-    response = client_with_seeds.get(f"/api/v1/sprints/{sprint_id}/by-status")
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}/by-status")
     assert response.status_code == 200
     data = response.json()
 

@@ -61,7 +61,7 @@ def page(browser_context: BrowserContext) -> Generator[Page, None, None]:
 
 
 @pytest.fixture
-def authenticated_page(page: Page, client) -> Generator[Page, None, None]:
+def authenticated_page(page: Page) -> Generator[Page, None, None]:
     """Create a page with authentication (if needed)."""
     # For now, no authentication is required
     # This fixture can be extended when auth is added
@@ -332,7 +332,6 @@ def test_server():
 
     # Start server in background (from the repo containing these tests, so a
     # worktree/checkout runs its own code and its own database)
-    repo_root = str(Path(__file__).resolve().parents[2])
     env = os.environ.copy()
     env["DATABASE_URL"] = "sqlite:///./data/e2e_test.db"
     env["PORT"] = str(BASE_URL.split(":")[-1].split("/")[0]) if ":" in BASE_URL else "8080"
@@ -340,7 +339,7 @@ def test_server():
     proc = subprocess.Popen(
         ["uv", "run", "python", "-m", "jackrabbit.main"],
         env=env,
-        cwd=repo_root,
+        cwd=Path(__file__).resolve().parents[2],
     )
 
     # Wait for server to be ready

@@ -78,6 +78,29 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+addopts = "-ra --strict-markers"
+markers = [
+    "e2e: end-to-end browser tests (Playwright)",
+    "cdx: mark test as requiring chrome-devtools-axi",
+    "lighthouse: mark test as running Lighthouse audit",
+    "performance: mark test as performance test",
+    "slow: slow tests, deselect with '-m \"not slow\"'",
+]
+
+[tool.coverage.run]
+source = ["jackrabbit"]
+branch = true
+omit = ["jackrabbit/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+# Spec target: >90% of business logic in services (tracked via make test-cov)
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

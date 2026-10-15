@@ -1,8 +1,9 @@
 """Shared test fixtures for Jackrabbit unit and integration tests."""
 
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from jackrabbit.config import Settings, get_settings
@@ -22,12 +23,13 @@ from sqlmodel import Session, SQLModel, create_engine
 
 # Override settings for testing
 @pytest.fixture(scope="session")
-def test_settings() -> Settings:
-    """Create test settings with in-memory database."""
+def test_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
+    """Test settings: DATA_DIR in a temp dir, PORT=0 (pick a free port)."""
     return Settings(
         environment="test",
         database_url="sqlite://",
-        data_dir=Path("./data"),
+        data_dir=tmp_path_factory.mktemp("jackrabbit-data"),
+        port=0,
         log_level="DEBUG",
     )
 
@@ -58,8 +60,12 @@ def test_db(test_engine) -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def client(test_db: Session) -> Generator[TestClient, None, None]:
-    """Create a test client with the test database session."""
+async def client(test_db: Session) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """httpx.AsyncClient wired to the app with the test database session.
+
+    httpx no longer accepts ``app=`` directly; ASGITransport is the supported
+    equivalent for ``httpx.AsyncClient(app=app, base_url="http://test")``.
+    """
 
     def get_test_session():
         yield test_db
@@ -69,10 +75,38 @@ def client(test_db: Session) -> Generator[TestClient, None, None]:
         environment="test",
         database_url="sqlite://",
         data_dir=Path("./data"),
+        port=0,
         log_level="DEBUG",
     )
 
     # Override the database session dependency
+    from jackrabbit.database import get_session
+
+    app.dependency_overrides[get_session] = get_test_session
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as async_client:
+        yield async_client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def sync_client(test_db: Session) -> Generator[TestClient, None, None]:
+    """Legacy sync TestClient (kept for unit-level endpoint spot checks)."""
+
+    def get_test_session():
+        yield test_db
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        environment="test",
+        database_url="sqlite://",
+        data_dir=Path("./data"),
+        port=0,
+        log_level="DEBUG",
+    )
+
     from jackrabbit.database import get_session
 
     app.dependency_overrides[get_session] = get_test_session
@@ -97,7 +131,7 @@ def seeded_projects(test_db: Session) -> list[Project]:
         is_system=True,
     )
 
-    # Regular projects
+    # Two regular test projects
     web = project_service.create_project(
         prefix="WEB",
         name="Web Application",
@@ -112,26 +146,19 @@ def seeded_projects(test_db: Session) -> list[Project]:
         color="#10b981",
     )
 
-    mobile = project_service.create_project(
-        prefix="MOB",
-        name="Mobile App",
-        description="Mobile application",
-        color="#f59e0b",
-    )
-
-    return [uns, web, api, mobile]
+    return [uns, web, api]
 
 
 @pytest.fixture
 def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Ticket]:
-    """Create seeded tickets for testing."""
+    """Create tickets in various states (Open, Groomed, In Progress, Ready for Review)."""
     ticket_service = TicketService(test_db)
 
-    uns, web, api, mobile = seeded_projects
+    uns, web, api = seeded_projects
 
     tickets = []
 
-    # Tickets in UNS project
+    # Two plain Open tickets in UNS
     tickets.append(
         ticket_service.create_ticket(
             project_id=uns.id,
@@ -152,7 +179,7 @@ def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Tic
         )
     )
 
-    # Tickets in WEB project
+    # Groomed ticket in WEB (carries the 4 grooming fields)
     tickets.append(
         ticket_service.create_ticket(
             project_id=web.id,
@@ -160,9 +187,15 @@ def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Tic
             type=TicketType.EPIC,
             priority=Priority.HIGH,
             description="Complete dashboard redesign",
+            approach="Redesign with new design system",
+            files_to_change="dashboard.py, templates/dashboard.html",
+            test_plan="Unit + E2E tests",
+            validation_steps="Visual check on staging",
         )
     )
+    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready for development")
 
+    # In Progress ticket in WEB (branch auto-generated on transition)
     tickets.append(
         ticket_service.create_ticket(
             project_id=web.id,
@@ -170,10 +203,16 @@ def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Tic
             type=TicketType.STORY,
             priority=Priority.MEDIUM,
             description="New responsive header",
+            approach="Extract header into component",
+            files_to_change="header.py",
+            test_plan="Unit tests",
+            validation_steps="Manual check",
         )
     )
+    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready")
+    ticket_service.transition(tickets[-1], TicketStatus.IN_PROGRESS, "Started work")
 
-    # Tickets in API project
+    # Ready for Review ticket in API (PR URL provided at transition time)
     tickets.append(
         ticket_service.create_ticket(
             project_id=api.id,
@@ -181,29 +220,16 @@ def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Tic
             type=TicketType.STORY,
             priority=Priority.CRITICAL,
             description="Implement rate limiting on all endpoints",
+            approach="Token bucket middleware",
+            files_to_change="api.py",
+            test_plan="Integration tests",
+            validation_steps="Load test on staging",
         )
     )
-
-    tickets.append(
-        ticket_service.create_ticket(
-            project_id=api.id,
-            title="Optimize database queries",
-            type=TicketType.SPIKE,
-            priority=Priority.MEDIUM,
-            description="Investigate slow query performance",
-        )
-    )
-
-    # Tickets in MOB project
-    tickets.append(
-        ticket_service.create_ticket(
-            project_id=mobile.id,
-            title="Fix crash on startup",
-            type=TicketType.BUG,
-            priority=Priority.CRITICAL,
-            description="App crashes on cold start",
-        )
-    )
+    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready")
+    ticket_service.transition(tickets[-1], TicketStatus.IN_PROGRESS, "Started work")
+    tickets[-1].pr_url = "https://github.com/test/repo/pull/1"
+    ticket_service.transition(tickets[-1], TicketStatus.READY_FOR_REVIEW, "PR opened")
 
     return tickets
 
@@ -313,9 +339,6 @@ def ready_for_review_ticket(test_db: Session, seeded_projects: list[Project]) ->
     )
     ticket_service.transition(ticket, TicketStatus.GROOMED, "Ready")
     ticket_service.transition(ticket, TicketStatus.IN_PROGRESS, "Started work")
-    ticket_service.transition(
-        ticket,
-        TicketStatus.READY_FOR_REVIEW,
-        "PR opened",
-    )
+    ticket.pr_url = "https://github.com/test/repo/pull/1"
+    ticket_service.transition(ticket, TicketStatus.READY_FOR_REVIEW, "PR opened")
     return ticket

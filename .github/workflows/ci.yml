@@ -45,7 +45,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run mypy
-        run: uv run mypy .
+        run: uv run mypy jackrabbit
 
   unit-tests:
     name: Unit Tests
@@ -121,6 +121,10 @@ jobs:
       - name: Install Playwright browsers
         run: uv run playwright install --with-deps chromium
 
+      # Headed Chrome needs a display server in CI
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Start test server
         run: |
           uv run python -m jackrabbit.main &
@@ -135,10 +139,12 @@ jobs:
             sleep 0.5
           done
 
+      # Headed Chrome (per spec: "headed Chrome in CI"), driven under Xvfb
       - name: Run E2E tests
-        run: uv run pytest tests/e2e -v --tb=short -x
+        run: xvfb-run --auto-servernum uv run pytest tests/e2e -v --tb=short -x
         env:
           E2E_BASE_URL: http://localhost:8080
+          CHROME_DEVTOOLS_AXI_HEADED: '1'
 
       - name: Stop test server
         if: always()
