@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Link types: `parent`, `child`, `blocks`, `blocked_by`, `relates_to` (ADR-0015)
 - [ ] API: `GET /api/v1/tickets/{id}/links` — list all links for ticket (both directions)

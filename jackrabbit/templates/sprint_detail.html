@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Jackrabbit - Sprint {{ sprint.number }}: {{ sprint.name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Sprint {{ sprint.number }}: {{ sprint.name }}</h1>
+            {% if sprint.description %}
+            <p class="text-gray-500 mt-1">{{ sprint.description }}</p>
+            {% endif %}
+        </div>
+        <div class="flex items-center gap-4">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium
+                {% if status == 'Planned' %}bg-gray-100 text-gray-800
+                {% elif status == 'Active' %}bg-blue-100 text-blue-800
+                {% elif status == 'Complete' %}bg-green-100 text-green-800
+                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                {{ status }}
+            </span>
+            <a href="/sprints/{{ sprint.id }}/edit"
+               class="text-indigo-600 hover:text-indigo-900 text-sm"
+               hx-get="/sprints/{{ sprint.id }}/edit"
+               hx-target="#sprint-detail-content"
+               hx-swap="outerHTML">
+                Edit Sprint
+            </a>
+            <a href="/sprints" class="text-gray-500 hover:text-gray-700 text-sm">← All Sprints</a>
+        </div>
+    </div>
+
+    <!-- Sprint Dates -->
+    {% if sprint.planned_start or sprint.planned_end %}
+    <div class="bg-white border border-gray-200 rounded-lg p-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-500">Planned Start</label>
+                <span class="text-gray-900">{% if sprint.planned_start %}{{ sprint.planned_start.strftime('%Y-%m-%d') }}{% else %}—{% endif %}</span>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-500">Planned End</label>
+                <span class="text-gray-900">{% if sprint.planned_end %}{{ sprint.planned_end.strftime('%Y-%m-%d') }}{% else %}—{% endif %}</span>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Sprint Board - Tickets Grouped by Status -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" id="sprint-board">
+        {% for status_key in ["Open", "Groomed", "In Progress", "Ready for Review", "Complete", "Rejected"] %}
+        <div class="bg-gray-50 rounded-lg p-4 min-h-[300px] flex flex-col">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider">{{ status_key }}</h3>
+                <span class="text-xs text-gray-400 bg-white px-2 py-0.5 rounded">{{ tickets_by_status[status_key]|length }}</span>
+            </div>
+            <div class="space-y-2 flex-1 overflow-y-auto" id="column-{{ status_key.lower().replace(' ', '-') }}">
+                {% for ticket in tickets_by_status[status_key] %}
+                <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer"
+                     hx-get="/ticket/{{ ticket.id }}"
+                     hx-target="#ticket-modal"
+                     hx-swap="innerHTML">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="font-mono text-xs text-indigo-600 font-medium">
+                            {{ ticket.project.prefix }}-{{ '%03d'|format(ticket.number) }}
+                        </span>
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                            {% if ticket.type == 'Epic' %}bg-purple-100 text-purple-800
+                            {% elif ticket.type == 'Story' %}bg-blue-100 text-blue-800
+                            {% elif ticket.type == 'Bug' %}bg-red-100 text-red-800
+                            {% elif ticket.type == 'Spike' %}bg-yellow-100 text-yellow-800
+                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ ticket.type }}
+                        </span>
+                    </div>
+                    <h4 class="text-sm font-medium text-gray-900 truncate">{{ ticket.title }}</h4>
+                    {% if ticket.story_points %}
+                    <div class="flex items-center gap-2 mt-2">
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
+                            {{ ticket.story_points }} pts
+                        </span>
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                            {% if ticket.priority == 'Low' %}bg-gray-100 text-gray-800
+                            {% elif ticket.priority == 'Medium' %}bg-blue-100 text-blue-800
+                            {% elif ticket.priority == 'High' %}bg-yellow-100 text-yellow-800
+                            {% elif ticket.priority == 'Critical' %}bg-red-100 text-red-800
+                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ ticket.priority }}
+                        </span>
+                    </div>
+                    {% else %}
+                    <div class="mt-2">
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                            {% if ticket.priority == 'Low' %}bg-gray-100 text-gray-800
+                            {% elif ticket.priority == 'Medium' %}bg-blue-100 text-blue-800
+                            {% elif ticket.priority == 'High' %}bg-yellow-100 text-yellow-800
+                            {% elif ticket.priority == 'Critical' %}bg-red-100 text-red-800
+                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ ticket.priority }}
+                        </span>
+                    </div>
+                    {% endif %}
+                    <div class="flex justify-end mt-2">
+                        <form hx-delete="/api/v1/sprints/{{ sprint.id }}/tickets/{{ ticket.id }}"
+                              hx-target="#ticket-row-sprint-{{ ticket.id }}"
+                              hx-swap="outerHTML"
+                              hx-confirm="Remove this ticket from the sprint?"
+                              class="inline">
+                            <button type="submit" class="btn btn-sm btn-outline text-red-600 hover:text-red-800 border-red-300 hover:bg-red-50" title="Remove from Sprint">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                                <span class="hidden sm:inline ml-1">Remove</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-center py-6 text-gray-400 text-sm">
+                    No tickets
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div id="ticket-modal"></div>
+{% endblock %}

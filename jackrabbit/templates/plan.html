@@ -4,36 +4,152 @@
 
 {% block content %}
 <div class="space-y-6">
-    <h1 class="text-2xl font-bold text-gray-900">Sprint Plan</h1>
-
-    <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="w-full">
-                <thead class="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sprint</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Planned Start</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Planned End</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tickets</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200" id="sprints-table-body">
-                    <tr>
-                        <td colspan="6" class="px-4 py-8 text-center text-gray-500">
-                            Loading sprints...
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-900">Sprint Plan</h1>
+        <div class="flex items-center gap-4">
+            <!-- Project Filter Dropdown -->
+            <form hx-get="/plan" hx-target="#plan-content" hx-swap="innerHTML" hx-push-url="true" class="flex items-center gap-2">
+                <label for="project-filter" class="sr-only">Filter by project</label>
+                <select id="project-filter" name="project_id" class="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" hx-trigger="change">
+                    <option value="">All Projects</option>
+                    {% for project in projects %}
+                    <option value="{{ project.id }}" {% if selected_project_id == project.id %}selected{% endif %}>{{ project.prefix }} - {{ project.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
         </div>
     </div>
-</div>
 
-<script>
-    document.body.addEventListener('htmx:load', function() {
-        htmx.ajax('GET', '/api/v1/sprints', {target: '#sprints-table-body', swap: 'innerHTML'});
-    });
-</script>
+    <div id="plan-content">
+        <div class="space-y-4" id="timeline">
+            {% if sprints %}
+            {% for sprint_data in sprints %}
+            {% set sprint = sprint_data.sprint %}
+            {% set ticket_counts = sprint_data.ticket_counts %}
+            {% set total_tickets = sprint_data.total_tickets %}
+            {% set status = sprint_data.status %}
+            {% set left_pct = sprint_data.left_pct %}
+            {% set width_pct = sprint_data.width_pct %}
+            {% set today_pct = sprint_data.today_pct %}
+            
+            <!-- Determine color based on status -->
+            {% if status == "Complete" %}
+            {% set bar_color = "bg-green-500" %}
+            {% set status_badge = "bg-green-100 text-green-800" %}
+            {% elif status == "Active" %}
+            {% set bar_color = "bg-blue-500" %}
+            {% set status_badge = "bg-blue-100 text-blue-800" %}
+            {% else %}
+            {% set bar_color = "bg-gray-400" %}
+            {% set status_badge = "bg-gray-100 text-gray-800" %}
+            {% endif %}
+            
+            <a href="/sprints/{{ sprint.id }}/detail" class="block group">
+                <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-200">
+                    <div class="p-4">
+                        <!-- Sprint header with number, name, dates -->
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xs font-mono font-bold text-gray-500">{{ sprint.number }}</span>
+                                <h3 class="text-lg font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">{{ sprint.name or "Unnamed Sprint" }}</h3>
+                                <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ status_badge }}">{{ status }}</span>
+                            </div>
+                            <div class="flex items-center gap-4 text-sm text-gray-500">
+                                {% if sprint.planned_start %}
+                                <span class="flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 002 2z"></path></svg>
+                                    {{ sprint.planned_start.strftime("%b %d, %Y") }}
+                                </span>
+                                {% endif %}
+                                {% if sprint.planned_end %}
+                                <span class="flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                                    {{ sprint.planned_end.strftime("%b %d, %Y") }}
+                                </span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Timeline bar -->
+                        {% if sprint.planned_start or sprint.planned_end %}
+                        <div class="relative h-8 mb-3">
+                            <!-- Full date range track -->
+                            <div class="absolute inset-0 h-8 bg-gray-100 rounded-full"></div>
+                            
+                            <!-- Sprint bar -->
+                            <div class="absolute h-8 rounded-full {{ bar_color }} transition-all duration-200 group-hover:opacity-90" 
+                                 style="left: {{ left_pct }}%; width: {{ width_pct }}%; min-width: 20px;"
+                                 title="{{ sprint.number }}: {{ sprint.planned_start.strftime('%b %d') if sprint.planned_start else 'No start' }} - {{ sprint.planned_end.strftime('%b %d') if sprint.planned_end else 'No end' }}">
+                            </div>
+                            
+                            <!-- Today marker -->
+                            {% if today_pct is not none %}
+                            <div class="absolute top-0 bottom-0 w-px bg-red-500" style="left: {{ today_pct }}%;" title="Today"></div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Status summary badges -->
+                        <div class="flex flex-wrap gap-2">
+                            {% if total_tickets > 0 %}
+                            <div class="flex items-center gap-1 text-sm text-gray-600">
+                                <span class="font-medium">{{ total_tickets }} tickets:</span>
+                                {% if ticket_counts['Open'] > 0 %}
+                                <span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">{{ ticket_counts['Open'] }} Open</span>
+                                {% endif %}
+                                {% if ticket_counts['Groomed'] > 0 %}
+                                <span class="px-2 py-0.5 text-xs bg-indigo-100 text-indigo-700 rounded">{{ ticket_counts['Groomed'] }} Groomed</span>
+                                {% endif %}
+                                {% if ticket_counts['In Progress'] > 0 %}
+                                <span class="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">{{ ticket_counts['In Progress'] }} In Progress</span>
+                                {% endif %}
+                                {% if ticket_counts['Ready for Review'] > 0 %}
+                                <span class="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">{{ ticket_counts['Ready for Review'] }} Ready for Review</span>
+                                {% endif %}
+                                {% if ticket_counts['Complete'] > 0 %}
+                                <span class="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded">{{ ticket_counts['Complete'] }} Complete</span>
+                                {% endif %}
+                                {% if ticket_counts['Rejected'] > 0 %}
+                                <span class="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded">{{ ticket_counts['Rejected'] }} Rejected</span>
+                                {% endif %}
+                            </div>
+                            {% else %}
+                            <span class="text-sm text-gray-400 italic">No tickets assigned</span>
+                            {% endif %}
+                        </div>
+
+                        {% if sprint.description %}
+                        <p class="mt-3 text-sm text-gray-600 line-clamp-2">{{ sprint.description }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+            {% else %}
+            <!-- Empty state when no sprints -->
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-12 text-center">
+                <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 002 2z"></path></svg>
+                <h3 class="mt-2 text-lg font-medium text-gray-900">No sprints yet</h3>
+                <p class="mt-1 text-sm text-gray-500">Create your first sprint to start planning.</p>
+                <a href="/sprints/new" class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
+                    <svg class="-ml-1 mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    Create Sprint
+                </a>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Unsprinted tickets section - show even when no sprints -->
+        {% if unsprinted_count > 0 %}
+        <div class="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <span class="font-medium text-amber-900">{{ unsprinted_count }} unsprinted ticket{{ 's' if unsprinted_count != 1 else '' }}</span>
+            </div>
+            <p class="mt-1 text-sm text-amber-800">Tickets not assigned to any sprint. Consider assigning them from the backlog.</p>
+            <a href="/backlog" class="mt-2 inline-block text-sm font-medium text-amber-700 hover:underline">View backlog →</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}

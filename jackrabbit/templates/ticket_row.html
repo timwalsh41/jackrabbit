@@ -1,0 +1,148 @@
+<tr class="hover:bg-gray-50" id="ticket-row-{{ ticket.id }}">
+    <td class="px-4 py-3">
+        <a href="/ticket/{{ ticket.id }}"
+           class="font-mono text-indigo-600 hover:text-indigo-900 font-medium"
+           title="{% if ticket.project %}{{ ticket.project.prefix }}{% else %}UNK{% endif %}-{{ '%03d'|format(ticket.number) }}{% if ticket.original_id %} (Formerly {{ ticket.original_id }}){% endif %}">
+            {% if ticket.project %}
+            {{ ticket.project.prefix }}-{{ '%03d'|format(ticket.number) }}
+            {% else %}
+            UNK-{{ '%03d'|format(ticket.number) }}
+            {% endif %}
+        </a>
+        {% if ticket.original_id %}
+        <span class="block text-xs text-gray-400 mt-0.5" title="Formerly {{ ticket.original_id }}">Formerly {{ ticket.original_id }}</span>
+        {% endif %}
+    </td>
+    <td class="px-4 py-3">
+        <a href="/ticket/{{ ticket.id }}"
+           class="text-gray-900 hover:text-indigo-600 font-medium truncate block max-w-xs">
+            {{ ticket.title }}
+        </a>
+        {% if ticket.description %}
+        <p class="text-sm text-gray-500 truncate max-w-xs mt-1">{{ ticket.description }}</p>
+        {% endif %}
+    </td>
+    <td class="px-4 py-3">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+            {% if ticket.type == 'Epic' %}bg-purple-100 text-purple-800
+            {% elif ticket.type == 'Story' %}bg-blue-100 text-blue-800
+            {% elif ticket.type == 'Bug' %}bg-red-100 text-red-800
+            {% elif ticket.type == 'Spike' %}bg-yellow-100 text-yellow-800
+            {% else %}bg-gray-100 text-gray-800{% endif %}">
+            {{ ticket.type }}
+        </span>
+    </td>
+    <td class="px-4 py-3">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+            {% if ticket.status == 'Open' %}bg-gray-100 text-gray-800
+            {% elif ticket.status == 'Groomed' %}bg-blue-100 text-blue-800
+            {% elif ticket.status == 'In Progress' %}bg-yellow-100 text-yellow-800
+            {% elif ticket.status == 'Ready for Review' %}bg-purple-100 text-purple-800
+            {% elif ticket.status == 'Complete' %}bg-green-100 text-green-800
+            {% elif ticket.status == 'Rejected' %}bg-red-100 text-red-800
+            {% else %}bg-gray-100 text-gray-800{% endif %}">
+            {{ ticket.status }}
+        </span>
+    </td>
+    <td class="px-4 py-3">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+            {% if ticket.priority == 'Low' %}bg-gray-100 text-gray-800
+            {% elif ticket.priority == 'Medium' %}bg-blue-100 text-blue-800
+            {% elif ticket.priority == 'High' %}bg-yellow-100 text-yellow-800
+            {% elif ticket.priority == 'Critical' %}bg-red-100 text-red-800
+            {% else %}bg-gray-100 text-gray-800{% endif %}">
+            {{ ticket.priority }}
+        </span>
+    </td>
+    <td class="px-4 py-3 text-center">
+        {% if ticket.story_points %}
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+            {{ ticket.story_points }}
+        </span>
+        {% else %}
+        <span class="text-gray-400">—</span>
+        {% endif %}
+    </td>
+    <td class="px-4 py-3">
+        {% if ticket.sprint %}
+        <span class="text-sm text-gray-700">{{ ticket.sprint.number }}{% if ticket.sprint.name %} - {{ ticket.sprint.name }}{% endif %}</span>
+        {% else %}
+        <span class="text-gray-400 text-sm">—</span>
+        {% endif %}
+    </td>
+    <td class="px-4 py-3">
+        {# Blocked indicator #}
+        {% set blockers = ticket.incoming_links|selectattr('link_type', 'equalto', 'blocks')|list %}
+        {% set open_blockers = blockers|selectattr('source.status', '!=', 'Complete')|list %}
+        {% if open_blockers %}
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200" title="{{ open_blockers|length }} open blocker{{ 's' if open_blockers|length > 1 else '' }}">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+            {{ open_blockers|length }}
+        </span>
+        {% else %}
+        <span class="text-gray-400 text-xs">—</span>
+        {% endif %}
+    </td>
+    <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+            <button class="btn btn-sm btn-outline"
+                    hx-get="/tickets/{{ ticket.id }}/edit"
+                    hx-target="#ticket-modal"
+                    hx-swap="innerHTML"
+                    title="Edit">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                </svg>
+            </button>
+            {% if ticket.sprint %}
+            <!-- Remove from Sprint button -->
+            <form hx-delete="/api/v1/sprints/{{ ticket.sprint.id }}/tickets/{{ ticket.id }}"
+                  hx-target="#ticket-row-{{ ticket.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Remove this ticket from the sprint?"
+                  class="inline">
+                <button type="submit" class="btn btn-sm btn-outline text-red-600 hover:text-red-800 border-red-300 hover:bg-red-50" title="Remove from Sprint">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                    <span class="hidden sm:inline ml-1">Remove</span>
+                </button>
+            </form>
+            {% else %}
+            <!-- Move to Sprint dropdown -->
+            <div class="relative inline-block text-left">
+                <button type="button" class="btn btn-sm btn-outline" id="move-to-sprint-{{ ticket.id }}" aria-expanded="false" aria-haspopup="true">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    </svg>
+                    <span class="hidden sm:inline ml-1">Move to Sprint</span>
+                </button>
+                <div class="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg py-1 z-10 hidden" id="move-to-sprint-dropdown-{{ ticket.id }}">
+                    {% for sprint in sprints %}
+                    <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                            hx-post="/api/v1/sprints/{{ sprint.id }}/tickets/{{ ticket.id }}"
+                            hx-target="#ticket-row-{{ ticket.id }}"
+                            hx-swap="outerHTML"
+                            hx-on::after-request="if(event.detail.successful) { document.getElementById('move-to-sprint-dropdown-{{ ticket.id }}').classList.add('hidden'); }">
+                        {{ sprint.number }}{% if sprint.name %} - {{ sprint.name }}{% endif %}
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            <form hx-delete="/api/v1/tickets/{{ ticket.id }}"
+                  hx-target="#ticket-row-{{ ticket.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Are you sure you want to delete {{ (ticket.project.prefix if ticket.project else 'UNK') ~ '-' ~ ('%03d'|format(ticket.number)) }}?"
+                  class="inline">
+                <button type="submit" class="btn btn-sm btn-outline text-red-600 hover:text-red-800 border-red-300 hover:bg-red-50" title="Delete">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                </button>
+            </form>
+        </div>
+    </td>
+</tr>

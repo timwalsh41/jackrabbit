@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel._compat import NaiveDatetime
 
 
 class TicketType(StrEnum):
@@ -62,10 +63,11 @@ class Sprint(SQLModel, table=True):
     number: str = Field(unique=True, index=True, max_length=10)  # e.g., "2601"
     name: str = ""
     description: str = ""
-    planned_start: datetime | None = None
-    planned_end: datetime | None = None
-    actual_start: datetime | None = None
-    actual_end: datetime | None = None
+    planned_start: NaiveDatetime | None = None
+    planned_end: NaiveDatetime | None = None
+    planned_duration_days: int | None = None
+    actual_start: NaiveDatetime | None = None
+    actual_end: NaiveDatetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -77,35 +79,39 @@ class Ticket(SQLModel, table=True):
     project_id: int = Field(foreign_key="project.id", index=True)
     sprint_id: int | None = Field(default=None, foreign_key="sprint.id", index=True)
     number: int = Field(index=True)  # Number within project
-    type: TicketType = Field(default=TicketType.STORY)
-    status: TicketStatus = Field(default=TicketStatus.OPEN, index=True)
-    priority: Priority = Field(default=Priority.MEDIUM, index=True)
+    type: TicketType = TicketType.STORY
+    status: TicketStatus = TicketStatus.OPEN
+    priority: Priority = Priority.MEDIUM
     title: str
     description: str = ""
     story_points: int | None = None
-
-    # Groomed fields
     approach: str = ""
     files_to_change: str = ""
     test_plan: str = ""
     validation_steps: str = ""
-
+    branch_name: str | None = None
+    pr_url: str | None = None
+    original_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
-    completed_at: datetime | None = None
+    completed_at: NaiveDatetime | None = None
 
-    project: Project = Relationship(back_populates="tickets")
+    project: Project | None = Relationship(back_populates="tickets")
     sprint: Sprint | None = Relationship(back_populates="tickets")
-    outgoing_links: list["TicketLink"] = Relationship(
-        back_populates="source", sa_relationship_kwargs={"foreign_keys": "TicketLink.source_id"}
-    )
-    incoming_links: list["TicketLink"] = Relationship(
-        back_populates="target", sa_relationship_kwargs={"foreign_keys": "TicketLink.target_id"}
-    )
 
     @property
     def full_id(self) -> str:
-        return f"{self.project.prefix}-{self.number}"
+        """Human-readable ticket ID like 'WEB-3' (requires the project relationship)."""
+        prefix = self.project.prefix if self.project else "UNK"
+        return f"{prefix}-{self.number}"
+
+    incoming_links: list["TicketLink"] = Relationship(
+        back_populates="target", sa_relationship_kwargs={"foreign_keys": "TicketLink.target_id"}
+    )
+    outgoing_links: list["TicketLink"] = Relationship(
+        back_populates="source", sa_relationship_kwargs={"foreign_keys": "TicketLink.source_id"}
+    )
+    transitions: list["Transition"] = Relationship(back_populates="ticket")
 
 
 class TicketLink(SQLModel, table=True):
@@ -123,3 +129,14 @@ class TicketLink(SQLModel, table=True):
         back_populates="incoming_links",
         sa_relationship_kwargs={"foreign_keys": "TicketLink.target_id"},
     )
+
+
+class Transition(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="ticket.id", index=True)
+    from_status: TicketStatus | None = None
+    to_status: TicketStatus
+    reason: str | None = None
+    at: datetime = Field(default_factory=utc_now)
+
+    ticket: Ticket = Relationship(back_populates="transitions")

@@ -1,0 +1,179 @@
+{# Add Link Modal #}
+<div class="fixed inset-0 z-50 overflow-y-auto" id="link-modal" role="dialog" aria-modal="true" aria-labelledby="link-modal-title">
+    <div class="flex min-h-full items-center justify-center p-4">
+        {# Backdrop #}
+        <div class="fixed inset-0 bg-black/50 transition-opacity" 
+             hx-get="/tickets/{{ ticket.id }}/links" 
+             hx-target="#links-section" 
+             hx-swap="outerHTML"
+             hx-trigger="click"></div>
+        
+        {# Modal content #}
+        <div class="relative w-full max-w-lg bg-white rounded-lg shadow-xl">
+            <div class="flex items-center justify-between p-4 border-b border-gray-200">
+                <h3 id="link-modal-title" class="text-lg font-semibold text-gray-900">Add Link to {{ ticket.full_id }}</h3>
+                <button type="button" 
+                        class="text-gray-400 hover:text-gray-600"
+                        hx-get="/tickets/{{ ticket.id }}/links" 
+                        hx-target="#links-section" 
+                        hx-swap="outerHTML">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <form hx-post="/api/v1/tickets/{{ ticket.id }}/links"
+                  hx-target="#links-section"
+                  hx-swap="outerHTML"
+                  hx-on::after-request="if(event.detail.successful) { document.getElementById('link-modal').remove(); }"
+                  class="p-4 space-y-4">
+                
+                {# Link Type #}
+                <div>
+                    <label for="link_type" class="block text-sm font-medium text-gray-700 mb-1">Link Type</label>
+                    <select name="link_type" id="link_type" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                            onchange="updateTargetFilter()">
+                        <option value="">Select link type...</option>
+                        <option value="parent" {% if ticket.type == 'Epic' %}disabled{% endif %}>Parent (this ticket is parent of target)</option>
+                        <option value="child" {% if ticket.type != 'Epic' %}disabled{% endif %}>Child (this ticket is child of target Epic)</option>
+                        <option value="blocks">Blocks (this ticket blocks target)</option>
+                        <option value="blocked_by">Blocked By (this ticket is blocked by target)</option>
+                        <option value="relates_to">Relates To (bidirectional association)</option>
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500" id="link-type-help"></p>
+                </div>
+                
+                {# Target Ticket Search #}
+                <div>
+                    <label for="target_ticket" class="block text-sm font-medium text-gray-700 mb-1">Target Ticket</label>
+                    <div class="relative">
+                        <input type="text" name="target_search" id="target_search" 
+                               placeholder="Search by ID or title..."
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                               autocomplete="off"
+                               hx-get="/tickets/search" 
+                               hx-target="#target-results"
+                               hx-trigger="keyup changed delay:300ms, search"
+                               hx-include="[name='link_type']"
+                               hx-indicator="#search-indicator">
+                        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                            <svg class="htmx-indicator w-5 h-5 text-gray-400" id="search-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 4a16 16 0 0116 16A16 16 0 014 4"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <input type="hidden" name="target_id" id="target_id" required>
+                    <div id="target-results" class="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto hidden"></div>
+                    <p class="mt-1 text-xs text-gray-500" id="target-help">Select a link type first</p>
+                </div>
+                
+                {# Error display #}
+                <div id="link-error" class="hidden p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700"></div>
+                
+                {# Actions #}
+                <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                    <button type="button" 
+                            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                            hx-get="/tickets/{{ ticket.id }}/links" 
+                            hx-target="#links-section" 
+                            hx-swap="outerHTML">
+                        Cancel
+                    </button>
+                    <button type="submit" 
+                            class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                            id="submit-btn"
+                            disabled>
+                        Add Link
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Link type help text
+    const linkTypeHelp = {
+        'parent': 'Source must be an Epic. Creates "Child" link on target.',
+        'child': 'Target must be an Epic. Creates "Parent" link on target.',
+        'blocks': 'This ticket must complete before the target can start. Creates "Blocked By" on target.',
+        'blocked_by': 'Target must complete before this ticket can start. Creates "Blocks" on target.',
+        'relates_to': 'General bidirectional association. Creates symmetric "Relates To" link.'
+    };
+    
+    // Target ticket help text
+    const targetHelp = {
+        'parent': 'Select a Story, Bug, or Spike to be a child of this Epic.',
+        'child': 'Select the Epic this ticket belongs to.',
+        'blocks': 'Select a ticket that this ticket blocks.',
+        'blocked_by': 'Select a ticket that blocks this ticket.',
+        'relates_to': 'Select any ticket to associate with.'
+    };
+    
+    function updateTargetFilter() {
+        const linkType = document.getElementById('link_type').value;
+        const helpEl = document.getElementById('link-type-help');
+        const targetHelpEl = document.getElementById('target-help');
+        const searchInput = document.getElementById('target_search');
+        const targetIdInput = document.getElementById('target_id');
+        const submitBtn = document.getElementById('submit-btn');
+        
+        if (linkType) {
+            helpEl.textContent = linkTypeHelp[linkType] || '';
+            targetHelpEl.textContent = targetHelp[linkType] || '';
+            searchInput.disabled = false;
+            searchInput.placeholder = 'Search by ID or title...';
+        } else {
+            helpEl.textContent = '';
+            targetHelpEl.textContent = 'Select a link type first';
+            searchInput.disabled = true;
+            searchInput.placeholder = 'Select a link type first...';
+        }
+        
+        // Clear selected target
+        targetIdInput.value = '';
+        searchInput.value = '';
+        submitBtn.disabled = true;
+        document.getElementById('target-results').classList.add('hidden');
+    }
+    
+    // Handle search results selection
+    document.body.addEventListener('htmx:afterSwap', function(event) {
+        if (event.detail.target.id === 'target-results') {
+            const results = document.getElementById('target-results');
+            if (results.innerHTML.trim()) {
+                results.classList.remove('hidden');
+            } else {
+                results.classList.add('hidden');
+            }
+        }
+    });
+    
+    // Handle result click
+    document.body.addEventListener('click', function(event) {
+        const resultItem = event.target.closest('.ticket-search-result');
+        if (resultItem) {
+            const ticketId = resultItem.dataset.ticketId;
+            const ticketRef = resultItem.dataset.ticketRef;
+            const ticketTitle = resultItem.dataset.ticketTitle;
+            
+            document.getElementById('target_id').value = ticketId;
+            document.getElementById('target_search').value = ticketRef + ' - ' + ticketTitle;
+            document.getElementById('target-results').classList.add('hidden');
+            document.getElementById('submit-btn').disabled = false;
+        }
+    });
+    
+    // Close results when clicking outside
+    document.body.addEventListener('click', function(event) {
+        if (!event.target.closest('#target_search') && !event.target.closest('#target-results')) {
+            document.getElementById('target-results').classList.add('hidden');
+        }
+    });
+    
+    // Focus search input on modal open
+    document.getElementById('target_search').focus();
+</script>

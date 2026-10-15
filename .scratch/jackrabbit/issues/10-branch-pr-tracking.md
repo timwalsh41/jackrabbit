@@ -4,7 +4,7 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Slug generation: `title.lower().replace(' ', '-').replace('_', '-')`, strip non-alphanumeric/hyphen, truncate 50 chars
 - [ ] On `Open → Groomed → In Progress` transition:

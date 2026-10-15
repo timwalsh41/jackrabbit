@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] API: `GET /api/v1/projects` (list), `POST /api/v1/projects` (create), `GET /api/v1/projects/{id}` (get), `PATCH /api/v1/projects/{id}` (update), `DELETE /api/v1/projects/{id}` (delete)
 - [ ] Validation: prefix unique, 2-10 chars uppercase; name required; color hex format
