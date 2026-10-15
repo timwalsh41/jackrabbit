@@ -1,0 +1,27 @@
+{# Inline edit form for a single groomed field.
+   Swapped into #field-{name}; a successful save swaps the whole fields
+   section back in (server re-renders it with the new value). #}
+<form class="mt-1 space-y-2"
+      hx-patch="/tickets/{{ ticket.id }}/fields/{{ field.name }}"
+      hx-target="#ticket-fields-section"
+      hx-swap="outerHTML">
+    {% if error %}
+    <p class="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1" role="alert">{{ error }}</p>
+    {% endif %}
+    <textarea name="value"
+              class="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 focus:ring-indigo-500 focus:border-indigo-500"
+              rows="4">{{ field.value }}</textarea>
+    <div class="flex gap-2">
+        <button type="submit"
+                class="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors">
+            Save
+        </button>
+        <button type="button"
+                hx-get="/tickets/{{ ticket.id }}/fields"
+                hx-target="#ticket-fields-section"
+                hx-swap="outerHTML"
+                class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
+            Cancel
+        </button>
+    </div>
+</form>

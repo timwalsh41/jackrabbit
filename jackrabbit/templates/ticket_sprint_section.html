@@ -1,0 +1,40 @@
+{# Sprint assignment section for the ticket detail page.
+   Swaps itself in place after assign/unassign so no full reload is needed. #}
+<div id="sprint-section" class="flex items-center gap-2 flex-wrap">
+    {% if sprint %}
+        <a href="/sprint/{{ sprint.id }}"
+           class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+            Sprint {{ sprint.number }}{% if sprint.name %} — {{ sprint.name }}{% endif %}
+        </a>
+        <form hx-post="/tickets/{{ ticket.id }}/unassign-sprint"
+              hx-target="#sprint-section"
+              hx-swap="outerHTML"
+              class="inline">
+            <button type="submit"
+                    class="text-xs px-2 py-0.5 text-gray-500 bg-white border border-gray-300 rounded hover:text-red-600 hover:border-red-300 transition-colors"
+                    title="Remove from sprint">
+                Remove
+            </button>
+        </form>
+    {% else %}
+        <span class="text-sm text-gray-500">Unassigned</span>
+        <form hx-post="/tickets/{{ ticket.id }}/assign-sprint"
+              hx-target="#sprint-section"
+              hx-swap="outerHTML"
+              class="inline flex items-center gap-2">
+            <label for="assign-sprint-select-{{ ticket.id }}" class="sr-only">Assign to Sprint</label>
+            <select name="sprint_id"
+                    id="assign-sprint-select-{{ ticket.id }}"
+                    class="text-sm border border-gray-300 rounded-md px-2 py-1 text-gray-700 bg-white">
+                <option value="">Assign to Sprint…</option>
+                {% for s in sprints %}
+                <option value="{{ s.id }}">Sprint {{ s.number }}{% if s.name %} — {{ s.name }}{% endif %}</option>
+                {% endfor %}
+            </select>
+            <button type="submit"
+                    class="text-xs px-2 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded hover:bg-indigo-100 transition-colors">
+                Assign
+            </button>
+        </form>
+    {% endif %}
+</div>

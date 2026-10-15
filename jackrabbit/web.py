@@ -10,7 +10,16 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from jackrabbit.database import get_session
-from jackrabbit.models import LinkType, Priority, Project, TicketStatus, TicketType
+from jackrabbit.markdown import render_markdown
+from jackrabbit.models import (
+    LinkType,
+    Priority,
+    Project,
+    Sprint,
+    Ticket,
+    TicketStatus,
+    TicketType,
+)
 from jackrabbit.schemas import ProjectCreate, ProjectUpdate
 from jackrabbit.services import LinkService, ProjectService, SprintService, TicketService
 
@@ -19,6 +28,20 @@ router = APIRouter()
 # Use default Jinja2Templates with directory - simpler and more reliable
 template_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(template_dir))
+
+# Server-side, HTML-escaping markdown renderer (HTMX-safe descriptions)
+templates.env.filters["markdown"] = render_markdown
+
+# Groomed fields editable inline on the ticket detail page (label order = display order)
+GROOMED_FIELD_DEFS: list[tuple[str, str]] = [
+    ("approach", "Approach"),
+    ("files_to_change", "Files to Change"),
+    ("test_plan", "Test Plan"),
+    ("validation_steps", "Validation Steps"),
+]
+
+# Statuses whose groomed fields are frozen (no inline edits)
+FIELD_EDIT_LOCKED_STATUSES = frozenset({TicketStatus.COMPLETE, TicketStatus.REJECTED})
 
 
 def get_project_service(session: Session = Depends(get_session)) -> ProjectService:
@@ -193,11 +216,6 @@ async def plan(
             "unsprinted_count": plan_data["unsprinted_count"],
         },
     )
-
-
-@router.get("/ticket/{ticket_id}", response_class=HTMLResponse)
-async def ticket_detail(request: Request, ticket_id: int) -> HTMLResponse:
-    return templates.TemplateResponse(request, "ticket_detail.html", {"ticket_id": ticket_id})
 
 
 # Link web routes
@@ -877,3 +895,240 @@ async def ticket_search(
             "link_type": link_type,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Ticket Detail page routes (ticket 12) — registered after /tickets/new and
+# /tickets/search so the literal paths win over /tickets/{ticket_id}.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ticket/{ticket_id}", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_id}", response_class=HTMLResponse)
+async def ticket_detail(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> HTMLResponse:
+    """Ticket detail page (deep-linkable).
+
+    The shell is server-rendered (header, actions, project/sprint/branch/PR
+    metadata); dynamic sections load via HTMX: the ticket JSON card, the
+    markdown/fields section, the sprint-assignment partial and the links
+    section. Non-existent tickets render the HTML 404 page.
+    """
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    # Resolve the project prefix while the session is open (plain scalars for
+    # the template, so rendering never depends on lazy relationship loads).
+    project = ticket_service.session.get(Project, ticket.project_id)
+    project_prefix = project.prefix if project else "UNK"
+
+    return templates.TemplateResponse(
+        request,
+        "ticket_detail.html",
+        {
+            "ticket_id": ticket.id,
+            "full_id": f"{project_prefix}-{ticket.number:03d}",
+            "ticket_title": ticket.title,
+            "ticket_type": ticket.type.value if hasattr(ticket.type, "value") else ticket.type,
+            "ticket_status": (
+                ticket.status.value if hasattr(ticket.status, "value") else ticket.status
+            ),
+            "ticket_priority": (
+                ticket.priority.value if hasattr(ticket.priority, "value") else ticket.priority
+            ),
+            "ticket_story_points": ticket.story_points,
+            "ticket_project_id": ticket.project_id,
+            "project_prefix": project_prefix,
+            "branch_name": ticket.branch_name,
+            "pr_url": ticket.pr_url,
+            "original_id": ticket.original_id,
+        },
+    )
+
+
+def _fields_section_response(request: Request, ticket: Ticket) -> HTMLResponse:
+    """Render the Description (markdown) + Groomed Fields section partial."""
+    groomed_fields = [
+        {"name": name, "label": label, "value": getattr(ticket, name) or ""}
+        for name, label in GROOMED_FIELD_DEFS
+    ]
+    editable = ticket.status not in FIELD_EDIT_LOCKED_STATUSES
+    return templates.TemplateResponse(
+        request,
+        "ticket_fields_section.html",
+        {
+            "ticket": ticket,
+            "groomed_fields": groomed_fields,
+            "editable": editable,
+            "show_groomed": editable or any(f["value"] for f in groomed_fields),
+        },
+    )
+
+
+@router.get("/tickets/{ticket_id}/fields", response_class=HTMLResponse)
+async def ticket_fields_section(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> HTMLResponse:
+    """Markdown-rendered description + collapsible groomed fields partial."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return _fields_section_response(request, ticket)
+
+
+@router.get("/tickets/{ticket_id}/fields/{field_name}/edit", response_class=HTMLResponse)
+async def ticket_field_edit_form(
+    request: Request,
+    ticket_id: int,
+    field_name: str,
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> HTMLResponse:
+    """Inline edit form for a single groomed field."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    field_def = next(((n, label) for n, label in GROOMED_FIELD_DEFS if n == field_name), None)
+    if field_def is None:
+        raise HTTPException(status_code=404, detail=f"Unknown field: {field_name}")
+    if ticket.status in FIELD_EDIT_LOCKED_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Fields cannot be edited while the ticket is {ticket.status.value}",
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "ticket_field_edit.html",
+        {
+            "ticket": ticket,
+            "field": {
+                "name": field_def[0],
+                "label": field_def[1],
+                "value": getattr(ticket, field_def[0]) or "",
+            },
+        },
+    )
+
+
+@router.patch("/tickets/{ticket_id}/fields/{field_name}", response_class=HTMLResponse)
+async def ticket_field_update(
+    request: Request,
+    ticket_id: int,
+    field_name: str,
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> HTMLResponse:
+    """Inline save for a single groomed field (HTMX form patch).
+
+    Returns the refreshed fields section on success; on validation failure
+    re-renders the edit form with an error message.
+    """
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    field_def = next(((n, label) for n, label in GROOMED_FIELD_DEFS if n == field_name), None)
+    if field_def is None:
+        raise HTTPException(status_code=404, detail=f"Unknown field: {field_name}")
+    if ticket.status in FIELD_EDIT_LOCKED_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Fields cannot be edited while the ticket is {ticket.status.value}",
+        )
+
+    form = await request.form()
+    raw_value = form.get("value")
+    if raw_value is None:
+        raise HTTPException(status_code=400, detail="value is required")
+
+    updated = ticket_service.update_ticket(ticket, **{field_name: str(raw_value)})
+    return _fields_section_response(request, updated)
+
+
+def _sprint_section_response(
+    request: Request, ticket: Ticket, sprint: Sprint | None, sprints: list[Sprint]
+) -> HTMLResponse:
+    """Render the sprint assignment partial for the ticket detail page."""
+    return templates.TemplateResponse(
+        request,
+        "ticket_sprint_section.html",
+        {"ticket": ticket, "sprint": sprint, "sprints": sprints},
+    )
+
+
+@router.get("/tickets/{ticket_id}/sprint-section", response_class=HTMLResponse)
+async def ticket_sprint_section(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    sprint_service: SprintService = Depends(get_sprint_service),
+) -> HTMLResponse:
+    """Sprint link / 'Unassigned' + assign-to-sprint dropdown partial."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    sprint = sprint_service.get_sprint(ticket.sprint_id) if ticket.sprint_id else None
+    sprints = [] if sprint else sprint_service.list_sprints()
+    return _sprint_section_response(request, ticket, sprint, sprints)
+
+
+@router.post("/tickets/{ticket_id}/assign-sprint", response_class=HTMLResponse)
+async def ticket_assign_sprint(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    sprint_service: SprintService = Depends(get_sprint_service),
+) -> HTMLResponse:
+    """HTMX form submit: assign the ticket to the selected sprint.
+
+    Returns the refreshed sprint section partial so the dropdown swaps to the
+    sprint link in place.
+    """
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    form = await request.form()
+    raw_sprint_id = form.get("sprint_id")
+    if raw_sprint_id in (None, ""):
+        raise HTTPException(status_code=400, detail="sprint_id is required")
+    try:
+        sprint_id = int(str(raw_sprint_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="sprint_id must be an integer") from e
+
+    try:
+        sprint_service.assign_ticket_to_sprint(sprint_id, ticket_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    sprint = sprint_service.get_sprint(sprint_id)
+    return _sprint_section_response(request, ticket, sprint, [])
+
+
+@router.post("/tickets/{ticket_id}/unassign-sprint", response_class=HTMLResponse)
+async def ticket_unassign_sprint(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    sprint_service: SprintService = Depends(get_sprint_service),
+) -> HTMLResponse:
+    """HTMX form submit: remove the ticket from its sprint."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if ticket.sprint_id is not None:
+        try:
+            sprint_service.unassign_ticket_from_sprint(ticket.sprint_id, ticket_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return _sprint_section_response(request, ticket, None, sprint_service.list_sprints())
