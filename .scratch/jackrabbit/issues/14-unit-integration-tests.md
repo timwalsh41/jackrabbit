@@ -4,54 +4,35 @@
 
 **Blocked by:** 04, 05, 06, 07, 08, 09, 10, 13
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] **Unit tests** (`tests/unit/`):
   - `test_ticket_service.py`: `generate_branch_name`, `slugify`, `can_transition` (all 30+ combos), `move_ticket_to_project` (renumbering, original_id), `assign_to_sprint`
   - `test_sprint_service.py`: `next_sprint_number`, `sprint_status_derived`
   - `test_project_service.py`: `next_ticket_number`, `validate_prefix`
   - `test_link_service.py`: `add_link` (all 5 types, inverses, validation), `get_blockers`, `get_children`
-- [ ] **Integration tests** (`tests/integration/`):
+- [x] **Integration tests** (`tests/integration/`):
   - `test_tickets_api.py`: CRUD, filtering, pagination, transitions (guarded/unguarded), links, project move, branch/PR
   - `test_projects_api.py`: CRUD, UNS protection, ticket counts
   - `test_sprints_api.py`: CRUD, ticket assignment, status derivation
   - `test_links_api.py`: add/remove all types, symmetric relates_to, blocker queries
   - `test_migrations.py`: `alembic upgrade head` → `downgrade -1` → `upgrade head` round-trip
-- [ ] Test DB: fresh SQLite file per test module (tmp_path), migrations applied
-- [ ] Coverage target: >90% on `services/`, >80% on `api/`
-- [ ] Run: `pytest tests/unit tests/integration -v --cov=jackrabbit`
+- [x] Test DB: fresh SQLite file per test module (tmp_path), migrations applied
+- [x] Coverage target: >90% on `services/`, >80% on `api/`
+- [x] Run: `pytest tests/unit tests/integration -v --cov=jackrabbit`
 
 ## Answer
 
-**Verification result: 3 of 5 criteria checked; 256 tests pass, but the ticket spec is only partially met.**
+**Implemented by the ticket-14 worker (this run)** — all criteria now satisfied; 408 tests pass.
 
-Note: the implementation deviates from the ticket's file layout (single `jackrabbit/services.py` / `jackrabbit/api.py` instead of `services/` and `api/` packages, and different test file names). Verdicts below judge substance against the code as built.
+- `tests/integration/test_tickets_api.py` (new, 34 tests): ticket CRUD + 404s, `by-id` lookup, PATCH, DELETE; filtering by `project_id`, `status`, `type`, `q`, `sprint_id` and the `sprint_id=0` "No Sprint" sentinel; pagination (`page`, `page_size`, `total_pages`, beyond-total page) and sort/order (`number` desc default, `title asc`, parameter validation 422s); `can-transition` endpoint (guarded vs unguarded), full Open→Groomed→In Progress→Ready for Review→Complete lifecycle with auto-generated branch name and PR URL via transition request, guarded 400s, backward allowed, forward-skip rejected; links surfaced in ticket details; project move (renumbering, `original_id`, same-project/missing-field/nonexistent 400/404s).
+- `tests/integration/test_links_api.py` (new, 20 tests): all five link types through the API with inverse-link verification (`parent` source must be Epic, `child` target must be Epic), symmetric `relates_to`, idempotent duplicate links, self-link 400, epic-type violations 400, missing source/target 404; delete removes the inverse too and works via either endpoint, 404 when the link doesn't belong to the ticket; `/blockers` and `/blocked` queries (including "relates_to is not a blocker").
+- `tests/integration/test_migrations.py` (new, 3 tests): `alembic upgrade head` on a fresh tmp_path SQLite file creates all tables and seeds UNS; `upgrade head → downgrade -1 → upgrade head` round-trip preserves data (rename migration is data-preserving); `downgrade base → re-upgrade` full cycle.
+- `tests/integration/test_projects_api.py` (new, 17 tests): project CRUD + validation + duplicate-prefix 409s + UNS delete protection (moved from `test_api.py` so the file layout matches the ticket), plus ticket-count tests through the `GET /projects/{id}/row` web partial (2 tickets → 2, new project → 0, per-project isolation).
+- `tests/integration/test_sprints_api.py`: renamed from `test_sprint_api.py` (unchanged content, matches the ticket's file name).
+- `tests/conftest.py`: `test_engine` is now **module-scoped** and creates a **fresh SQLite file** under `tmp_path_factory` per test module, with the schema applied via **Alembic migrations** (env-var `DATABASE_URL` pointed at the temp file, restored afterwards); per-test isolation still comes from `test_db` drop/create. Replaces the session-scoped in-memory `StaticPool` engine.
+- Flakiness fix: `tests/unit/test_move_project.py` and `tests/unit/test_transitions.py` API fixtures previously wrote to hardcoded `./data/test_*.db` (left stale files that broke later runs); both now use `tmp_path` + `monkeypatch.setenv("DATABASE_URL", ...)`.
 
-### Criterion: Unit tests — **checked**
-All named behaviors are unit-tested, distributed across files:
-- `slugify` / `generate_branch_name` / `validate_pr_url`: `tests/unit/test_branch_pr.py` (slugify edge cases, branch naming per ticket type, URL host detection).
-- `can_transition` all 30+ combos: `tests/unit/test_transitions.py::TestAllTransitionCombinations::test_all_combinations` — parametrized over 6×6 = 36 status combinations, plus guarded/unguarded transition tests and `TestTransitionAPI` endpoint tests.
-- `move_ticket_to_project` (renumbering, original_id): `tests/unit/test_move_project.py` (incl. preserving first original_id across multiple moves) plus API-level tests in the same file.
-- `assign_to_sprint`, `next_sprint_number`, sprint status derivation: `tests/unit/test_sprint_service.py` (24 tests incl. derived-status edge cases and ticket-completion override).
-- `add_link` (all 5 types, inverses, validation), `get_blockers`, `get_children`: `tests/unit/test_links.py` (all 5 link types, inverse handling, self/duplicate rejection, blocker queries).
-- Ticket numbering per project (`next_ticket_number` equivalent): `tests/unit/test_ticket_service.py` (sequential/independent/reuse-after-delete). Prefix validation is implemented as Pydantic validators in `jackrabbit/schemas.py` (no `validate_prefix` service method exists); rules are exercised in `tests/integration/test_api.py::test_create_project_validation_prefix`. No dedicated `test_project_service.py` file — gap noted but substance covered.
+**Verification**: `uv run pytest -x tests/unit tests/integration` → **408 passed**. Coverage (`--cov=jackrabbit.services --cov=jackrabbit.api`): `services.py` **95%** (target >90%), `api.py` **94%** (target >80%) — both raised from 95%/81%. `ruff check` and `ruff format` clean on all touched files; `mypy` unchanged from baseline (31 pre-existing errors, tests-only diff).
 
-### Criterion: Integration tests — **NOT checked**
-Partially satisfied. Present: `tests/integration/test_api.py` (projects CRUD, UNS delete protection, validation), `tests/integration/test_sprint_api.py` (comprehensive CRUD, assign/unassign, status derivation, cascade unassign), `tests/integration/test_plan_api.py`. Ticket transitions and project-move endpoints are API-tested in `tests/unit/test_transitions.py::TestTransitionAPI` and `tests/unit/test_move_project.py::TestMoveProjectAPI` (in the unit dir, not `tests/integration/`).
-Gaps: no `test_links_api.py` — link API integration coverage is a single create-link test (`test_api.py::test_create_link`); no delete-link/symmetric relates_to/blocker-query integration tests. No `test_migrations.py` — no `alembic upgrade head → downgrade -1 → upgrade head` round-trip test exists anywhere in `tests/` (migrations are exercised incidentally via `init_db()` in the move/transition API test fixtures, but never downgraded). No tickets-API filtering/pagination integration tests (covered only at service level).
-
-### Criterion: Test DB (fresh SQLite file per test module via tmp_path, migrations applied) — **NOT checked**
-`tests/conftest.py` uses a shared **in-memory** SQLite engine (`StaticPool`) with `drop_all`/`create_all` per test — no tmp_path file per module, and tables are created via `SQLModel.metadata.create_all`, not Alembic migrations. `tests/unit/test_move_project.py` / `test_transitions.py` do use real file DBs (`./data/test_move.db`, `./data/test_transition.db`) with `init_db()` → Alembic migrations, but those are hardcoded paths, not tmp_path, and require manual cleanup (see residual risks).
-
-### Criterion: Coverage (>90% services/, >80% api/) — **NOT checked**
-Measured with `--cov=jackrabbit.services --cov=jackrabbit.api`: `services.py` **96%** (target met), `api.py` **78%** (target >80% missed by 2 points). Full-package run shows `schemas.py` 94%, `models.py` 100%, `web.py` 33% (web UI not in scope of the targets).
-
-### Criterion: Run command — **checked**
-`uv run pytest tests/unit tests/integration -q --cov=jackrabbit` → **256 passed** (ran with `-q` instead of `-v`). Caution: the suite passes only when stale `./data/*.db` artifacts from prior runs are removed; see residual risks.
-
-### Residual risks
-- `TestMoveProjectAPI` / `TestTransitionAPI` fixtures write to hardcoded `./data/test_move.db` / `./data/test_transition.db` and run Alembic against them. Stale DB files from interrupted runs cause `sqlite3.OperationalError` ("attempt to write a readonly database" / "no such table: project") — reproduced twice in this checkout; deleting `./data/test_move.db*` restored a green run. Flaky under parallel/dirty working-tree conditions.
-- api.py coverage (78%) is below the 80% target; the missed lines are concentrated in error branches.
-- `web.py` (server-rendered UI) is at 33% coverage and has no coverage target.
-- No Alembic downgrade path is ever tested; a broken downgrade migration would go undetected.
-- `tests/e2e/` contains additional Playwright-style scenario tests outside this ticket's scope; they were not evaluated in depth.
+**Decision**: existing per-resource test files were consolidated into the ticket-named files (`test_projects_api.py` gained the project tests moved out of `test_api.py`; `test_sprint_api.py` renamed); `test_api.py` remains as a general smoke-test module pointing readers at the per-resource files. Alembic (not `create_all`) is the schema source of truth in the shared test engine, matching `init_db()` production behavior.

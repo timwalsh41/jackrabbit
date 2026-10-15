@@ -326,13 +326,11 @@ class TestMoveProjectAPI:
     """Integration tests for the move project API endpoint."""
 
     @pytest.fixture
-    def client(self):
-        """Create test client."""
-        import os
-
-        os.environ["DATABASE_URL"] = "sqlite:///./data/test_move.db"
+    def client(self, tmp_path, monkeypatch):
+        """Create test client backed by a fresh temp SQLite file DB."""
         from jackrabbit.main import create_app
 
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test_move.db'}")
         app = create_app()
         init_db()
 
@@ -340,11 +338,6 @@ class TestMoveProjectAPI:
 
         client = TestClient(app)
         yield client
-        # Cleanup
-        import os
-
-        if os.path.exists("./data/test_move.db"):
-            os.remove("./data/test_move.db")
 
     def test_move_project_endpoint(self, client):
         """Test POST /tickets/{id}/move-project endpoint."""
