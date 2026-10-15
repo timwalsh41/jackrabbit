@@ -10,9 +10,8 @@
     </div>
 
     <div class="bg-white shadow-sm border border-gray-200 rounded-lg p-6">
-        <form hx-post="{{ action }}"
-              hx-target="#ticket-modal"
-              hx-swap="innerHTML"
+        <form hx-{% if ticket %}patch{% else %}post{% endif %}="{{ action }}"
+              {% if ticket %}hx-target="this" hx-swap="none"{% else %}hx-target="#ticket-modal" hx-swap="innerHTML"{% endif %}
               id="ticket-form"
               class="space-y-6">
             <div>
@@ -165,14 +164,16 @@
 </div>
 
 <script>
-    // Close modal on successful form submission
     document.body.addEventListener('htmx:afterRequest', function(evt) {
         if (evt.detail.successful && evt.detail.target.id === 'ticket-form') {
-            // The response should be the new row HTML or empty
-            // Close modal by clearing it
+            {% if ticket %}
+            // Edit: PATCH succeeded — return to the backlog to see the updated row
+            window.location.href = '/backlog';
+            {% else %}
+            // Close modal by clearing it, then refresh the table
             document.getElementById('ticket-modal').innerHTML = '';
-            // Refresh the table
             htmx.ajax('GET', '/backlog', {target: '#tickets-table-body', swap: 'innerHTML'});
+            {% endif %}
         }
     });
 </script>

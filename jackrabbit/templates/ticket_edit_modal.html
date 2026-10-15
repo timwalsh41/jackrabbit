@@ -1,0 +1,139 @@
+<div class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="flex min-h-full items-center justify-center p-4 text-center">
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
+        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+        <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
+            <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div class="sm:flex sm:items-start">
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Edit Ticket
+                        </h3>
+                    </div>
+                </div>
+
+                <form hx-patch="{{ action }}"
+                      hx-target="#ticket-row-{{ ticket.id }}"
+                      hx-swap="outerHTML"
+                      id="ticket-edit-form"
+                      class="mt-4 space-y-4"
+                      hx-headers='{"Content-Type": "application/json"}'
+                      hx-ext="json-enc"
+                      hx-on::after-request="if (event.detail.xhr.status === 200) { closeModal(); } else if (!event.detail.successful) { var el = document.getElementById('ticket-edit-error'); if (el) { el.textContent = 'Save failed (' + event.detail.xhr.status + '). Please check your input and try again.'; el.classList.remove('hidden'); } }">
+                    <div id="ticket-edit-error" class="hidden rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700"></div>
+
+                    <div>
+                        <label for="edit_type" class="block text-sm font-medium text-gray-700 mb-1">Type <span class="text-red-500">*</span></label>
+                        <select name="type" id="edit_type" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            {% for t in TicketType %}
+                            <option value="{{ t.value }}" {% if ticket.type == t %}selected{% endif %}>
+                                {{ t.value }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="edit_title" class="block text-sm font-medium text-gray-700 mb-1">Title <span class="text-red-500">*</span></label>
+                        <input type="text"
+                               id="edit_title"
+                               name="title"
+                               value="{{ ticket.title }}"
+                               required
+                               maxlength="255"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                               placeholder="Brief ticket title...">
+                    </div>
+
+                    <div>
+                        <label for="edit_description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="edit_description"
+                                  name="description"
+                                  rows="4"
+                                  class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                                  placeholder="Detailed description...">{{ ticket.description or '' }}</textarea>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="edit_priority" class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                            <select name="priority" id="edit_priority"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                {% for p in Priority %}
+                                <option value="{{ p.value }}" {% if ticket.priority == p %}selected{% endif %}>
+                                    {{ p.value }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="edit_story_points" class="block text-sm font-medium text-gray-700 mb-1">Story Points</label>
+                            <input type="number"
+                                   id="edit_story_points"
+                                   name="story_points"
+                                   value="{{ ticket.story_points if ticket.story_points else '' }}"
+                                   min="0"
+                                   max="100"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                                   placeholder="Optional (e.g., 5)">
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                        <button type="button"
+                                class="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                                onclick="closeModal()">
+                            Cancel
+                        </button>
+                        <button type="submit"
+                                class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                            Save Changes
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Ensure json-enc extension is registered
+    (function() {
+        if (typeof htmx !== 'undefined' && htmx.defineExtension && (!htmx.extensions || !htmx.extensions['json-enc'])) {
+            htmx.defineExtension('json-enc', {
+                onEvent: function(name, evt) {
+                    if (name === "htmx:configRequest") {
+                        evt.detail.headers['Content-Type'] = "application/json";
+                    }
+                },
+                encodeParameters: function(xhr, parameters, elt) {
+                    xhr.overrideMimeType('text/json');
+                    return JSON.stringify(parameters);
+                }
+            });
+        }
+    })();
+
+    function closeModal() {
+        const modal = document.getElementById('ticket-modal');
+        if (modal) {
+            modal.innerHTML = '';
+        }
+    }
+
+    // Close on backdrop click
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('bg-gray-500')) {
+            closeModal();
+        }
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+</script>

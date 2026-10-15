@@ -449,6 +449,7 @@ class TicketService:
         project_id: int | None = None,
         status: TicketStatus | None = None,
         type: TicketType | None = None,
+        priority: Priority | None = None,
         sprint_id: int | None = None,
         q: str | None = None,
         sort: str = "number",
@@ -456,6 +457,11 @@ class TicketService:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[Ticket], int]:
+        """List tickets with optional filters and pagination.
+
+        ``sprint_id=0`` is the "No Sprint" sentinel: it selects only tickets
+        whose sprint_id is NULL. ``sprint_id=None`` applies no sprint filter.
+        """
         query = select(Ticket)
         count_query = select(func.count(Ticket.id))
 
@@ -468,7 +474,14 @@ class TicketService:
         if type:
             query = query.where(Ticket.type == type)
             count_query = count_query.where(Ticket.type == type)
-        if sprint_id:
+        if priority:
+            query = query.where(Ticket.priority == priority)
+            count_query = count_query.where(Ticket.priority == priority)
+        if sprint_id == 0:
+            # "No Sprint" sentinel: only unsprinted tickets
+            query = query.where(Ticket.sprint_id.is_(None))  # type: ignore[union-attr]
+            count_query = count_query.where(Ticket.sprint_id.is_(None))  # type: ignore[union-attr]
+        elif sprint_id is not None:
             query = query.where(Ticket.sprint_id == sprint_id)
             count_query = count_query.where(Ticket.sprint_id == sprint_id)
         if q:

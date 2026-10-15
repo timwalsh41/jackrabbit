@@ -239,6 +239,46 @@ class TestListTickets:
         assert total == 1
         assert tickets[0].id == many_tickets[0].id
 
+    def test_filter_by_priority(self, ticket_service, many_tickets):
+        """Priority filter narrows to tickets with that priority (backlog filter)."""
+        ticket_service.update_ticket(many_tickets[0], priority=Priority.CRITICAL)
+        ticket_service.update_ticket(many_tickets[3], priority=Priority.CRITICAL)
+        tickets, total = ticket_service.list_tickets(priority=Priority.CRITICAL)
+        assert total == 2
+        assert {t.id for t in tickets} == {many_tickets[0].id, many_tickets[3].id}
+
+    def test_no_priority_filter_returns_all(self, ticket_service, many_tickets):
+        tickets, total = ticket_service.list_tickets(priority=None)
+        assert total == 5
+
+    def test_filter_no_sprint_with_zero_sentinel(
+        self, ticket_service, setup_projects, many_tickets
+    ):
+        """sprint_id=0 means 'No Sprint': only tickets with NULL sprint_id."""
+        from jackrabbit.services import SprintService
+
+        sprint = SprintService(ticket_service.session).create_sprint(number=2601)
+        ticket_service.update_ticket(many_tickets[0], sprint_id=sprint.id)
+        tickets, total = ticket_service.list_tickets(sprint_id=0)
+        assert total == 4
+        assert all(t.sprint_id is None for t in tickets)
+
+    def test_sprint_id_none_returns_all(self, ticket_service, setup_projects, many_tickets):
+        from jackrabbit.services import SprintService
+
+        sprint = SprintService(ticket_service.session).create_sprint(number=2601)
+        ticket_service.update_ticket(many_tickets[0], sprint_id=sprint.id)
+        tickets, total = ticket_service.list_tickets(sprint_id=None)
+        assert total == 5
+
+    def test_filter_by_sprint_excludes_null(self, ticket_service, setup_projects, many_tickets):
+        """Filtering by a real sprint must NOT return unsprinted tickets."""
+        from jackrabbit.services import SprintService
+
+        sprint = SprintService(ticket_service.session).create_sprint(number=2601)
+        tickets, total = ticket_service.list_tickets(sprint_id=sprint.id)
+        assert total == 0
+
     def test_search_by_title(self, ticket_service, many_tickets):
         tickets, total = ticket_service.list_tickets(q="login")
         assert total == 2

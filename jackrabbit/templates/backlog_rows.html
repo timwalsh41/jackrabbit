@@ -1,0 +1,9 @@
+{# Table body rows for the Backlog view. Rendered standalone for HTMX
+   filter/sort/pagination requests (hx-target="#tickets-table-body"). #}
+{% for ticket in tickets %}
+{% include "ticket_row.html" %}
+{% else %}
+<tr>
+    <td colspan="9" class="px-4 py-8 text-center text-gray-500">No tickets found</td>
+</tr>
+{% endfor %}

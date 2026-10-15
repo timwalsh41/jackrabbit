@@ -105,37 +105,37 @@
                 <tr>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-                        hx-vals='js:{"sort": "number", "order": "{{ "asc" if current_filters.sort == "number" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+                        hx-vals='js:{"sort": "number", "order": "{{ "asc" if current_filters.sort == "number" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
                         ID {% if current_filters.sort == "number" %}{% if current_filters.order == "asc" %}↑{% else %}↓{% endif %}{% endif %}
                     </th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-                        hx-vals='js:{"sort": "title", "order": "{{ "asc" if current_filters.sort == "title" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+                        hx-vals='js:{"sort": "title", "order": "{{ "asc" if current_filters.sort == "title" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
                         Title {% if current_filters.sort == "title" %}{% if current_filters.order == "asc" %}↑{% else %}↓{% endif %}{% endif %}
                     </th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-                        hx-vals='js:{"sort": "type", "order": "{{ "asc" if current_filters.sort == "type" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+                        hx-vals='js:{"sort": "type", "order": "{{ "asc" if current_filters.sort == "type" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
                         Type {% if current_filters.sort == "type" %}{% if current_filters.order == "asc" %}↑{% else %}↓{% endif %}{% endif %}
                     </th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-                        hx-vals='js:{"sort": "status", "order": "{{ "asc" if current_filters.sort == "status" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+                        hx-vals='js:{"sort": "status", "order": "{{ "asc" if current_filters.sort == "status" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
                         Status {% if current_filters.sort == "status" %}{% if current_filters.order == "asc" %}↑{% else %}↓{% endif %}{% endif %}
                     </th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-                        hx-vals='js:{"sort": "priority", "order": "{{ "asc" if current_filters.sort == "priority" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+                        hx-vals='js:{"sort": "priority", "order": "{{ "asc" if current_filters.sort == "priority" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
                         Priority {% if current_filters.sort == "priority" %}{% if current_filters.order == "asc" %}↑{% else %}↓{% endif %}{% endif %}
                     </th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-                        hx-vals='js:{"sort": "story_points", "order": "{{ "asc" if current_filters.sort == "story_points" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+                        hx-vals='js:{"sort": "story_points", "order": "{{ "asc" if current_filters.sort == "story_points" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
                         Points {% if current_filters.sort == "story_points" %}{% if current_filters.order == "asc" %}↑{% else %}↓{% endif %}{% endif %}
                     </th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-                        hx-vals='js:{"sort": "sprint_id", "order": "{{ "asc" if current_filters.sort == "sprint_id" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+                        hx-vals='js:{"sort": "sprint_id", "order": "{{ "asc" if current_filters.sort == "sprint_id" and current_filters.order == "desc" else "desc" }}", "page": 1, "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
                         Sprint {% if current_filters.sort == "sprint_id" %}{% if current_filters.order == "asc" %}↑{% else %}↓{% endif %}{% endif %}
                     </th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Blocked</th>
@@ -143,13 +143,7 @@
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-200" id="tickets-table-body">
-                {% for ticket in tickets %}
-                {% include "ticket_row.html" %}
-                {% else %}
-                <tr>
-                    <td colspan="9" class="px-4 py-8 text-center text-gray-500">No tickets found</td>
-                </tr>
-                {% endfor %}
+                {% include "backlog_rows.html" %}
             </tbody>
         </table>
     </div>
@@ -160,7 +154,7 @@
         {% if page > 1 %}
         <a href="#" class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
             hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-            hx-vals='js:{"page": {{ page - 1 }}, "sort": "{{ current_filters.sort }}", "order": "{{ current_filters.order }}", "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+            hx-vals='js:{"page": {{ page - 1 }}, "sort": "{{ current_filters.sort }}", "order": "{{ current_filters.order }}", "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
             Previous
         </a>
         {% endif %}
@@ -172,7 +166,7 @@
         {% if page < total_pages %}
         <a href="#" class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
             hx-get="/backlog" hx-target="#tickets-table-body" hx-swap="innerHTML"
-            hx-vals='js:{"page": {{ page + 1 }}, "sort": "{{ current_filters.sort }}", "order": "{{ current_filters.order }}", "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{{ current_filters.sprint_id or "" }}", "q": "{{ current_filters.q or "" }}"}'>
+            hx-vals='js:{"page": {{ page + 1 }}, "sort": "{{ current_filters.sort }}", "order": "{{ current_filters.order }}", "project_id": "{{ current_filters.project_id or "" }}", "status": "{{ current_filters.status.value if current_filters.status else "" }}", "type": "{{ current_filters.type.value if current_filters.type else "" }}", "sprint_id": "{% if current_filters.sprint_id is not none %}{{ current_filters.sprint_id }}{% endif %}", "priority": "{{ current_filters.priority.value if current_filters.priority else "" }}", "q": "{{ current_filters.q or "" }}"}'>
             Next
         </a>
         {% endif %}
