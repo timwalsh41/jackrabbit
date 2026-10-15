@@ -189,7 +189,13 @@ class TicketService:
         return self.session.get(Ticket, ticket_id)
 
     def get_ticket_by_full_id(self, project_prefix: str, number: int) -> Ticket | None:
-        project = self.session.exec(select(Project).where(Project.prefix == project_prefix)).first()
+        """Look up a ticket by its full human ID (e.g. WEB-1).
+
+        The prefix part is case-insensitive (WEB, web, and Web all match).
+        """
+        project = self.session.exec(
+            select(Project).where(func.upper(Project.prefix) == project_prefix.upper())
+        ).first()
         if not project:
             return None
         return self.session.exec(
