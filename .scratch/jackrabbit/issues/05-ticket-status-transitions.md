@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Status enum: `Open`, `Groomed`, `In Progress`, `Ready for Review`, `Complete`, `Rejected` (jackrabbit/models.py:20-26, `TicketStatus` StrEnum)
 - [x] Transition rules (ADR-0009):
@@ -20,7 +20,7 @@
 - [x] Service: `transition(ticket, to_status, reason)` — atomic update + audit (jackrabbit/services.py:401-446; status update + `Transition` row added, single `commit()`)
 - [x] Web: Ticket detail shows current status badge + action buttons for valid next states (jackrabbit/templates/ticket_detail.html: status badge in `renderTicket`, `renderTransitionButtons` computes valid next states incl. backward/Rejected; guarded transitions open modals) — EXCEPT the 400-error-display sub-bullet below, left unchecked
   - [x] Buttons use `hx-post="/api/v1/tickets/{id}/transition"` → returns updated status badge + history partial (ticket_detail.html:193 and modal templates `hx-post` to the API; on success the ticket content incl. badge and history is re-rendered via `htmx.ajax` GET)
-  - [ ] Guard failures return 400 with error message (displayed via HTMX) — 400-with-detail verified (`test_transition_endpoint_invalid_guard`, api.py:506-507), but NOT displayed via HTMX: buttons use `hx-swap="none"` and no `htmx:responseError`/error handler exists in any template
+  - [x] Guard failures return 400 with error message (displayed via HTMX) — `ticket_detail.html` now registers a global `htmx:responseError` handler that parses FastAPI `detail` (string or validation array) and shows it in the `#transition-error` banner (page) or `#modal-error` container (inside guarded-transition modals, all three of which gained an error div). Also fixed a pre-existing bug found en route: non-modal direct buttons (e.g. Ready for Review → Complete, Rejected restore) posted form-encoded `hx-vals` to the JSON endpoint → 422 before guards ran; they now use `hx-ext="json-enc"` + JSON Content-Type header. E2E: `test_guard_failure_error_displayed` (Rejected → Groomed restore, banner shows "Approach is required") and previously-broken `test_complete_ticket` now pass
 - [x] Web: Transition history section on ticket detail (timestamp, from→to, reason) (ticket_detail.html:209-235 `renderTransitions` renders from→to badges, reason, localized timestamp; section at lines 404-407)
 - [x] Unit tests: all 30+ transition combinations (forward guarded, backward free, rejected restore) (tests/unit/test_transitions.py: `TestAllTransitionCombinations.test_all_combinations` parametrized 6×6 = 36 combinations; plus dedicated guard tests)
 
@@ -42,16 +42,25 @@ Verified against branch `jackrabbit-integration`.
 3. **API endpoint** — Satisfied. `POST /api/v1/tickets/{ticket_id}/transition` in `jackrabbit/api.py:467-507` with `TransitionRequest {to_status, reason, optional grooming/branch/pr fields}`; `ValueError` → HTTP 400 (api.py:506-507). Also exposes `GET .../transition/can` (api.py:454-464). Tests: `test_transition_endpoint`, `test_transition_endpoint_invalid_guard`, `test_can_transition_endpoint`.
 4. **`can_transition`** — Satisfied. Signature `(ticket, to_status) -> tuple[bool, str | None]` at `jackrabbit/services.py:324`.
 5. **`transition`** — Satisfied. `jackrabbit/services.py:401-446`: guard check, status update, `Transition` audit row + ticket added, single `commit()` (atomic). Tests: `test_successful_transition_creates_audit`, `test_multiple_transitions_create_multiple_audit_records`, `test_transition_sets_completed_at`, `test_transition_raises_on_invalid`.
-6. **Web status badge + action buttons** — Mostly satisfied; one sub-bullet left unchecked. `ticket_detail.html` renders a status badge (`getStatusBadge(ticket.status)`), computes valid next states (forward next / backward / Rejected) in `getValidTransitions`, and guarded transitions open HTMX modals (`/tickets/{id}/transition/{groomed,in-progress,ready-for-review}/modal` in `jackrabbit/web.py:545-605`); unguarded buttons post directly via `hx-post` (line 193). Success re-renders the badge + history via `htmx.ajax` GET. **Gap:** the sub-criterion "guard failures … displayed via HTMX" is only half true — the API returns 400 with the error message, but the UI has no `htmx:responseError`/`hx-target-error` handler anywhere (checked all templates and static assets; `jackrabbit/static` is empty), so the 400 detail is silently dropped on the client. That sub-bullet is left unchecked; the parent bullet is checked because the badge/buttons/refresh behavior itself is fully implemented and tested.
+6. **Web status badge + action buttons** — Satisfied, including the previously-open guard-failure sub-bullet (fixed in this pass; see **Update** below). `ticket_detail.html` renders a status badge (`getStatusBadge`), computes valid next states in `getValidTransitions`, opens HTMX modals for guarded forward transitions, and posts direct transitions via `hx-post`. Success re-renders badge + history via `htmx.ajax` GET. Guard failures are now displayed: a global `htmx:responseError` handler parses FastAPI `detail` and shows it in the `#transition-error` banner (page) or `#modal-error` div (inside each guarded-transition modal).
 7. **Transition history section** — Satisfied. `renderTransitions` (ticket_detail.html:209-235) renders from→to status badges, reason, and localized timestamp; mounted as the "Transition History" section at lines 404-407.
 8. **Unit tests 30+ combinations** — Satisfied. `TestAllTransitionCombinations.test_all_combinations` in `tests/unit/test_transitions.py:392-558` is parametrized over all 6 statuses × 6 statuses = 36 combinations, plus 17 focused guard/audit/endpoint tests (53 tests total).
 
-**Commands run:**
-- `uv run pytest tests/unit/test_transitions.py -q` → 53 passed.
-- `uv run pytest tests/unit tests/integration -q` → 4 failed, 251 passed, 1 error — all failures are in unrelated `test_move_project.py` (move-project API) and `test_plan_api.py::test_get_plan_with_project_filter`, outside this ticket's scope. No transition test failed.
+**Update (guard-failure HTMX display, this pass):**
+
+The final open sub-bullet — "guard failures return 400 with error message (displayed via HTMX)" — is now implemented (TDD, red→green):
+
+- `ticket_detail.html`: global `htmx:responseError` listener + `extractErrorMessage` (handles `detail` strings and 422 validation arrays); `#transition-error` alert banner added to the Status Actions section; cleared implicitly on successful reload (renderTicket rebuilds it hidden).
+- All three transition modal templates gained a `#modal-error` container so in-modal guard failures surface next to the form.
+- **Bug found and fixed en route:** non-modal direct buttons (Ready for Review → Complete, Rejected-restore, backward moves) sent form-encoded `hx-vals` to the JSON-only endpoint → FastAPI 422 before guards ever ran; E2E `test_complete_ticket` was failing as a result. Buttons now use `hx-ext="json-enc"` + `hx-headers Content-Type: application/json` (same pattern as the modals).
+- New tests: `tests/integration/test_transition_web.py` (detail page wires `htmx:responseError` + `#transition-error`; modals have `#modal-error`; 400-with-detail contract for HTMX requests, guard + invalid-PR-URL cases) and E2E `test_guard_failure_error_displayed` (Rejected → Groomed restore, banner shows "Approach is required").
+
+**Commands run (full run, this pass):**
+- `uv run pytest -x tests/unit tests/integration -q` → 335 passed.
+- `uv run pytest tests/e2e/test_ticket_lifecycle.py -q` (against live server) → 7 passed.
+- `uv run ruff check` / `ruff format` on touched test files → clean.
 
 **Gaps / residual risks:**
-- Guard-failure error messages are not surfaced in the web UI (no HTMX error handler); the API contract (400 + detail) is correct.
 - Ready for Review → Complete performs no programmatic check (manual confirmation by design; no spike-report "accepted" field exists in the model).
 - In `test_all_combinations`, Rejected → prior cases use `expected = None` (asserting observed behavior rather than a pre-computed expectation) — coverage exists but expectation is weaker for those cases.
-- Pre-existing failures in `test_move_project.py` / `test_plan_api.py` unrelated to this ticket (likely covered by ticket 06).
+- `mypy jackrabbit` reports 37 pre-existing errors in unrelated source files (api.py, etc.); none introduced by this pass (templates and tests only; `tests/` is excluded from mypy).

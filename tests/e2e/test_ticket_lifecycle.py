@@ -144,6 +144,36 @@ class TestTicketLifecycle:
             timeout=10000
         )
 
+    def test_guard_failure_error_displayed(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """A guarded transition that fails (400) surfaces the error message via HTMX."""
+        import httpx
+
+        ticket = make_ticket(status="Open")
+        tid = ticket["id"]
+
+        # Reject the ticket via API so the restore buttons are direct hx-post buttons
+        # (Rejected -> Groomed re-checks the Groomed guard, which fails with no fields).
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            response = api.post(
+                f"/api/v1/tickets/{tid}/transition",
+                json={"to_status": "Rejected", "reason": "not needed"},
+            )
+            assert response.status_code == 200
+
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
+
+        page.on("dialog", lambda d: d.accept("restore"))
+        # Restore to Groomed without grooming fields -> guard fails -> 400
+        page.click("#transition-buttons button:has-text('Groomed')")
+
+        banner = page.locator("#transition-error")
+        expect(banner).to_be_visible(timeout=10000)
+        expect(banner).to_contain_text("Approach is required")
+
     def test_transition_history_recorded(
         self, page: Page, base_url: str, seeded_projects, make_ticket
     ):

@@ -190,7 +190,9 @@
             } else if (t.forward && t.status === 'Ready for Review') {
                 buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/ready-for-review/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
             } else {
-                buttonAttrs = `hx-post="/api/v1/tickets/${ticket.id}/transition" hx-vals='js:{to_status: "${t.status}", reason: prompt("Reason for transition to ${t.status}:")}' hx-swap="none" hx-on::after-request="if(event.detail.successful) { htmx.ajax('GET', '/api/v1/tickets/${ticket.id}', {target: '#ticket-content', swap: 'innerHTML'}); }"`;
+                // Direct (non-modal) transitions still POST JSON to the API —
+                // json-enc encodes the hx-vals object, the header keeps FastAPI happy.
+                buttonAttrs = `hx-post="/api/v1/tickets/${ticket.id}/transition" hx-ext="json-enc" hx-headers='{"Content-Type": "application/json"}' hx-vals='js:{to_status: "${t.status}", reason: prompt("Reason for transition to ${t.status}:")}' hx-swap="none" hx-on::after-request="if(event.detail.successful) { htmx.ajax('GET', '/api/v1/tickets/${ticket.id}', {target: '#ticket-content', swap: 'innerHTML'}); }"`;
             }
             
             html += `
@@ -360,6 +362,7 @@
                 <!-- Transition Actions -->
                 <div class="pb-4 border-b border-gray-200">
                     <h3 class="text-sm font-medium text-gray-900 mb-2">Status Actions</h3>
+                    <div id="transition-error" class="hidden mb-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md" role="alert"></div>
                     <div id="transition-buttons">
                         ${transitionButtons}
                     </div>
@@ -417,6 +420,39 @@
             </div>
         `;
     }
+
+    // Extract a human-readable error message from an error response body.
+    // Handles FastAPI-style {"detail": "..."} strings and validation arrays.
+    function extractErrorMessage(xhr) {
+        try {
+            const data = JSON.parse(xhr.responseText);
+            const detail = data && data.detail;
+            if (typeof detail === 'string' && detail) return detail;
+            if (Array.isArray(detail)) {
+                return detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join('; ');
+            }
+        } catch (e) {
+            // Non-JSON body: fall through to generic message
+        }
+        return 'Transition failed (status ' + xhr.status + ')';
+    }
+
+    // Display guard-failure (400) error messages from HTMX transition requests.
+    // If the failing request came from inside a modal, show the error there;
+    // otherwise show it in the transition-error banner on the page.
+    document.body.addEventListener('htmx:responseError', function(evt) {
+        const xhr = evt.detail.xhr || { status: 0, responseText: '' };
+        const message = extractErrorMessage(xhr);
+        const source = evt.detail.elt;
+        const modal = (source && source.closest) ? source.closest('[role="dialog"]') : null;
+        const errEl = (modal && modal.querySelector('#modal-error'))
+            ? modal.querySelector('#modal-error')
+            : document.getElementById('transition-error');
+        if (errEl) {
+            errEl.textContent = message;
+            errEl.classList.remove('hidden');
+        }
+    });
 
     // Handler for htmx response
     document.body.addEventListener('htmx:afterSwap', function(evt) {
