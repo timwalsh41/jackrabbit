@@ -1,5 +1,7 @@
 """FastAPI API routes for Jackrabbit."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +18,6 @@ from jackrabbit.models import (
 )
 from jackrabbit.schemas import (
     CanTransitionResponse,
-    MoveProjectRequest,
     MoveProjectResponse,
     PaginatedResponse,
     PlanResponse,
@@ -548,19 +549,50 @@ def transition_ticket(
 @router.post(
     "/tickets/{ticket_id}/move-project", response_model=MoveProjectResponse, status_code=200
 )
-def move_ticket_project(
+async def move_ticket_project(
     ticket_id: int,
-    request: MoveProjectRequest,
+    request: Request,
     service: TicketService = Depends(get_ticket_service),
 ) -> MoveProjectResponse:
+    """Move a ticket to another project (JSON or urlencoded form body).
+
+    Accepts `project_id` (and the documented alias `target_project_id`) so both
+    JSON API clients and htmx form posts work.
+    """
     ticket = service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+
+    payload = await _parse_move_payload(request)
+    target_raw = payload.get("project_id", payload.get("target_project_id"))
+    if target_raw is None or target_raw == "":
+        raise HTTPException(status_code=400, detail="project_id is required")
     try:
-        result = service.move_ticket_to_project(ticket_id, request.project_id)
+        target_project_id = int(target_raw)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="project_id must be an integer") from e
+
+    try:
+        result = service.move_ticket_to_project(ticket_id, target_project_id)
         return MoveProjectResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+async def _parse_move_payload(request: Request) -> dict[str, Any]:
+    """Parse a move request body: JSON for API clients, form data for htmx."""
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="Invalid JSON body") from e
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="JSON body must be an object")
+        return body
+    # Browser/htmx submissions post urlencoded (or multipart) form data
+    form = await request.form()
+    return dict(form)
 
 
 # Link endpoints

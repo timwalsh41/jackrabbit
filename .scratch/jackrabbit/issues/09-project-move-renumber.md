@@ -4,7 +4,7 @@
 
 **Blocked by:** 04, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Ticket model: add `original_id` TEXT field (stores `MSC-005` format)
 - [x] API: `POST /api/v1/tickets/{id}/move-project` with `{target_project_id}`
@@ -12,16 +12,16 @@
   - Updates `project_id`, `number`, sets `original_id = f"{old_prefix}-{old_number:03d}"` (if not already set)
   - Returns updated ticket with new ID format
 - [x] Service: `move_ticket_to_project(ticket_id, target_project_id)` — atomic, handles race conditions
-- [ ] Web: Ticket detail — "Move Project" button → modal with project dropdown (excludes current)
+- [x] Web: Ticket detail — "Move Project" button → modal with project dropdown (excludes current)
   - `hx-post="/api/v1/tickets/{id}/move-project"` → returns updated ticket detail partial
   - Display "Formerly {original_id}" below ticket ID if `original_id` set
 - [x] Web: Backlog — ticket row shows current ID; hover/tooltip shows original ID
 - [x] Edge case: moving already-moved ticket preserves first `original_id`
-- [ ] Unit tests: move to empty project (→ 001), move to project with gaps (→ next), chained moves preserve first original_id, concurrent moves handled
+- [x] Unit tests: move to empty project (→ 001), move to project with gaps (→ next), chained moves preserve first original_id, concurrent moves handled
 
 ## Answer
 
-Verified on branch `jackrabbit-integration` (HEAD 97f36c3). Backend functionality is fully implemented and tested; the browser UI move flow is broken (Playwright e2e failure), and two named unit-test scenarios are missing.
+**Resolved in follow-up pass (ticket 09).** Backend was already implemented and verified (HEAD 97f36c3); this pass fixed the broken browser UI move flow, added the two missing unit-test scenarios, and aligned the model with the migration schema.
 
 ### Criterion verdicts
 
@@ -46,3 +46,17 @@ Verified on branch `jackrabbit-integration` (HEAD 97f36c3). Backend functionalit
 - Manual headless-Chromium + TestClient verification of detail-page "Formerly" badge, backlog row tooltip, gap numbering (`WEB-4`), and API error codes.
 
 Note: an initial run of `TestMoveProjectAPI` failed with sqlite `disk I/O error` due to stale `data/test_move.db*` WAL artifacts; all pass on a clean run. No production files were modified; only this ticket file was edited.
+### Follow-up resolution (this pass)
+
+1. **Web ticket-detail move modal — fixed & satisfied.** The prior implementation failed e2e because the modal forced `Content-Type: application/json` via `hx-headers` while htmx posted a urlencoded form body — the API returned 422 and the move never happened. Fixes:
+   - `jackrabbit/templates/ticket_move_project_modal.html`: plain urlencoded form post (`hx-post` + `hx-swap="none"`), on success closes the modal and refreshes `#ticket-content` via `htmx.ajax('GET', '/api/v1/tickets/{id}')`, which re-renders the detail with the new ID and the "Formerly {original_id}" badge.
+   - `jackrabbit/api.py` `POST /tickets/{id}/move-project` now parses both JSON and urlencoded/multipart form bodies (`_parse_move_payload`) and accepts both `project_id` and the documented `target_project_id` field names; empty/invalid `project_id` → 400.
+   - Verified: `tests/e2e/test_project_move.py` 2/2 pass (UI move now updates the detail page to `WEB-…` and shows the Formerly badge; chained moves preserve `original_id`).
+2. **Unit tests — completed.** Added to `tests/unit/test_move_project.py`:
+   - `test_move_ticket_to_project_with_gap`: target project with numbers {1,3} → moved ticket becomes `WEB-4` (MAX+1 skips the gap).
+   - `test_move_ticket_handles_concurrent_number_race`: simulated concurrent writer claims `WEB-3` between the MAX read and the commit; the service retries and assigns `WEB-4`, no duplicate number.
+   - Plus integration tests in `tests/integration/test_move_project_web.py`: modal dropdown excludes current project, form-encoded move updates ticket, unknown ticket modal → 404, empty project_id → 400.
+3. **Concurrency hardening.** `TicketService.move_ticket_to_project` now retries (up to 5 attempts) on `IntegrityError` with a fresh `MAX(number)` read; added `UniqueConstraint("project_id","number", name="uq_ticket_project_number")` to the `Ticket` SQLModel (previously only in the alembic migration — model/migration drift meant `create_all`-based test schemas lacked the guard).
+4. Full gate: `uv run pytest -x tests/unit tests/integration` → 339 passed; ruff check/format clean on touched files; `mypy jackrabbit` unchanged from baseline (31 pre-existing errors, 0 new).
+
+**Status:** resolved

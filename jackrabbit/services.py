@@ -6,6 +6,7 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
 from jackrabbit.models import (
@@ -538,21 +539,35 @@ class TicketService:
         if original_id is None:
             original_id = old_full_id
 
-        # Get next ticket number for target project
-        max_num = self.session.exec(
-            select(func.max(Ticket.number)).where(Ticket.project_id == new_project_id)
-        ).first()
-        next_number = (max_num or 0) + 1
+        # Perform the move: read MAX(number) and write in a tight window.
+        # A concurrent writer could claim the computed number between the read
+        # and the commit; the uq_ticket_project_number constraint turns that
+        # into an IntegrityError, and we retry with a fresh MAX read.
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            current = self.get_ticket(ticket_id)
+            if current is None:  # pragma: no cover - deleted mid-move
+                raise ValueError(f"Ticket {ticket_id} not found")
+            ticket = current
+            max_num = self.session.exec(
+                select(func.max(Ticket.number)).where(Ticket.project_id == new_project_id)
+            ).first()
+            next_number = (max_num or 0) + 1
 
-        # Perform the move
-        ticket.project_id = new_project_id
-        ticket.number = next_number
-        ticket.original_id = original_id
-        ticket.updated_at = utc_now()
+            ticket.project_id = new_project_id
+            ticket.number = next_number
+            ticket.original_id = original_id
+            ticket.updated_at = utc_now()
 
-        self.session.add(ticket)
-        self.session.commit()
-        self.session.refresh(ticket)
+            self.session.add(ticket)
+            try:
+                self.session.commit()
+                self.session.refresh(ticket)
+                break
+            except IntegrityError:
+                self.session.rollback()
+                if attempt == max_attempts - 1:
+                    raise
 
         new_full_id = f"{new_project.prefix}-{ticket.number}"
 
