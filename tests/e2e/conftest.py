@@ -1,4 +1,13 @@
-"""Playwright fixtures for end-to-end tests."""
+"""Playwright fixtures for end-to-end tests.
+
+Options:
+    --headed   Run the browser headed (default headless; also E2E_HEADED=1).
+               Local usage: `pytest tests/e2e --headed`
+    --cdx      Start a chrome-devtools-axi bridge alongside the tests so agents
+               can attach to the same Chrome via the DevTools protocol for
+               debugging (also CHROME_DEVTOOLS_AXI_ENABLED=1). Skipped cleanly
+               when the `chrome-devtools-axi` binary is not installed.
+"""
 
 import os
 from collections.abc import Generator
@@ -11,6 +20,32 @@ from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_
 BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:8080")
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add e2e runner options."""
+    group = parser.getgroup("jackrabbit-e2e")
+    group.addoption(
+        "--headed",
+        action="store_true",
+        default=False,
+        help="Run the browser headed instead of headless (or set E2E_HEADED=1).",
+    )
+    group.addoption(
+        "--cdx",
+        action="store_true",
+        default=False,
+        help=(
+            "Start a chrome-devtools-axi bridge for agent debugging via the "
+            "DevTools protocol (or set CHROME_DEVTOOLS_AXI_ENABLED=1)."
+        ),
+    )
+
+
+def _is_headed(request: pytest.FixtureRequest) -> bool:
+    if request.config.getoption("--headed"):
+        return True
+    return os.environ.get("E2E_HEADED") == "1"
+
+
 @pytest.fixture(scope="session")
 def base_url() -> str:
     """Provide the base URL for e2e tests."""
@@ -18,23 +53,68 @@ def base_url() -> str:
 
 
 @pytest.fixture(scope="session")
+def headed(request: pytest.FixtureRequest) -> bool:
+    """Whether the browser should run headed (--headed / E2E_HEADED=1)."""
+    return _is_headed(request)
+
+
+@pytest.fixture(scope="session")
+def cdx_bridge(request: pytest.FixtureRequest, headed: bool):
+    """Optional chrome-devtools-axi bridge for DevTools-protocol debugging.
+
+    Only started when --cdx (or CHROME_DEVTOOLS_AXI_ENABLED=1) is requested;
+    otherwise yields None so the suite stays independent of the CLI tool.
+    """
+    enabled = (
+        request.config.getoption("--cdx") or os.environ.get("CHROME_DEVTOOLS_AXI_ENABLED") == "1"
+    )
+    if not enabled:
+        yield None
+        return
+
+    try:
+        from tests.cdx_helper import ChromeDevToolsAxi
+    except ImportError:  # pragma: no cover - tests package always importable
+        yield None
+        return
+
+    bridge = ChromeDevToolsAxi(headed=headed)
+    try:
+        bridge.start()
+    except (FileNotFoundError, RuntimeError):
+        # Agents may request cdx on machines without the tool; degrade gently
+        # by continuing without the bridge (tests do not depend on it).
+        yield None
+        return
+    yield bridge
+    bridge.stop()
+
+
+@pytest.fixture
 def playwright() -> Generator[Playwright, None, None]:
-    """Create a Playwright instance."""
+    """Create a Playwright instance.
+
+    Function-scoped on purpose: the sync API runs an asyncio loop on the main
+    thread, and while a session-scoped instance stays alive that loop counts as
+    "running", which breaks pytest-asyncio fixture setup for any async test
+    that follows in the same pytest process (the full `pytest -x` gate mixes
+    e2e and async integration tests). Closing it per test keeps the gate green.
+    """
     with sync_playwright() as p:
         yield p
 
 
-@pytest.fixture(scope="session")
-def browser(playwright: Playwright) -> Generator[Browser, None, None]:
-    """Create a browser instance."""
+@pytest.fixture
+def browser(playwright: Playwright, headed: bool) -> Generator[Browser, None, None]:
+    """Create a browser instance (headed with --headed, headless by default)."""
     # Use chromium by default, but allow override
     browser_type = os.environ.get("PLAYWRIGHT_BROWSER", "chromium")
     if browser_type == "firefox":
-        browser = playwright.firefox.launch(headless=True)
+        browser = playwright.firefox.launch(headless=not headed)
     elif browser_type == "webkit":
-        browser = playwright.webkit.launch(headless=True)
+        browser = playwright.webkit.launch(headless=not headed)
     else:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(headless=not headed)
     yield browser
     browser.close()
 

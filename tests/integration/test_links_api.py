@@ -247,3 +247,38 @@ class TestBlockerQueries:
         await _link(client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "relates_to")
         response = await client_with_seeds.get(f"/api/v1/tickets/{tickets['story']['id']}/blockers")
         assert response.json() == []
+
+
+async def test_create_link_htmx_returns_links_section(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """HTMX create-link requests swap the refreshed links section in place."""
+    epic = (
+        await client_with_seeds.post(
+            "/api/v1/tickets", json={"project_id": 2, "title": "Epic X", "type": "Epic"}
+        )
+    ).json()
+    story = (
+        await client_with_seeds.post(
+            "/api/v1/tickets", json={"project_id": 2, "title": "Story X", "type": "Story"}
+        )
+    ).json()
+
+    response = await client_with_seeds.post(
+        f"/api/v1/tickets/{epic['id']}/links",
+        json={
+            "source_id": epic["id"],
+            "target_id": story["id"],
+            "link_type": "parent",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert 'id="links-section"' in response.text
+    assert "Children (Stories/Bugs/Spikes)" in response.text
+    # The inverse child link (targeted at the epic) is what the epic page shows;
+    # the row must reference the CHILD ticket, not the epic itself.
+    assert "Story X" in response.text
+    assert 'title="Story X"' in response.text
+    assert 'title="Epic X"' not in response.text

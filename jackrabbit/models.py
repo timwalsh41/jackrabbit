@@ -107,9 +107,9 @@ class Ticket(SQLModel, table=True):
 
     @property
     def full_id(self) -> str:
-        """Human-readable ticket ID like 'WEB-3' (requires the project relationship)."""
+        """Human-readable zero-padded ticket ID like 'WEB-003' (requires project)."""
         prefix = self.project.prefix if self.project else "UNK"
-        return f"{prefix}-{self.number}"
+        return f"{prefix}-{self.number:03d}"
 
     incoming_links: list["TicketLink"] = Relationship(
         back_populates="target", sa_relationship_kwargs={"foreign_keys": "TicketLink.target_id"}

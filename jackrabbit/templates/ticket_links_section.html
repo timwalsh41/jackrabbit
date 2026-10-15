@@ -26,7 +26,7 @@
             <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Parent (Epic)</h3>
             <div class="space-y-2">
                 {% for link in parent_links %}
-                {% with link=link, direction="outgoing" %}{% include "ticket_link_row.html" %}{% endwith %}
+                {% with link=link, direction="incoming" %}{% include "ticket_link_row.html" %}{% endwith %}
                 {% endfor %}
             </div>
         </div>
@@ -37,7 +37,7 @@
             <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Children (Stories/Bugs/Spikes)</h3>
             <div class="space-y-2">
                 {% for link in child_links %}
-                {% with link=link, direction="outgoing" %}{% include "ticket_link_row.html" %}{% endwith %}
+                {% with link=link, direction="incoming" %}{% include "ticket_link_row.html" %}{% endwith %}
                 {% endfor %}
             </div>
         </div>
@@ -59,7 +59,7 @@
             <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Blocked By</h3>
             <div class="space-y-2">
                 {% for link in blocked_by_links %}
-                {% with link=link, direction="incoming" %}{% include "ticket_link_row.html" %}{% endwith %}
+                {% with link=link, direction="outgoing" %}{% include "ticket_link_row.html" %}{% endwith %}
                 {% endfor %}
             </div>
         </div>

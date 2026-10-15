@@ -52,14 +52,14 @@ async def test_htmx_form_move_updates_ticket(
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["new_full_id"] == "WEB-1"
-    assert data["original_id"] == "UNS-1"
+    assert data["new_full_id"] == "WEB-001"
+    assert data["original_id"] == "UNS-001"
 
     # Ticket detail now shows the new project and preserved original_id
     detail = await client_with_seeds.get(f"/api/v1/tickets/{uns_ticket.id}")
     assert detail.status_code == 200
     assert detail.json()["project_id"] == web.id
-    assert detail.json()["original_id"] == "UNS-1"
+    assert detail.json()["original_id"] == "UNS-001"
 
 
 @pytest.mark.asyncio

@@ -76,25 +76,28 @@ class TestEpicStoryLinking:
         page.wait_for_selector("#ticket-content", state="visible", timeout=10000)
 
         for story in stories:
-            # Open the link modal
+            # Open the link modal (rendered into #link-modal-container)
             page.click("button:has-text('Add Link')")
-            page.wait_for_selector("#ticket-modal form", state="visible", timeout=10000)
+            page.wait_for_selector("#link-modal form", state="visible", timeout=10000)
 
             # Epic is the parent; story is the child target
-            page.select_option("select[name='link_type']", "parent")
+            page.select_option("#link-modal select[name='link_type']", "parent")
 
-            # Search for the story by its full ID prefix (UNS-NNN)
+            # Search for the story by its full ID prefix (UNS-NNN). The search
+            # input triggers on keyup, which page.fill does not dispatch.
             story_ref = f"UNS-{story['number']:03d}"
-            page.fill("input[name='target_search']", story_ref)
+            page.fill("#link-modal #target_search", story_ref)
+            page.dispatch_event("#link-modal #target_search", "keyup")
             # Wait for search result and click it (sets hidden target_id)
             page.wait_for_selector(".ticket-search-result", timeout=10000)
             page.click(".ticket-search-result >> nth=0")
             page.wait_for_timeout(300)
 
             # Submit the link
-            page.click("#ticket-modal button[type='submit']")
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(1000)
+            page.click("#link-modal button[type='submit']")
+            # The modal removes itself and the links section swaps in place
+            page.wait_for_selector("#link-modal", state="detached", timeout=10000)
+            page.wait_for_timeout(500)
 
         # Reload the Epic page and verify all 3 children are shown
         page.goto(f"{base_url}/ticket/{epic['id']}")
@@ -103,32 +106,65 @@ class TestEpicStoryLinking:
 
         for story in stories:
             story_ref = f"UNS-{story['number']:03d}"
-            expect(page.locator("#links-section-container")).to_contain_text(story_ref)
+            expect(page.locator("#links-section")).to_contain_text(story_ref)
+            # Each child is listed with its title
+            expect(page.locator("#links-section")).to_contain_text(story["title"])
 
     def test_epic_detail_shows_children(
         self, page: Page, base_url: str, seeded_projects, epic_with_stories
     ):
         """Epic detail page shows the Links section with children."""
         epic, stories = epic_with_stories
-        # Link one story via API so the section has content
+        # Link one story via API (child -> epic, the API validates direction)
         import httpx
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            client.post(
+            response = client.post(
                 f"/api/v1/tickets/{stories[0]['id']}/links",
                 json={
-                    "link_type": "parent",
+                    "source_id": stories[0]["id"],
                     "target_id": epic["id"],
+                    "link_type": "child",
                 },
             )
+            assert response.status_code == 201, response.text
 
         page.goto(f"{base_url}/ticket/{epic['id']}")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
         # Links section is visible and shows the child relationship
-        expect(page.locator("#links-section-container")).to_be_visible()
-        expect(page.locator("#links-section-container")).to_contain_text("child")
+        expect(page.locator("#links-section")).to_be_visible()
+        expect(page.locator("#links-section")).to_contain_text("Children")
+        expect(page.locator("#links-section")).to_contain_text(stories[0]["title"])
+
+    def test_plan_view_shows_epic_with_children(
+        self, page: Page, base_url: str, seeded_projects, epic_with_stories
+    ):
+        """Plan view surfaces the Epic with its child tickets."""
+        import httpx
+
+        epic, stories = epic_with_stories
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            for story in stories:
+                resp = client.post(
+                    f"/api/v1/tickets/{story['id']}/links",
+                    json={
+                        "source_id": story["id"],
+                        "target_id": epic["id"],
+                        "link_type": "child",
+                    },
+                )
+                assert resp.status_code == 201, resp.text
+
+        page.goto(f"{base_url}/plan")
+        page.wait_for_load_state("networkidle")
+
+        epics_section = page.locator("#plan-epics")
+        expect(epics_section).to_be_visible(timeout=10000)
+        expect(epics_section).to_contain_text(epic["title"])
+        for story in stories:
+            expect(epics_section).to_contain_text(story["title"])
 
 
 if __name__ == "__main__":

@@ -328,3 +328,50 @@ async def test_plan_web_page_unsprinted_tickets(client_with_seeds: AsyncClient) 
     content = response.text
     assert "2 unsprinted tickets" in content
     assert "View backlog" in content
+
+
+async def test_plan_web_page_shows_epics_with_children(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """The Plan view surfaces every Epic with its child tickets (spec E2E flow 4)."""
+    epic = (
+        await client_with_seeds.post(
+            "/api/v1/tickets", json={"project_id": 2, "title": "Plan Epic", "type": "Epic"}
+        )
+    ).json()
+    child_ids = []
+    for i in range(2):
+        child = (
+            await client_with_seeds.post(
+                "/api/v1/tickets",
+                json={"project_id": 2, "title": f"Plan Child {i + 1}", "type": "Story"},
+            )
+        ).json()
+        child_ids.append(child)
+        link_resp = await client_with_seeds.post(
+            f"/api/v1/tickets/{child['id']}/links",
+            json={
+                "source_id": child["id"],
+                "target_id": epic["id"],
+                "link_type": "child",
+            },
+        )
+        assert link_resp.status_code == 201, link_resp.text
+
+    response = await client_with_seeds.get("/plan")
+    assert response.status_code == 200
+    content = response.text
+    # Epics section present with the epic and its children
+    assert 'id="plan-epics"' in content
+    assert "Plan Epic" in content
+    assert "Plan Child 1" in content
+    assert "Plan Child 2" in content
+
+
+async def test_plan_web_page_epics_section_empty_state(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """With no Epics the section renders a friendly empty state."""
+    response = await client_with_seeds.get("/plan")
+    assert response.status_code == 200
+    assert "No epics yet" in response.text

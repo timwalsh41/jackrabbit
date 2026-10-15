@@ -203,9 +203,13 @@ async def plan(
     project_id: int | None = Query(None),
     sprint_service: SprintService = Depends(get_sprint_service),
     project_service: ProjectService = Depends(get_project_service),
+    link_service: LinkService = Depends(get_link_service),
 ) -> HTMLResponse:
     projects = project_service.list_projects()
     plan_data = sprint_service.get_plan_data(project_id=project_id)
+    epics_with_children = link_service.get_epics_with_children()
+    if project_id is not None:
+        epics_with_children = [e for e in epics_with_children if e["epic"].project_id == project_id]
     return templates.TemplateResponse(
         request,
         "plan.html",
@@ -214,18 +218,20 @@ async def plan(
             "selected_project_id": project_id,
             "sprints": plan_data["sprints"],
             "unsprinted_count": plan_data["unsprinted_count"],
+            "epics_with_children": epics_with_children,
         },
     )
 
 
 # Link web routes
-@router.get("/tickets/{ticket_id}/links", response_class=HTMLResponse)
-async def ticket_links_section(
+def _links_section_response(
     request: Request,
     ticket_id: int,
-    ticket_service: TicketService = Depends(get_ticket_service),
-    link_service: LinkService = Depends(get_link_service),
+    ticket_service: TicketService,
+    link_service: LinkService,
 ) -> HTMLResponse:
+    """Render the links section partial (shared by the GET route and the HTMX-aware
+    POST /api/v1/tickets/{id}/links endpoint, which swaps this section in place)."""
     ticket = ticket_service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -277,6 +283,16 @@ async def ticket_links_section(
             "TicketStatus": TicketStatus,
         },
     )
+
+
+@router.get("/tickets/{ticket_id}/links", response_class=HTMLResponse)
+async def ticket_links_section(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    link_service: LinkService = Depends(get_link_service),
+) -> HTMLResponse:
+    return _links_section_response(request, ticket_id, ticket_service, link_service)
 
 
 @router.get("/tickets/{ticket_id}/links/modal", response_class=HTMLResponse)
@@ -851,11 +867,16 @@ async def ticket_search(
     request: Request,
     q: str = Query(""),
     link_type: str = Query(""),
+    source_id: int | None = Query(None),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Search tickets for link modal."""
     # Get all tickets and filter by search query
     all_tickets, _ = ticket_service.list_tickets(page_size=1000)
+
+    # Never offer the source ticket itself as a link target
+    if source_id is not None:
+        all_tickets = [t for t in all_tickets if t.id != source_id]
 
     if q:
         q_lower = q.lower()

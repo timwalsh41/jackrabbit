@@ -189,6 +189,81 @@ class TestTicketLifecycle:
         # At least one transition entry should be present (Open -> Groomed)
         expect(page.locator("#transition-history").first).to_contain_text("Groomed")
 
+    def test_full_lifecycle_buttons_badges_and_history(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Walk Open -> ... -> Complete: badge, history and button guards at each stage.
+
+        The UI only renders VALID transitions, so "disables invalid next buttons"
+        means the invalid next-status buttons must not be offered at all.
+        """
+        ticket = make_ticket(status="Open", title="Full Lifecycle Walk")
+        tid = ticket["id"]
+
+        def buttons() -> object:
+            return page.locator("#transition-buttons button")
+
+        def assert_invalid_absent(*labels: str) -> None:
+            for label in labels:
+                assert (
+                    buttons().locator(f"button:has-text('{label}')").count() == 0
+                ), f"invalid transition button '{label}' is offered"
+
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
+
+        # Open: only Groomed (guarded) and Rejected may be next
+        assert_invalid_absent("Complete", "Ready for Review", "In Progress")
+
+        # --- Open -> Groomed via modal (4 fields required) ---
+        page.click("button:has-text('Groomed')")
+        page.wait_for_selector("#groom-form", state="visible", timeout=10000)
+        page.fill("textarea[name='approach']", "Walk approach")
+        page.fill("textarea[name='files_to_change']", "walk.py")
+        page.fill("textarea[name='test_plan']", "walk tests")
+        page.fill("textarea[name='validation_steps']", "walk validation")
+        page.click("#groom-form button[type='submit']")
+        expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
+            timeout=10000
+        )
+        expect(page.locator("#transition-history")).to_contain_text("Groomed")
+        # Groomed: In Progress and Rejected only
+        assert_invalid_absent("Complete", "Ready for Review")
+
+        # --- Groomed -> In Progress (branch pre-filled) ---
+        page.click("button:has-text('In Progress')")
+        page.wait_for_selector("#in-progress-form", state="visible", timeout=10000)
+        branch = page.locator("input[name='branch_name']").input_value()
+        assert branch, "branch name should be pre-filled"
+        page.click("button:has-text('Start Work')")
+        expect(page.locator("#ticket-content span:has-text('In Progress')").first).to_be_visible(
+            timeout=10000
+        )
+        expect(page.locator("#transition-history")).to_contain_text("In Progress")
+        # In Progress: Ready for Review and Rejected only
+        assert_invalid_absent("Complete")
+
+        # --- In Progress -> Ready for Review (PR URL required) ---
+        page.click("button:has-text('Ready for Review')")
+        page.wait_for_selector("#review-form", state="visible", timeout=10000)
+        page.fill("input[name='pr_url']", "https://github.com/test/repo/pull/42")
+        page.click("button:has-text('Submit for Review')")
+        expect(
+            page.locator("#ticket-content span:has-text('Ready for Review')").first
+        ).to_be_visible(timeout=10000)
+        expect(page.locator("#transition-history")).to_contain_text("Ready for Review")
+
+        # --- Ready for Review -> Complete (merged confirm) ---
+        page.on("dialog", lambda d: d.accept("merged"))
+        page.click("button:has-text('Complete')")
+        expect(page.locator("#ticket-content span:has-text('Complete')").first).to_be_visible(
+            timeout=10000
+        )
+        expect(page.locator("#transition-history")).to_contain_text("Complete")
+        # Complete: only Rejected is possible forward/backward-wise here
+        assert_invalid_absent("In Progress", "Groomed", "Open")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

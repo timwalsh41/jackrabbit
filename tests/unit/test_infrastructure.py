@@ -141,3 +141,29 @@ class TestChromeDevToolsAxi:
         assert hasattr(cdx_helper, "cdx_bridge")
         assert hasattr(cdx_helper, "cdx_bridge_per_test")
         assert hasattr(cdx_helper, "CDXPageHelper")
+
+
+class TestE2ERunnerOptions:
+    """Ticket 15: tests/e2e supports --headed and a cdx debugging bridge."""
+
+    @staticmethod
+    def _collect_with(options: str) -> subprocess.CompletedProcess:
+        repo_root = Path(__file__).resolve().parents[2]
+        return subprocess.run(
+            ["uv", "run", "pytest", "tests/e2e", "--collect-only", "-q", *options.split()],
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+        )
+
+    def test_headed_and_cdx_options_are_registered(self) -> None:
+        """`pytest tests/e2e --headed --cdx` parses (criteria: headed runs + cdx)."""
+        result = self._collect_with("--headed --cdx")
+        assert "unrecognized arguments" not in (result.stdout + result.stderr)
+
+    def test_conftest_defines_cdx_bridge_fixture(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "e2e" / "conftest.py").read_text()
+        assert '"--headed"' in source
+        assert '"--cdx"' in source
+        assert "def cdx_bridge" in source
+        assert "ChromeDevToolsAxi" in source

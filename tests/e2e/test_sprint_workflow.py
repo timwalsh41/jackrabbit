@@ -105,6 +105,90 @@ class TestSprintWorkflow:
             ).first
         ).to_be_visible(timeout=10000)
 
+    def test_sprint_view_updates_on_status_change(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, make_sprint
+    ):
+        """Moving a ticket through statuses is reflected in the Sprint view columns."""
+        import httpx
+
+        sprint = make_sprint()
+        ticket = make_ticket(title="Status Move Ticket")
+        tid = ticket["id"]
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            resp = client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{tid}")
+            assert resp.status_code == 200
+
+        # Ticket starts in the Open column
+        page.goto(f"{base_url}/sprint/{sprint['id']}")
+        page.wait_for_load_state("networkidle")
+        open_col = page.locator("#column-open")
+        groomed_col = page.locator("#column-groomed")
+        expect(open_col).to_contain_text("Status Move Ticket", timeout=10000)
+        assert "Status Move Ticket" not in groomed_col.inner_text()
+
+        # Groom it through the ticket detail UI
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
+        page.click("button:has-text('Groomed')")
+        page.wait_for_selector("#groom-form", state="visible", timeout=10000)
+        page.fill("textarea[name='approach']", "Approach")
+        page.fill("textarea[name='files_to_change']", "f.py")
+        page.fill("textarea[name='test_plan']", "tests")
+        page.fill("textarea[name='validation_steps']", "validate")
+        page.click("#groom-form button[type='submit']")
+        expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
+            timeout=10000
+        )
+
+        # The Sprint view now shows the ticket in the Groomed column
+        page.goto(f"{base_url}/sprint/{sprint['id']}")
+        page.wait_for_load_state("networkidle")
+        groomed_col = page.locator("#column-groomed")
+        open_col = page.locator("#column-open")
+        expect(groomed_col).to_contain_text("Status Move Ticket", timeout=10000)
+        assert "Status Move Ticket" not in open_col.inner_text()
+
+    def _open_sprint_edit_modal(self, page: Page, base_url: str, sprint_id: int) -> None:
+        page.goto(f"{base_url}/sprints")
+        page.wait_for_load_state("networkidle")
+        page.click(f"#sprint-row-{sprint_id} a:has-text('Edit')")
+        page.wait_for_selector("#sprint-modal #sprint-form", state="visible", timeout=10000)
+
+    def test_actual_start_makes_sprint_active(
+        self, page: Page, base_url: str, seeded_projects, make_sprint
+    ):
+        """Setting actual_start via the sprint edit modal derives status=Active."""
+        sprint = make_sprint()
+        self._open_sprint_edit_modal(page, base_url, sprint["id"])
+
+        page.fill("input[name='actual_start']", "2026-01-05")
+        page.click("#sprint-form button:has-text('Save Changes')")
+        # Modal closes and the list refreshes with the derived status
+        page.wait_for_function(
+            "document.getElementById('sprint-modal').innerText.trim() === ''",
+            timeout=10000,
+        )
+        row = page.locator(f"#sprint-row-{sprint['id']}")
+        expect(row).to_contain_text("Active", timeout=10000)
+
+    def test_actual_finish_makes_sprint_complete(
+        self, page: Page, base_url: str, seeded_projects, make_sprint
+    ):
+        """Setting actual_finish via the sprint edit modal derives status=Complete."""
+        sprint = make_sprint()
+        self._open_sprint_edit_modal(page, base_url, sprint["id"])
+
+        page.fill("input[name='actual_start']", "2026-01-05")
+        page.fill("input[name='actual_finish']", "2026-01-19")
+        page.click("#sprint-form button:has-text('Save Changes')")
+        page.wait_for_function(
+            "document.getElementById('sprint-modal').innerText.trim() === ''",
+            timeout=10000,
+        )
+        row = page.locator(f"#sprint-row-{sprint['id']}")
+        expect(row).to_contain_text("Complete", timeout=10000)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

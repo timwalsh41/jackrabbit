@@ -94,7 +94,7 @@ class TestMoveTicketToProject:
         assert test_ticket.project_id == uns.id
         assert test_ticket.number == 1
         assert test_ticket.original_id is None
-        assert test_ticket.full_id == "UNS-1"
+        assert test_ticket.full_id == "UNS-001"
 
         # Move to WEB
         result = ticket_service.move_ticket_to_project(test_ticket.id, web.id)
@@ -103,16 +103,16 @@ class TestMoveTicketToProject:
         assert result["ticket_id"] == test_ticket.id
         assert result["old_project_id"] == uns.id
         assert result["new_project_id"] == web.id
-        assert result["old_full_id"] == "UNS-1"
-        assert result["new_full_id"] == "WEB-1"
-        assert result["original_id"] == "UNS-1"
+        assert result["old_full_id"] == "UNS-001"
+        assert result["new_full_id"] == "WEB-001"
+        assert result["original_id"] == "UNS-001"
 
         # Refresh ticket
         ticket_service.session.refresh(test_ticket)
         assert test_ticket.project_id == web.id
         assert test_ticket.number == 1
-        assert test_ticket.original_id == "UNS-1"
-        assert test_ticket.full_id == "WEB-1"
+        assert test_ticket.original_id == "UNS-001"
+        assert test_ticket.full_id == "WEB-001"
 
     def test_move_ticket_preserves_original_id_on_second_move(
         self, ticket_service, test_ticket, setup_projects
@@ -124,21 +124,21 @@ class TestMoveTicketToProject:
         # First move: UNS -> WEB
         ticket_service.move_ticket_to_project(test_ticket.id, web.id)
         ticket_service.session.refresh(test_ticket)
-        assert test_ticket.original_id == "UNS-1"
-        assert test_ticket.full_id == "WEB-1"
+        assert test_ticket.original_id == "UNS-001"
+        assert test_ticket.full_id == "WEB-001"
 
         # Second move: WEB -> API
         result = ticket_service.move_ticket_to_project(test_ticket.id, api.id)
 
         # Check result preserves original original_id
-        assert result["original_id"] == "UNS-1"
-        assert result["old_full_id"] == "WEB-1"
-        assert result["new_full_id"] == "API-1"
+        assert result["original_id"] == "UNS-001"
+        assert result["old_full_id"] == "WEB-001"
+        assert result["new_full_id"] == "API-001"
 
         ticket_service.session.refresh(test_ticket)
         assert test_ticket.project_id == api.id
-        assert test_ticket.original_id == "UNS-1"
-        assert test_ticket.full_id == "API-1"
+        assert test_ticket.original_id == "UNS-001"
+        assert test_ticket.full_id == "API-001"
 
     def test_move_ticket_assigns_next_number_in_target_project(
         self, ticket_service, setup_projects
@@ -159,7 +159,7 @@ class TestMoveTicketToProject:
 
         # Move to WEB - should get number 3
         result = ticket_service.move_ticket_to_project(ticket3.id, web.id)
-        assert result["new_full_id"] == "WEB-3"
+        assert result["new_full_id"] == "WEB-003"
 
         ticket_service.session.refresh(ticket3)
         assert ticket3.number == 3
@@ -180,12 +180,12 @@ class TestMoveTicketToProject:
 
         # MAX(number) in WEB is 3, so the moved ticket becomes WEB-4
         result = ticket_service.move_ticket_to_project(mover.id, web.id)
-        assert result["new_full_id"] == "WEB-4"
+        assert result["new_full_id"] == "WEB-004"
 
         ticket_service.session.refresh(mover)
         assert mover.project_id == web.id
         assert mover.number == 4
-        assert mover.original_id == "UNS-1"
+        assert mover.original_id == "UNS-001"
 
     def test_move_ticket_handles_concurrent_number_race(self, tmp_path):
         """If a competing writer claims the target number between the MAX read
@@ -248,7 +248,7 @@ class TestMoveTicketToProject:
             session_b.close()
 
         # Retry must have recomputed MAX+1 = 4, not produced a duplicate WEB-3
-        assert result["new_full_id"] == "WEB-4"
+        assert result["new_full_id"] == "WEB-004"
         with Session(engine_a) as verify:
             moved = verify.get(Ticket, racer_id)
             assert moved is not None
@@ -353,15 +353,15 @@ class TestMoveProjectAPI:
         response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 2})
         assert response.status_code == 200
         data = response.json()
-        assert data["old_full_id"] == "UNS-1"
-        assert data["new_full_id"] == "WEB-1"
-        assert data["original_id"] == "UNS-1"
+        assert data["old_full_id"] == "UNS-001"
+        assert data["new_full_id"] == "WEB-001"
+        assert data["original_id"] == "UNS-001"
 
         # Verify ticket updated
         response = client.get(f"/api/v1/tickets/{ticket_id}")
         assert response.json()["project_id"] == 2
         assert response.json()["number"] == 1
-        assert response.json()["original_id"] == "UNS-1"
+        assert response.json()["original_id"] == "UNS-001"
 
     def test_move_project_already_moved_preserves_first_original_id(self, client):
         """Test moving already-moved ticket preserves first original_id via API."""
@@ -377,21 +377,21 @@ class TestMoveProjectAPI:
         # First move: UNS -> WEB
         response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 2})
         assert response.status_code == 200
-        assert response.json()["original_id"] == "UNS-1"
+        assert response.json()["original_id"] == "UNS-001"
 
         # Second move: WEB -> API
         response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 3})
         assert response.status_code == 200
-        assert response.json()["original_id"] == "UNS-1"
-        assert response.json()["old_full_id"] == "WEB-1"
-        assert response.json()["new_full_id"] == "API-1"
+        assert response.json()["original_id"] == "UNS-001"
+        assert response.json()["old_full_id"] == "WEB-001"
+        assert response.json()["new_full_id"] == "API-001"
 
         # Third move: API -> MOB
         response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 4})
         assert response.status_code == 200
-        assert response.json()["original_id"] == "UNS-1"
-        assert response.json()["old_full_id"] == "API-1"
-        assert response.json()["new_full_id"] == "MOB-1"
+        assert response.json()["original_id"] == "UNS-001"
+        assert response.json()["old_full_id"] == "API-001"
+        assert response.json()["new_full_id"] == "MOB-001"
 
     def test_move_project_accepts_form_encoded_body(self, client):
         """htmx forms post urlencoded bodies; the endpoint must accept them."""
@@ -403,7 +403,7 @@ class TestMoveProjectAPI:
             f"/api/v1/tickets/{ticket_id}/move-project", data={"project_id": "2"}
         )
         assert response.status_code == 200
-        assert response.json()["new_full_id"] == "WEB-1"
+        assert response.json()["new_full_id"] == "WEB-001"
 
     def test_move_project_accepts_target_project_id_field(self, client):
         """The documented field name target_project_id is also accepted."""
@@ -415,7 +415,7 @@ class TestMoveProjectAPI:
             f"/api/v1/tickets/{ticket_id}/move-project", json={"target_project_id": 2}
         )
         assert response.status_code == 200
-        assert response.json()["new_full_id"] == "WEB-1"
+        assert response.json()["new_full_id"] == "WEB-001"
 
     def test_move_project_same_project_returns_400(self, client):
         """Moving to same project returns 400."""
