@@ -4,9 +4,9 @@
 
 **Blocked by:** 04, 05, 08, 10
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Web: `GET /tickets/{id}` — single page with sections:
+- [x] Web: `GET /tickets/{id}` — single page with sections:
   - **Header**: Ticket ID (`MSC-005`), Title, Type badge, Status badge (with transition buttons), Priority, Story Points
   - **Metadata**: Project link, Sprint link (or "Unassigned" + "Assign to Sprint" dropdown), Branch name (copy), PR URL (link), "Formerly MSC-003" if moved
   - **Description**: Markdown-rendered (HTMX safe)
@@ -14,11 +14,24 @@
   - **Links**: Table of links (type, target ticket link, remove button) + "Add Link" button
   - **Transition History**: Chronological list (timestamp, from→to, reason)
   - **Actions**: Edit (→ `/tickets/{id}/edit`), Move Project, Delete (confirm)
-- [ ] All mutations via HTMX partials: status buttons, link add/remove, sprint assign, project move, field edits
+- [x] All mutations via HTMX partials: status buttons, link add/remove, sprint assign, project move, field edits
 - [x] URL-based: deep-linkable, browser back/forward works
-- [ ] 404 page for non-existent tickets
+- [x] 404 page for non-existent tickets
 
 ## Answer
+
+Implemented by the ticket-12 agent on worktree branch `pi-subagents/impl-1-t12-0f34637-cc08-s0-t0`.
+
+- **Route**: `GET /tickets/{id}` added in `jackrabbit/web.py` (canonical; `/ticket/{id}` kept as an alias). The route verifies the ticket exists and server-renders the shell: header (full ID `MSC-005`, title, type/status/priority/story-points meta), actions row (Edit → `/tickets/{id}/edit`, Move Project modal, Delete with `hx-confirm` → redirect to `/backlog`), and a metadata grid (project link → `/projects/{id}/tickets`, sprint partial loader, branch name with Copy button, PR URL link, "Formerly MSC-003" badge).
+- **Dynamic sections via HTMX**: status badge + transition buttons + transition history render from `GET /api/v1/tickets/{id}` JSON (unchanged ticket-05 behavior); links section via `GET /tickets/{id}/links` (ticket-10); new fields partial `GET /tickets/{id}/fields` (markdown description + collapsible `<details>` Groomed Fields); new sprint partial `GET /tickets/{id}/sprint-section`.
+- **Markdown (HTMX-safe)**: new dependency-free `jackrabbit/markdown.py` (`render_markdown`) — escapes all raw HTML first, then renders headings, bold/italic, inline code, fenced code blocks, links (javascript:/vbscript:/data: URLs neutralized), lists, paragraphs. Registered as a Jinja filter `markdown`; description renders through it with `| safe`.
+- **Sprint assignment partial**: `GET /tickets/{id}/sprint-section` shows the sprint link (`/sprint/{id}`) + Remove, or "Unassigned" + an "Assign to Sprint…" dropdown. `POST /tickets/{id}/assign-sprint` (form `sprint_id`) and `POST /tickets/{id}/unassign-sprint` wrap `SprintService` and return the refreshed partial (outerHTML swap, no reload).
+- **Inline groomed-field edits**: `GET /tickets/{id}/fields/{field}/edit` returns a textarea form partial; `PATCH /tickets/{id}/fields/{field}` (urlencoded form) validates the field against the whitelist (approach, files_to_change, test_plan, validation_steps — status changes impossible through it), enforces the Complete/Rejected freeze server-side (400), updates via `TicketService.update_ticket`, and returns the refreshed fields section. Edit affordances are hidden for Complete/Rejected tickets.
+- **404 page**: new `templates/404.html`; global `HTTPException` handler in `main.py` renders it for browser (text/html Accept) requests to non-`/api/` paths — non-existent tickets get a real HTML 404 on `/tickets/{id}` and `/ticket/{id}`, while API 404s stay JSON.
+- **Fixed a race in the Move Project modal** (`ticket_move_project_modal.html`): the submit-enable logic moved from an end-of-body `addEventListener` (htmx evaluates swapped scripts asynchronously → change events could fire before attachment, leaving the button permanently disabled) to an inline `onchange` on the select.
+- **Tests**: `tests/unit/test_markdown.py` (17 unit tests) and `tests/integration/test_ticket_detail_web.py` (29 integration tests: page render/deep-link, HTML 404, markdown + XSS escaping, sprint assign/unassign partials, inline field edit incl. Complete/Rejected freeze and status-edit block, delete/edit/move actions, project link). Full gate: `uv run pytest tests/unit tests/integration` → 394 passed. E2E (fresh DB): 37/40 pass; the 3 failures (`test_epic_story` ×2, `test_sprint_workflow::test_assign_ticket_to_sprint`) reproduce identically on the pre-change baseline (DB-pollution/ordering flakiness in existing tests, unrelated to this ticket).
+
+## Prior verification notes (pre-implementation, superseded above)
 
 Verification performed on branch `jackrabbit-integration` (HEAD 97f36c3). Only criterion 3 could be checked with concrete evidence; the others have material gaps.
 

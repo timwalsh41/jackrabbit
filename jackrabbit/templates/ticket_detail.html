@@ -1,15 +1,74 @@
 {% extends "base.html" %}
 
-{% block title %}Jackrabbit - Ticket {{ ticket_id }}{% endblock %}
+{% block title %}Jackrabbit - Ticket {{ full_id }}{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto space-y-6">
     <div class="flex justify-between items-start">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900" id="ticket-title">Loading...</h1>
-            <p class="text-gray-600 mt-1" id="ticket-meta"></p>
+            <h1 class="text-2xl font-bold text-gray-900" id="ticket-title"><span class="ticket-id">{{ full_id }}</span>: {{ ticket_title }}</h1>
+            <p class="text-gray-600 mt-1" id="ticket-meta">{{ ticket_type }} • {{ ticket_status }} • {{ ticket_priority }}{% if ticket_story_points %} • {{ ticket_story_points }} pts{% endif %}</p>
         </div>
-        <a href="/backlog" class="text-indigo-600 hover:text-indigo-800">← Back to Backlog</a>
+        <div class="flex items-center gap-2">
+            <a href="/tickets/{{ ticket_id }}/edit" class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Edit</a>
+            <button type="button"
+                    class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                    hx-get="/tickets/{{ ticket_id }}/move-project/modal"
+                    hx-target="#ticket-modal"
+                    hx-swap="innerHTML"
+                    title="Move to another project">
+                Move Project
+            </button>
+            <form hx-delete="/api/v1/tickets/{{ ticket_id }}"
+                  hx-confirm="Are you sure you want to delete {{ full_id }}? This cannot be undone."
+                  class="inline"
+                  hx-on::after-request="if(event.detail.successful) { window.location.href = '/backlog'; }">
+                <button type="submit" class="px-3 py-1.5 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-md hover:bg-red-50">Delete</button>
+            </form>
+            <a href="/backlog" class="text-indigo-600 hover:text-indigo-800 ml-2">← Back to Backlog</a>
+        </div>
+    </div>
+
+    {# Server-rendered metadata: project link, sprint assignment partial, branch, PR #}
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-6">
+        <div class="grid gap-4 md:grid-cols-2">
+            <div>
+                <h4 class="text-sm font-medium text-gray-900 mb-1">Project</h4>
+                <a href="/projects/{{ ticket_project_id }}/tickets" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">{{ project_prefix }}</a>
+            </div>
+            <div>
+                <h4 class="text-sm font-medium text-gray-900 mb-1">Sprint</h4>
+                <div id="sprint-section"
+                     hx-get="/tickets/{{ ticket_id }}/sprint-section"
+                     hx-trigger="load"
+                     hx-swap="outerHTML">
+                    <span class="text-sm text-gray-400">Loading…</span>
+                </div>
+            </div>
+            {% if branch_name %}
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <h4 class="text-sm font-medium text-gray-900">Branch</h4>
+                    <button type="button" onclick="copyToClipboard('{{ branch_name }}', this)"
+                            class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+                            title="Copy branch name">Copy</button>
+                </div>
+                <code class="text-sm bg-gray-100 px-2 py-1 rounded break-all">{{ branch_name }}</code>
+            </div>
+            {% endif %}
+            {% if pr_url %}
+            <div>
+                <h4 class="text-sm font-medium text-gray-900 mb-1">Pull Request</h4>
+                <a href="{{ pr_url }}" target="_blank" rel="noopener noreferrer" class="text-sm text-indigo-600 hover:text-indigo-800 underline break-all">{{ pr_url }}</a>
+            </div>
+            {% endif %}
+            {% if original_id %}
+            <div>
+                <h4 class="text-sm font-medium text-gray-900 mb-1">Original ID</h4>
+                <span class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded" title="Original ID before project move">Formerly {{ original_id }}</span>
+            </div>
+            {% endif %}
+        </div>
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-6" id="ticket-content"
@@ -23,6 +82,16 @@
 </div>
 
 <script>
+    // Escape user-provided strings before injecting into HTML templates
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     // Status badge colors
     const statusColors = {
         'Open': 'bg-gray-100 text-gray-800',
@@ -217,7 +286,7 @@
         for (const t of transitions) {
             const from = t.from_status ? getStatusBadge(t.from_status) : '<span class="text-gray-400">—</span>';
             const to = getStatusBadge(t.to_status);
-            const reason = t.reason ? `<p class="text-sm text-gray-600 mt-1">${t.reason}</p>` : '';
+            const reason = t.reason ? `<p class="text-sm text-gray-600 mt-1">${escapeHtml(t.reason)}</p>` : '';
             const time = t.at ? new Date(t.at).toLocaleString() : '';
             
             html += `
@@ -242,94 +311,19 @@
         const projectPrefix = ticket.project_prefix || '';
         const fullId = `${projectPrefix}-${ticket.number}`;
         
-        let fieldsHtml = '';
+        // Description and Groomed Fields are server-rendered (markdown-safe,
+        // inline-editable) and loaded into this placeholder via HTMX.
+        const fieldsSection = `
+            <div id="ticket-fields-section"
+                 hx-get="/tickets/${ticket.id}/fields"
+                 hx-trigger="load"
+                 hx-swap="outerHTML">
+                <div class="text-center text-gray-400 py-4 text-sm">Loading fields…</div>
+            </div>
+        `;
         
-        // Description
-        if (ticket.description) {
-            fieldsHtml += `
-                <div>
-                    <h4 class="text-sm font-medium text-gray-900 mb-1">Description</h4>
-                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.description}</p>
-                </div>
-            `;
-        }
-        
-        // Groomed fields
-        if (ticket.approach) {
-            fieldsHtml += `
-                <div>
-                    <h4 class="text-sm font-medium text-gray-900 mb-1">Approach</h4>
-                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.approach}</p>
-                </div>
-            `;
-        }
-        if (ticket.files_to_change) {
-            fieldsHtml += `
-                <div>
-                    <h4 class="text-sm font-medium text-gray-900 mb-1">Files to Change</h4>
-                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.files_to_change}</p>
-                </div>
-            `;
-        }
-        if (ticket.test_plan) {
-            fieldsHtml += `
-                <div>
-                    <h4 class="text-sm font-medium text-gray-900 mb-1">Test Plan</h4>
-                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.test_plan}</p>
-                </div>
-            `;
-        }
-        if (ticket.validation_steps) {
-            fieldsHtml += `
-                <div>
-                    <h4 class="text-sm font-medium text-gray-900 mb-1">Validation Steps</h4>
-                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.validation_steps}</p>
-                </div>
-            `;
-        }
-        
-        // Git fields - Branch
-        if (ticket.branch_name) {
-            const branchUrl = ticket.pr_url ? generateBranchUrl(ticket.pr_url, ticket.branch_name) : null;
-            fieldsHtml += `
-                <div>
-                    <div class="flex items-center justify-between mb-1">
-                        <h4 class="text-sm font-medium text-gray-900">Branch</h4>
-                        <button type="button" 
-                                onclick="copyToClipboard('${ticket.branch_name.replace(/'/g, "\\'")}', this)" 
-                                class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors" 
-                                title="Copy branch name">
-                            Copy
-                        </button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <code class="text-sm bg-gray-100 px-2 py-1 rounded flex-1 min-w-0 break-all">${ticket.branch_name}</code>
-                        ${branchUrl ? `<a href="${branchUrl}" target="_blank" class="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors whitespace-nowrap" title="View branch on git host">View Branch</a>` : ''}
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Git fields - PR URL
-        if (ticket.pr_url) {
-            const gitHost = getGitHostInfo(ticket.pr_url);
-            fieldsHtml += `
-                <div>
-                    <div class="flex items-center justify-between mb-1">
-                        <h4 class="text-sm font-medium text-gray-900">Pull Request</h4>
-                        <button type="button" 
-                                onclick="copyToClipboard('${ticket.pr_url.replace(/'/g, "\\'")}', this)" 
-                                class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors" 
-                                title="Copy PR URL">
-                            Copy
-                        </button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <a href="${ticket.pr_url}" target="_blank" class="text-sm ${gitHost.color} underline break-all flex-1 min-w-0" title="Open PR on ${gitHost.label}">${gitHost.label}: ${ticket.pr_url}</a>
-                    </div>
-                </div>
-            `;
-        }
+        // Git fields (branch name + PR URL) are server-rendered in the page
+        // shell metadata section (with copy/link affordances).
         
         const statusBadge = getStatusBadge(ticket.status);
         const transitionButtons = renderTransitionButtons(ticket);
@@ -340,23 +334,14 @@
                 <!-- Header with status and actions -->
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
                     <div>
-                        <h2 class="text-xl font-semibold text-gray-900"><span class="ticket-id">${fullId}</span>: ${ticket.title}</h2>
-                        <div class="flex items-center gap-3 mt-2">
+                        <h2 class="text-xl font-semibold text-gray-900"><span class="ticket-id">${fullId}</span>: ${escapeHtml(ticket.title)}</h2>
+                        <div class="flex items-center gap-3 mt-2 flex-wrap">
                             ${statusBadge}
                             <span class="text-sm text-gray-500">${ticket.type} • ${ticket.priority}${ticket.story_points ? ` • ${ticket.story_points} pts` : ''}</span>
                             ${ticket.original_id ? `<span class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded" title="Original ID before project move">Formerly ${ticket.original_id}</span>` : ''}
                         </div>
                     </div>
-                    <div class="flex gap-2">
-                        <a href="/tickets/${ticket.id}/edit" class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Edit</a>
-                        <button class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-                                hx-get="/tickets/${ticket.id}/move-project/modal"
-                                hx-target="#ticket-modal"
-                                hx-swap="innerHTML"
-                                title="Move to another project">
-                            Move Project
-                        </button>
-                    </div>
+                    <div class="text-xs text-gray-400">Edit, Move Project and Delete actions are in the page header above.</div>
                 </div>
                 
                 <!-- Transition Actions -->
@@ -370,14 +355,6 @@
                 
                 <!-- Ticket Details -->
                 <div class="grid gap-4 md:grid-cols-2 pb-4 border-b border-gray-200">
-                    <div>
-                        <h4 class="text-sm font-medium text-gray-900 mb-1">Project</h4>
-                        <p class="text-gray-600">${ticket.project_prefix} (ID: ${ticket.project_id})</p>
-                    </div>
-                    <div>
-                        <h4 class="text-sm font-medium text-gray-900 mb-1">Sprint</h4>
-                        <p class="text-gray-600">${ticket.sprint_id ? `#${ticket.sprint_id}` : '—'}</p>
-                    </div>
                     <div>
                         <h4 class="text-sm font-medium text-gray-900 mb-1">Created</h4>
                         <p class="text-gray-600">${ticket.created_at ? new Date(ticket.created_at).toLocaleString() : '—'}</p>
@@ -395,14 +372,7 @@
                 </div>
                 
                 <!-- Additional Fields -->
-                ${fieldsHtml ? `
-                <div class="space-y-4 pb-4 border-b border-gray-200">
-                    <h3 class="text-sm font-medium text-gray-900 mb-3">Details</h3>
-                    <div class="space-y-4">
-                        ${fieldsHtml}
-                    </div>
-                </div>
-                ` : ''}
+                ${fieldsSection}
                 
                 <!-- Transition History -->
                 <div id="transition-history">
