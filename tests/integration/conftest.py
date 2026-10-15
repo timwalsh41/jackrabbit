@@ -1,8 +1,11 @@
 """Integration test fixtures - imports from tests.conftest and adds seeded database."""
 
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "/workspace/projects/jackrabbit")
+# Ensure the repo containing these tests is on sys.path (works from any checkout/
+# worktree location, not just a hardcoded absolute path).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tests.conftest import (
     Generator,
     Path,

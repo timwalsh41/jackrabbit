@@ -60,14 +60,14 @@ class Project(SQLModel, table=True):
 
 class Sprint(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    number: str = Field(unique=True, index=True, max_length=10)  # e.g., "2601"
+    number: int = Field(unique=True, index=True)  # e.g., 2601 (auto: MAX(number)+1)
     name: str = ""
     description: str = ""
     planned_start: NaiveDatetime | None = None
     planned_end: NaiveDatetime | None = None
     planned_duration_days: int | None = None
     actual_start: NaiveDatetime | None = None
-    actual_end: NaiveDatetime | None = None
+    actual_finish: NaiveDatetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

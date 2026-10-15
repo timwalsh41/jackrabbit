@@ -194,20 +194,19 @@ def make_ticket(base_url):
 @pytest.fixture
 def make_sprint(base_url):
     """Factory that creates a sprint via API and returns the sprint dict."""
-    import uuid
-
     import httpx
 
-    def _make(number: str | None = None) -> dict:
+    def _make(number: int | None = None) -> dict:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            return client.post(
-                "/api/v1/sprints",
-                json={
-                    "number": number or f"E2E{uuid.uuid4().hex[:4].upper()}",
-                    "name": "E2E Sprint",
-                    "description": "Created by E2E test factory",
-                },
-            ).json()
+            payload = {
+                "name": "E2E Sprint",
+                "description": "Created by E2E test factory",
+            }
+            if number is not None:
+                payload["number"] = number
+            # number omitted -> the API auto-assigns MAX(number)+1, which is
+            # unique across runs since the server database persists
+            return client.post("/api/v1/sprints", json=payload).json()
 
     return _make
 
@@ -281,29 +280,29 @@ def e2e_test_data(base_url):
         # Create sprints
         existing_sprints = {s["number"]: s for s in client.get("/api/v1/sprints").json()}
 
-        if "2601" not in existing_sprints:
+        if 2601 not in existing_sprints:
             sprint1 = client.post(
                 "/api/v1/sprints",
                 json={
-                    "number": "2601",
+                    "number": 2601,
                     "name": "Sprint 2601",
                     "description": "First sprint",
                 },
             ).json()
         else:
-            sprint1 = existing_sprints["2601"]
+            sprint1 = existing_sprints[2601]
 
-        if "2602" not in existing_sprints:
+        if 2602 not in existing_sprints:
             sprint2 = client.post(
                 "/api/v1/sprints",
                 json={
-                    "number": "2602",
+                    "number": 2602,
                     "name": "Sprint 2602",
                     "description": "Second sprint",
                 },
             ).json()
         else:
-            sprint2 = existing_sprints["2602"]
+            sprint2 = existing_sprints[2602]
 
         return {
             "projects": [uns, web, api],
@@ -331,7 +330,9 @@ def test_server():
     except Exception:
         pass
 
-    # Start server in background
+    # Start server in background (from the repo containing these tests, so a
+    # worktree/checkout runs its own code and its own database)
+    repo_root = str(Path(__file__).resolve().parents[2])
     env = os.environ.copy()
     env["DATABASE_URL"] = "sqlite:///./data/e2e_test.db"
     env["PORT"] = str(BASE_URL.split(":")[-1].split("/")[0]) if ":" in BASE_URL else "8080"
@@ -339,7 +340,7 @@ def test_server():
     proc = subprocess.Popen(
         ["uv", "run", "python", "-m", "jackrabbit.main"],
         env=env,
-        cwd="/workspace/projects/jackrabbit",
+        cwd=repo_root,
     )
 
     # Wait for server to be ready

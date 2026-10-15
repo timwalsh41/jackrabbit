@@ -25,11 +25,11 @@ def test_get_plan_with_sprints(client_with_seeds: TestClient) -> None:
     active_start = (now - timedelta(days=5)).isoformat()
     active_end = (now + timedelta(days=10)).isoformat()
 
-    # Planned sprint
+    # Planned sprint (no actual_start yet)
     sprint1 = client_with_seeds.post(
         "/api/v1/sprints",
         json={
-            "number": "2601",
+            "number": 2601,
             "name": "Future Sprint",
             "planned_start": future_start,
             "planned_end": future_end,
@@ -37,26 +37,29 @@ def test_get_plan_with_sprints(client_with_seeds: TestClient) -> None:
     )
     sprint1_id = sprint1.json()["id"]
 
-    # Active sprint
+    # Active sprint (actual_start set, no actual_finish)
     sprint2 = client_with_seeds.post(
         "/api/v1/sprints",
         json={
-            "number": "2602",
+            "number": 2602,
             "name": "Current Sprint",
             "planned_start": active_start,
             "planned_end": active_end,
+            "actual_start": active_start,
         },
     )
     sprint2_id = sprint2.json()["id"]
 
-    # Completed sprint
+    # Completed sprint (actual_finish set)
     sprint3 = client_with_seeds.post(
         "/api/v1/sprints",
         json={
-            "number": "2603",
+            "number": 2603,
             "name": "Past Sprint",
             "planned_start": past_start,
             "planned_end": past_end,
+            "actual_start": past_start,
+            "actual_finish": past_end,
         },
     )
     sprint3_id = sprint3.json()["id"]
@@ -130,18 +133,18 @@ def test_get_plan_with_sprints(client_with_seeds: TestClient) -> None:
     assert data["unsprinted_count"] == 2
 
     # Check sprints are ordered by planned_start
-    assert data["sprints"][0]["number"] == "2603"  # Past sprint first (earliest start)
-    assert data["sprints"][1]["number"] == "2602"  # Active sprint
-    assert data["sprints"][2]["number"] == "2601"  # Future sprint
+    assert data["sprints"][0]["number"] == 2603  # Past sprint first (earliest start)
+    assert data["sprints"][1]["number"] == 2602  # Active sprint
+    assert data["sprints"][2]["number"] == 2601  # Future sprint
 
     # Check sprint 2603 (Complete)
-    sprint_2603 = next(s for s in data["sprints"] if s["number"] == "2603")
+    sprint_2603 = next(s for s in data["sprints"] if s["number"] == 2603)
     assert sprint_2603["status"] == "Complete"
     assert sprint_2603["total_tickets"] == 1
     assert sprint_2603["ticket_counts"]["Complete"] == 1
 
     # Check sprint 2602 (Active)
-    sprint_2602 = next(s for s in data["sprints"] if s["number"] == "2602")
+    sprint_2602 = next(s for s in data["sprints"] if s["number"] == 2602)
     assert sprint_2602["status"] == "Active"
     assert sprint_2602["total_tickets"] == 3
     assert sprint_2602["ticket_counts"]["In_Progress"] == 1
@@ -149,7 +152,7 @@ def test_get_plan_with_sprints(client_with_seeds: TestClient) -> None:
     assert sprint_2602["ticket_counts"]["Complete"] == 1
 
     # Check sprint 2601 (Planned)
-    sprint_2601 = next(s for s in data["sprints"] if s["number"] == "2601")
+    sprint_2601 = next(s for s in data["sprints"] if s["number"] == 2601)
     assert sprint_2601["status"] == "Planned"
     assert sprint_2601["total_tickets"] == 2
     assert sprint_2601["ticket_counts"]["Open"] == 1
@@ -166,7 +169,7 @@ def test_get_plan_with_project_filter(client_with_seeds: TestClient) -> None:
     sprint = client_with_seeds.post(
         "/api/v1/sprints",
         json={
-            "number": "2601",
+            "number": 2601,
             "name": "Sprint 1",
             "planned_start": future_start,
             "planned_end": future_end,
@@ -225,7 +228,7 @@ def test_get_plan_sprint_without_dates(client_with_seeds: TestClient) -> None:
     """Test plan with sprint that has no planned dates."""
     # Sprint without dates
     sprint = client_with_seeds.post(
-        "/api/v1/sprints", json={"number": "2601", "name": "No Dates Sprint"}
+        "/api/v1/sprints", json={"number": 2601, "name": "No Dates Sprint"}
     )
     sprint_id = sprint.json()["id"]
 
@@ -263,7 +266,7 @@ def test_plan_web_page_with_sprints(client_with_seeds: TestClient) -> None:
     sprint = client_with_seeds.post(
         "/api/v1/sprints",
         json={
-            "number": "2601",
+            "number": 2601,
             "name": "Test Sprint",
             "planned_start": future_start,
             "planned_end": future_end,

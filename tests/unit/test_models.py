@@ -83,12 +83,21 @@ def test_ticket_create_schema() -> None:
 
 def test_sprint_create_schema() -> None:
     """Test SprintCreate schema validation."""
-    sprint = SprintCreate(number="2601")
-    assert sprint.number == "2601"
+    sprint = SprintCreate(number=2601)
+    assert sprint.number == 2601
     assert sprint.name == ""
     assert sprint.description == ""
     assert sprint.planned_start is None
     assert sprint.planned_end is None
+    assert sprint.planned_duration_days is None
+    assert sprint.actual_start is None
+    assert sprint.actual_finish is None
+
+
+def test_sprint_create_number_optional_auto_assigned() -> None:
+    """SprintCreate.number is optional so the API can auto-assign MAX(number)+1."""
+    sprint = SprintCreate()
+    assert sprint.number is None
 
 
 def test_ticket_link_create_schema() -> None:

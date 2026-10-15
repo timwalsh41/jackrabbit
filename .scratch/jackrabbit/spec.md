@@ -44,6 +44,9 @@ Core domain: **Projects** (prefixes like `MSC`, `WEB`, `UNS`), **Tickets** (Epic
 
 ## Implementation Decisions
 
+### Decisions so far (from implemented tickets)
+- **Ticket 06 (Sprint CRUD)**: `Sprint.number` is an `int` (auto-assigned `MAX(number)+1`, starting at `2601`; clients may override, duplicates → 409). Sprint status is derived **only from actual dates**: `actual_finish` set → Complete, `actual_start` set → Active, otherwise Planned (ticket statuses do not drive sprint status). `actual_end` renamed `actual_finish` per glossary/ticket. `planned_end` kept alongside `planned_duration_days` (Plan view depends on it). Sprint schemas tolerate empty-string form fields (`""` → None) since HTMX `json-enc` submits untouched optional inputs as `""`. Sprint list page shows planned AND actual date ranges.
+
 ### Architecture
 - **Backend**: FastAPI application with SQLModel (SQLAlchemy) models
 - **Database**: SQLite with WAL mode, single file at `{DATA_DIR}/jackrabbit.db`

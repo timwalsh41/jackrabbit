@@ -106,33 +106,67 @@ class ProjectUpdate(BaseModel):
         return v
 
 
-class SprintBase(BaseModel):
-    number: str
+class _EmptyStringToNoneMixin(BaseModel):
+    """Treat empty-string form fields (HTML forms submit "" for untouched
+    optional inputs) as absent for optional date/int fields."""
+
+    @field_validator(
+        "planned_start",
+        "planned_end",
+        "actual_start",
+        "actual_finish",
+        "planned_duration_days",
+        mode="before",
+        check_fields=False,
+    )
+    @classmethod
+    def _empty_string_to_none(cls, v: object) -> object:
+        if v == "":
+            return None
+        return v
+
+
+class SprintBase(_EmptyStringToNoneMixin):
+    number: int
     name: str = ""
     description: str = ""
     planned_start: datetime | None = None
     planned_end: datetime | None = None
+    planned_duration_days: int | None = None
+    actual_start: datetime | None = None
+    actual_finish: datetime | None = None
 
 
 class SprintCreate(SprintBase):
-    pass
+    # number is optional on create: when omitted the API auto-assigns
+    # MAX(number)+1 starting at 2601; clients may override it explicitly.
+    number: int | None = None  # type: ignore[assignment]
+
+    @field_validator("number", mode="before")
+    @classmethod
+    def _empty_number_to_none(cls, v: object) -> object:
+        # An untouched number field ("") means "auto-assign"
+        if v == "":
+            return None
+        return v
 
 
 class SprintRead(SprintBase):
     id: int
-    actual_start: datetime | None = None
-    actual_end: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class SprintUpdate(BaseModel):
+class SprintUpdate(_EmptyStringToNoneMixin):
     name: str | None = None
     description: str | None = None
     planned_start: datetime | None = None
     planned_end: datetime | None = None
+    planned_duration_days: int | None = None
+    actual_start: datetime | None = None
+    actual_finish: datetime | None = None
 
 
 class SprintReadWithTickets(SprintRead):
@@ -317,13 +351,14 @@ class PlanSprintTicketCounts(BaseModel):
 
 class PlanSprintResponse(BaseModel):
     id: int
-    number: str
+    number: int
     name: str
     description: str
     planned_start: datetime | None = None
     planned_end: datetime | None = None
+    planned_duration_days: int | None = None
     actual_start: datetime | None = None
-    actual_end: datetime | None = None
+    actual_finish: datetime | None = None
     ticket_counts: PlanSprintTicketCounts
     total_tickets: int
     status: str
