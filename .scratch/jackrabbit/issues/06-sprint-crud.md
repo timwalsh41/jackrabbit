@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] API: `GET /api/v1/sprints` (list, ordered by number desc), `POST /api/v1/sprints` (create), `GET /api/v1/sprints/{id}` (get with tickets), `PATCH /api/v1/sprints/{id}` (update), `DELETE /api/v1/sprints/{id}` (delete)
 - [ ] Sprint number: auto-assign `MAX(number)+1` (starts at 2601); user can override

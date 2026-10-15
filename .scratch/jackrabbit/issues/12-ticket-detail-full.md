@@ -4,7 +4,7 @@
 
 **Blocked by:** 04, 05, 08, 10
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Web: `GET /tickets/{id}` — single page with sections:
   - **Header**: Ticket ID (`MSC-005`), Title, Type badge, Status badge (with transition buttons), Priority, Story Points

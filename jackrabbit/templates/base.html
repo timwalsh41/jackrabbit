@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Jackrabbit{% endblock %}</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js"></script>
     <script src="https://unpkg.com/hyperscript.org@0.9.12"></script>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css" rel="stylesheet">
     <style>
@@ -12,6 +13,47 @@
         .htmx-request .htmx-indicator { opacity: 1; }
         .htmx-request.htmx-indicator { opacity: 1; }
     </style>
+    <script>
+        // Dropdown handling for Move to Sprint
+        document.addEventListener('click', function(event) {
+            // Close dropdowns when clicking outside
+            if (!event.target.closest('[id^="move-to-sprint-"]')) {
+                document.querySelectorAll('[id^="move-to-sprint-dropdown-"]').forEach(function(dropdown) {
+                    dropdown.classList.add('hidden');
+                });
+                document.querySelectorAll('[id^="move-to-sprint-"]').forEach(function(btn) {
+                    btn.setAttribute('aria-expanded', 'false');
+                });
+            }
+        });
+        
+        // Toggle dropdown
+        document.addEventListener('click', function(event) {
+            const btn = event.target.closest('[id^="move-to-sprint-"]:not([id^="move-to-sprint-dropdown-"])');
+            if (btn) {
+                const ticketId = btn.id.replace('move-to-sprint-', '');
+                const dropdown = document.getElementById('move-to-sprint-dropdown-' + ticketId);
+                if (dropdown) {
+                    const isHidden = dropdown.classList.contains('hidden');
+                    // Close all other dropdowns first
+                    document.querySelectorAll('[id^="move-to-sprint-dropdown-"]').forEach(function(d) {
+                        d.classList.add('hidden');
+                    });
+                    document.querySelectorAll('[id^="move-to-sprint-"]').forEach(function(b) {
+                        b.setAttribute('aria-expanded', 'false');
+                    });
+                    // Toggle this one
+                    if (isHidden) {
+                        dropdown.classList.remove('hidden');
+                        btn.setAttribute('aria-expanded', 'true');
+                    } else {
+                        dropdown.classList.add('hidden');
+                        btn.setAttribute('aria-expanded', 'false');
+                    }
+                }
+            }
+        });
+    </script>
 </head>
 <body class="bg-gray-50 min-h-screen">
     <nav class="bg-white shadow-sm border-b border-gray-200">
@@ -22,6 +64,7 @@
                     <div class="ml-8 flex space-x-4">
                         <a href="/backlog" class="text-gray-700 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium">Backlog</a>
                         <a href="/plan" class="text-gray-700 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium">Plan</a>
+                        <a href="/projects" class="text-gray-700 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium">Projects</a>
                     </div>
                 </div>
             </div>

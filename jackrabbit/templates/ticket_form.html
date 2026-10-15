@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}{% if ticket %}Edit Ticket{% else %}New Ticket{% endif %} - Jackrabbit{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">{% if ticket %}Edit Ticket{% else %}New Ticket{% endif %}</h1>
+        <a href="/backlog" class="text-gray-500 hover:text-gray-700">← Back to Backlog</a>
+    </div>
+
+    <div class="bg-white shadow-sm border border-gray-200 rounded-lg p-6">
+        <form hx-post="{{ action }}"
+              hx-target="#ticket-modal"
+              hx-swap="innerHTML"
+              id="ticket-form"
+              class="space-y-6">
+            <div>
+                <label for="project_id" class="block text-sm font-medium text-gray-700 mb-1">Project <span class="text-red-500">*</span></label>
+                <select name="project_id" id="project_id" required
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    {% for project in projects %}
+                    <option value="{{ project.id }}" {% if default_project_id == project.id %}selected{% endif %}>
+                        {{ project.prefix }} - {{ project.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="type" class="block text-sm font-medium text-gray-700 mb-1">Type <span class="text-red-500">*</span></label>
+                <select name="type" id="type" required
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    {% for t in TicketType %}
+                    <option value="{{ t.value }}" {% if ticket and ticket.type == t %}selected{% elif not ticket and t == TicketType.STORY %}selected{% endif %}>
+                        {{ t.value }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="title" class="block text-sm font-medium text-gray-700 mb-1">Title <span class="text-red-500">*</span></label>
+                <input type="text"
+                       id="title"
+                       name="title"
+                       value="{{ ticket.title if ticket else '' }}"
+                       required
+                       maxlength="255"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                       placeholder="Brief ticket title...">
+            </div>
+
+            <div>
+                <label for="description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea id="description"
+                          name="description"
+                          rows="4"
+                          class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="Detailed description...">{{ ticket.description if ticket else '' }}</textarea>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label for="priority" class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                    <select name="priority" id="priority"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        {% for p in Priority %}
+                        <option value="{{ p.value }}" {% if ticket and ticket.priority == p %}selected{% elif not ticket and p == Priority.MEDIUM %}selected{% endif %}>
+                            {{ p.value }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label for="story_points" class="block text-sm font-medium text-gray-700 mb-1">Story Points</label>
+                    <input type="number"
+                           id="story_points"
+                           name="story_points"
+                           value="{{ ticket.story_points if ticket and ticket.story_points else '' }}"
+                           min="0"
+                           max="100"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                           placeholder="Optional (e.g., 5)">
+                </div>
+            </div>
+
+            {% if ticket %}
+            <div>
+                <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select name="status" id="status"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    {% for s in TicketStatus %}
+                    <option value="{{ s.value }}" {% if ticket.status == s %}selected{% endif %}>
+                        {{ s.value }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="sprint_id" class="block text-sm font-medium text-gray-700 mb-1">Sprint</label>
+                <select name="sprint_id" id="sprint_id"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="">No Sprint</option>
+                    {% for sprint in sprints %}
+                    <option value="{{ sprint.id }}" {% if ticket.sprint_id == sprint.id %}selected{% endif %}>
+                        {{ sprint.number }} - {{ sprint.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Groomed fields - show in edit form -->
+            <div>
+                <label for="approach" class="block text-sm font-medium text-gray-700 mb-1">Approach</label>
+                <textarea id="approach"
+                          name="approach"
+                          rows="3"
+                          class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="Implementation approach...">{{ ticket.approach if ticket else '' }}</textarea>
+            </div>
+
+            <div>
+                <label for="files_to_change" class="block text-sm font-medium text-gray-700 mb-1">Files to Change</label>
+                <textarea id="files_to_change"
+                          name="files_to_change"
+                          rows="3"
+                          class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="List of files to modify...">{{ ticket.files_to_change if ticket else '' }}</textarea>
+            </div>
+
+            <div>
+                <label for="test_plan" class="block text-sm font-medium text-gray-700 mb-1">Test Plan</label>
+                <textarea id="test_plan"
+                          name="test_plan"
+                          rows="3"
+                          class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="How to test this...">{{ ticket.test_plan if ticket else '' }}</textarea>
+            </div>
+
+            <div>
+                <label for="validation_steps" class="block text-sm font-medium text-gray-700 mb-1">Validation Steps</label>
+                <textarea id="validation_steps"
+                          name="validation_steps"
+                          rows="3"
+                          class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="Step-by-step validation...">{{ ticket.validation_steps if ticket else '' }}</textarea>
+            </div>
+            {% endif %}
+
+            <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                <a href="/backlog"
+                   class="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
+                    Cancel
+                </a>
+                <button type="submit"
+                        class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                    {% if ticket %}Save Changes{% else %}Create Ticket{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // Close modal on successful form submission
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+        if (evt.detail.successful && evt.detail.target.id === 'ticket-form') {
+            // The response should be the new row HTML or empty
+            // Close modal by clearing it
+            document.getElementById('ticket-modal').innerHTML = '';
+            // Refresh the table
+            htmx.ajax('GET', '/backlog', {target: '#tickets-table-body', swap: 'innerHTML'});
+        }
+    });
+</script>
+{% endblock %}

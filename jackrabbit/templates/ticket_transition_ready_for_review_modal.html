@@ -1,0 +1,128 @@
+<div class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="flex min-h-full items-center justify-center p-4 text-center">
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
+        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+        <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+            <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div class="sm:flex sm:items-start">
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Transition to Ready for Review
+                        </h3>
+                        <div class="mt-2">
+                            <p class="text-sm text-gray-500">
+                                {% if ticket.project %}{{ ticket.project.prefix }}{% else %}UNK{% endif %}-{{ '%03d'|format(ticket.number) }}: {{ ticket.title }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                
+                <form id="review-form"
+                      hx-post="/api/v1/tickets/{{ ticket.id }}/transition"
+                      hx-headers='{"Content-Type": "application/json"}'
+                      hx-ext="json-enc"
+                      hx-on::after-request="if(event.detail.xhr.status === 200) { closeModal(); htmx.ajax('GET', '/api/v1/tickets/{{ ticket.id }}', {target: '#ticket-content', swap: 'innerHTML'}); }"
+                      class="mt-4">
+                    <input type="hidden" name="to_status" value="Ready for Review">
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label for="pr_url" class="block text-sm font-medium text-gray-700 mb-1">
+                                PR URL <span class="text-red-500">*</span>
+                            </label>
+                            <input type="url" 
+                                   id="pr_url" 
+                                   name="pr_url" 
+                                   value="{{ ticket.pr_url or '' }}"
+                                   placeholder="https://github.com/org/repo/pull/123"
+                                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border"
+                                   required
+                                   autocomplete="off">
+                            <p class="mt-1 text-xs text-gray-500">Enter the full URL to the Pull Request (GitHub, GitLab, Bitbucket, Azure DevOps)</p>
+                        </div>
+                        
+                        <div>
+                            <label for="branch_name" class="block text-sm font-medium text-gray-700 mb-1">
+                                Branch Name
+                            </label>
+                            <input type="text" 
+                                   id="branch_name" 
+                                   name="branch_name" 
+                                   value="{{ ticket.branch_name or '' }}"
+                                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-gray-50"
+                                   readonly>
+                            <p class="mt-1 text-xs text-gray-500">Branch name (set when transitioning to In Progress)</p>
+                        </div>
+                        
+                        <div>
+                            <label for="reason" class="block text-sm font-medium text-gray-700 mb-1">
+                                Reason (optional)
+                            </label>
+                            <textarea id="reason" 
+                                      name="reason" 
+                                      rows="2"
+                                      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border"
+                                      placeholder="Any notes about the PR or changes?"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-5 sm:mt-6 sm:flex sm:flex-row-reverse gap-3">
+                        <button type="button" 
+                                class="w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm"
+                                onclick="closeModal()">
+                            Cancel
+                        </button>
+                        <button type="submit"
+                                class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:ml-3 sm:w-auto sm:text-sm">
+                            Submit for Review
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function closeModal() {
+        const modal = document.querySelector('[aria-modal="true"]');
+        if (modal) {
+            modal.remove();
+        }
+    }
+    
+    // Close on backdrop click
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('bg-gray-500')) {
+            closeModal();
+        }
+    });
+    
+    // Close on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+    
+    // Ensure json-enc extension is registered and process HTMX
+    (function() {
+        const modalEl = document.querySelector('[aria-modal="true"]');
+        if (modalEl) {
+            if (typeof htmx !== 'undefined' && htmx.defineExtension && (!htmx.extensions || !htmx.extensions['json-enc'])) {
+                htmx.defineExtension('json-enc', {
+                    onEvent: function(name, evt) {
+                        if (name === "htmx:configRequest") {
+                            evt.detail.headers['Content-Type'] = "application/json";
+                        }
+                    },
+                    encodeParameters: function(xhr, parameters, elt) {
+                        xhr.overrideMimeType('text/json');
+                        return JSON.stringify(parameters);
+                    }
+                });
+            }
+            htmx.process(modalEl);
+        }
+    })();
+</script>

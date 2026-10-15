@@ -1,0 +1,37 @@
+{# Ticket search results for link modal #}
+{% for ticket in tickets %}
+<button type="button" 
+        class="ticket-search-result w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0"
+        data-ticket-id="{{ ticket.id }}"
+        data-ticket-ref="{{ ticket.project.prefix }}-{{ '%03d'|format(ticket.number) }}"
+        data-ticket-title="{{ ticket.title }}">
+    <div class="flex items-center justify-between">
+        <div>
+            <span class="font-mono text-indigo-600 font-medium">{{ ticket.project.prefix }}-{{ '%03d'|format(ticket.number) }}</span>
+            <span class="ml-2 text-sm text-gray-900">{{ ticket.title }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                {% if ticket.type == 'Epic' %}bg-purple-100 text-purple-800
+                {% elif ticket.type == 'Story' %}bg-blue-100 text-blue-800
+                {% elif ticket.type == 'Bug' %}bg-red-100 text-red-800
+                {% elif ticket.type == 'Spike' %}bg-yellow-100 text-yellow-800
+                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                {{ ticket.type }}
+            </span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                {% if ticket.status == 'Open' %}bg-gray-100 text-gray-800
+                {% elif ticket.status == 'Groomed' %}bg-blue-100 text-blue-800
+                {% elif ticket.status == 'In Progress' %}bg-yellow-100 text-yellow-800
+                {% elif ticket.status == 'Ready for Review' %}bg-purple-100 text-purple-800
+                {% elif ticket.status == 'Complete' %}bg-green-100 text-green-800
+                {% elif ticket.status == 'Rejected' %}bg-red-100 text-red-800
+                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                {{ ticket.status }}
+            </span>
+        </div>
+    </div>
+</button>
+{% else %}
+<div class="px-4 py-3 text-center text-gray-500 text-sm">No tickets found</div>
+{% endfor %}

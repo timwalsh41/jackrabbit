@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Status enum: `Open`, `Groomed`, `In Progress`, `Ready for Review`, `Complete`, `Rejected`
 - [ ] Transition rules (ADR-0009):

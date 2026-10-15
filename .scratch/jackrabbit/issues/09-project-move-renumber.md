@@ -4,7 +4,7 @@
 
 **Blocked by:** 04, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Ticket model: add `original_id` TEXT field (stores `MSC-005` format)
 - [ ] API: `POST /api/v1/tickets/{id}/move-project` with `{target_project_id}`

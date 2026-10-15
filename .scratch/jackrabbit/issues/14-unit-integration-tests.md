@@ -4,7 +4,7 @@
 
 **Blocked by:** 04, 05, 06, 07, 08, 09, 10, 13
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] **Unit tests** (`tests/unit/`):
   - `test_ticket_service.py`: `generate_branch_name`, `slugify`, `can_transition` (all 30+ combos), `move_ticket_to_project` (renumbering, original_id), `assign_to_sprint`

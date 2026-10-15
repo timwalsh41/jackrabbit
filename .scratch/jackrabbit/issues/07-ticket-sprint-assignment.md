@@ -4,7 +4,7 @@
 
 **Blocked by:** 04, 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] API: `POST /api/v1/sprints/{id}/tickets/{ticket_id}` — assign ticket to sprint (fails if ticket already in another sprint)
 - [ ] API: `DELETE /api/v1/sprints/{id}/tickets/{ticket_id}` — unassign ticket from sprint

@@ -4,7 +4,7 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] API: `GET /api/v1/tickets` with query filters: `project_id`, `type`, `status`, `sprint_id`, `q` (title search), `sort`, `order`; returns paginated list
 - [ ] API: `POST /api/v1/tickets` — create with `project_id`, `type`, `title`; auto-assigns `number = MAX(number)+1` for that project; defaults `status=Open`

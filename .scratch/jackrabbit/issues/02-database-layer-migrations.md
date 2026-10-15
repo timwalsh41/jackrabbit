@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] `database.py`: SQLite engine with `PRAGMA journal_mode=WAL`, session factory, `init_db()` runs migrations
 - [ ] `alembic.ini` + `alembic/env.py` configured to read `DATABASE_URL` from settings

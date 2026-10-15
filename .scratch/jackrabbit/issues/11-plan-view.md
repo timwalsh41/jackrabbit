@@ -4,7 +4,7 @@
 
 **Blocked by:** 06, 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] API: `GET /api/v1/plan` — returns all sprints with nested ticket counts by status
   - Response: `[{sprint: {...}, counts: {Open: 3, Groomed: 2, "In Progress": 1, ...}, date_range: {planned_start, planned_end, actual_start, actual_finish}}]`

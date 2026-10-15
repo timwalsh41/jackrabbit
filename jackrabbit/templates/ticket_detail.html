@@ -12,24 +12,452 @@
         <a href="/backlog" class="text-indigo-600 hover:text-indigo-800">← Back to Backlog</a>
     </div>
 
-    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-6" id="ticket-content">
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-6" id="ticket-content"
+         hx-get="/api/v1/tickets/{{ ticket_id }}"
+         hx-trigger="load"
+         hx-swap="innerHTML">
         <div class="text-center text-gray-500 py-8">Loading ticket details...</div>
     </div>
+
+    <div id="ticket-modal" class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true"></div>
 </div>
 
 <script>
-    document.body.addEventListener('htmx:load', function() {
-        htmx.ajax('GET', '/api/v1/tickets/{{ ticket_id }}', {
-            target: '#ticket-content',
-            swap: 'innerHTML',
-            handler: function(response) {
-                if (response.target) {
-                    const ticket = JSON.parse(response.target.responseText);
-                    document.getElementById('ticket-title').textContent = ticket.full_id || `Ticket #${ticket.id}`;
-                    document.getElementById('ticket-meta').textContent = `${ticket.type} • ${ticket.status} • ${ticket.priority}`;
+    // Status badge colors
+    const statusColors = {
+        'Open': 'bg-gray-100 text-gray-800',
+        'Groomed': 'bg-blue-100 text-blue-800',
+        'In Progress': 'bg-yellow-100 text-yellow-800',
+        'Ready for Review': 'bg-purple-100 text-purple-800',
+        'Complete': 'bg-green-100 text-green-800',
+        'Rejected': 'bg-red-100 text-red-800',
+    };
+
+    // Detect git host from PR URL
+    function detectGitHost(prUrl) {
+        if (!prUrl) return null;
+        const url = prUrl.toLowerCase();
+        if (url.includes('github.com')) return 'github';
+        if (url.includes('gitlab.com') || url.includes('gitlab.')) return 'gitlab';
+        if (url.includes('bitbucket.org')) return 'bitbucket';
+        if (url.includes('dev.azure.com') || url.includes('visualstudio.com')) return 'azure';
+        return null;
+    }
+
+    // Get git host icon/label
+    function getGitHostInfo(prUrl) {
+        const host = detectGitHost(prUrl);
+        switch (host) {
+            case 'github':
+                return { label: 'GitHub', icon: 'github', color: 'text-gray-700 hover:text-gray-900' };
+            case 'gitlab':
+                return { label: 'GitLab', icon: 'gitlab', color: 'text-orange-600 hover:text-orange-800' };
+            case 'bitbucket':
+                return { label: 'Bitbucket', icon: 'bitbucket', color: 'text-blue-600 hover:text-blue-800' };
+            case 'azure':
+                return { label: 'Azure DevOps', icon: 'azure', color: 'text-blue-700 hover:text-blue-900' };
+            default:
+                return { label: 'Open PR', icon: 'external', color: 'text-indigo-600 hover:text-indigo-800' };
+        }
+    }
+
+    // Copy to clipboard
+    async function copyToClipboard(text, button) {
+        try {
+            await navigator.clipboard.writeText(text);
+            const originalText = button.textContent;
+            button.textContent = 'Copied!';
+            button.classList.add('bg-green-100', 'text-green-700');
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.classList.remove('bg-green-100', 'text-green-700');
+            }, 2000);
+        } catch (err) {
+            console.error('Failed to copy:', err);
+            button.textContent = 'Failed';
+            setTimeout(() => {
+                button.textContent = 'Copy';
+            }, 2000);
+        }
+    }
+
+    // Generate GitHub/GitLab branch URL (best effort)
+    function generateBranchUrl(prUrl, branchName) {
+        const host = detectGitHost(prUrl);
+        if (!host || !branchName) return null;
+        
+        try {
+            const url = new URL(prUrl);
+            const pathParts = url.pathname.split('/').filter(p => p);
+            
+            if (host === 'github' && pathParts.length >= 4 && pathParts[3] === 'pull') {
+                // github.com/owner/repo/pull/123 -> github.com/owner/repo/tree/branch
+                return `https://${url.host}/${pathParts[0]}/${pathParts[1]}/tree/${encodeURIComponent(branchName)}`;
+            } else if (host === 'gitlab' && pathParts.length >= 4 && pathParts[3].startsWith('merge')) {
+                // gitlab.com/owner/repo/-/merge_requests/123 -> gitlab.com/owner/repo/-/tree/branch
+                return `https://${url.host}/${pathParts[0]}/${pathParts[1]}/-/tree/${encodeURIComponent(branchName)}`;
+            } else if (host === 'bitbucket' && pathParts.length >= 4 && pathParts[3] === 'pull-requests') {
+                // bitbucket.org/owner/repo/pull-requests/123 -> bitbucket.org/owner/repo/src/branch/
+                return `https://${url.host}/${pathParts[0]}/${pathParts[1]}/src/${encodeURIComponent(branchName)}/`;
+            } else if (host === 'azure' && pathParts.length >= 5 && pathParts[4] === 'pullrequest') {
+                // dev.azure.com/org/project/_git/repo/pullrequest/123 -> dev.azure.com/org/project/_git/repo?version=GBbranch
+                return `https://${url.host}/${pathParts[0]}/${pathParts[1]}/_git/${pathParts[3]}?version=GB${encodeURIComponent(branchName)}`;
+            }
+        } catch (e) {
+            // Ignore parsing errors
+        }
+        return null;
+    }
+
+    // Status transition order for backward check
+    const statusOrder = ['Open', 'Groomed', 'In Progress', 'Ready for Review', 'Complete'];
+
+    function getStatusBadge(status) {
+        const color = statusColors[status] || 'bg-gray-100 text-gray-800';
+        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${color}">${status}</span>`;
+    }
+
+    function isBackward(fromStatus, toStatus) {
+        const fromIdx = statusOrder.indexOf(fromStatus);
+        const toIdx = statusOrder.indexOf(toStatus);
+        if (fromIdx === -1 || toIdx === -1) return false;
+        return toIdx < fromIdx;
+    }
+
+    function getValidTransitions(currentStatus) {
+        const allStatuses = ['Open', 'Groomed', 'In Progress', 'Ready for Review', 'Complete', 'Rejected'];
+        const transitions = [];
+        
+        // Any -> Rejected always allowed
+        if (currentStatus !== 'Rejected') {
+            transitions.push({ status: 'Rejected', backward: false, isRejected: true });
+        }
+        
+        // Rejected -> any prior if guards met (we'll show all prior states)
+        if (currentStatus === 'Rejected') {
+            for (const s of allStatuses) {
+                if (s !== 'Rejected') {
+                    transitions.push({ status: s, backward: false, fromRejected: true });
                 }
             }
-        });
+        }
+        
+        // Backward transitions (to any previous status)
+        const currentIdx = statusOrder.indexOf(currentStatus);
+        if (currentIdx > 0) {
+            for (let i = 0; i < currentIdx; i++) {
+                transitions.push({ status: statusOrder[i], backward: true });
+            }
+        }
+        
+        // Forward transition (only to next status in order)
+        if (currentIdx !== -1 && currentIdx < statusOrder.length - 1) {
+            transitions.push({ status: statusOrder[currentIdx + 1], backward: false, forward: true });
+        }
+        
+        return transitions;
+    }
+
+    function renderTransitionButtons(ticket) {
+        const transitions = getValidTransitions(ticket.status);
+        if (transitions.length === 0) return '';
+        
+        let html = '<div class="flex flex-wrap gap-2">';
+        for (const t of transitions) {
+            let buttonClass = 'px-3 py-1.5 text-sm font-medium rounded-md border transition-colors ';
+            let buttonText = t.status;
+            let buttonAttrs = '';
+            
+            if (t.isRejected) {
+                buttonClass += 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100';
+            } else if (t.fromRejected) {
+                buttonClass += 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100';
+            } else if (t.backward) {
+                buttonClass += 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100';
+                buttonText = `← ${t.status}`;
+            } else if (t.forward) {
+                buttonClass += 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100';
+                buttonText = `${t.status} →`;
+            } else {
+                buttonClass += 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100';
+            }
+            
+            // Special handling for transitions that need modals
+            if (t.forward && t.status === 'Groomed') {
+                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/groomed/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+            } else if (t.forward && t.status === 'In Progress') {
+                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/in-progress/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+            } else if (t.forward && t.status === 'Ready for Review') {
+                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/ready-for-review/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+            } else {
+                buttonAttrs = `hx-post="/api/v1/tickets/${ticket.id}/transition" hx-vals='js:{to_status: "${t.status}", reason: prompt("Reason for transition to ${t.status}:")}' hx-swap="none" hx-on::after-request="if(event.detail.successful) { htmx.ajax('GET', '/api/v1/tickets/${ticket.id}', {target: '#ticket-content', swap: 'innerHTML'}); }"`;
+            }
+            
+            html += `
+                <button 
+                    class="${buttonClass}"
+                    ${buttonAttrs}
+                >
+                    ${buttonText}
+                </button>
+            `;
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function renderTransitions(transitions) {
+        if (!transitions || transitions.length === 0) {
+            return '<p class="text-gray-500 text-sm">No transitions yet</p>';
+        }
+        
+        let html = '<div class="space-y-3">';
+        for (const t of transitions) {
+            const from = t.from_status ? getStatusBadge(t.from_status) : '<span class="text-gray-400">—</span>';
+            const to = getStatusBadge(t.to_status);
+            const reason = t.reason ? `<p class="text-sm text-gray-600 mt-1">${t.reason}</p>` : '';
+            const time = t.at ? new Date(t.at).toLocaleString() : '';
+            
+            html += `
+                <div class="flex items-start gap-4 p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center gap-2 text-sm text-gray-500 min-w-[180px]">
+                        ${from}
+                        <span>→</span>
+                        ${to}
+                    </div>
+                    <div class="flex-1">
+                        ${reason}
+                        <p class="text-xs text-gray-400">${time}</p>
+                    </div>
+                </div>
+            `;
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function renderTicket(ticket) {
+        const projectPrefix = ticket.project_prefix || '';
+        const fullId = `${projectPrefix}-${ticket.number}`;
+        
+        let fieldsHtml = '';
+        
+        // Description
+        if (ticket.description) {
+            fieldsHtml += `
+                <div>
+                    <h4 class="text-sm font-medium text-gray-900 mb-1">Description</h4>
+                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.description}</p>
+                </div>
+            `;
+        }
+        
+        // Groomed fields
+        if (ticket.approach) {
+            fieldsHtml += `
+                <div>
+                    <h4 class="text-sm font-medium text-gray-900 mb-1">Approach</h4>
+                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.approach}</p>
+                </div>
+            `;
+        }
+        if (ticket.files_to_change) {
+            fieldsHtml += `
+                <div>
+                    <h4 class="text-sm font-medium text-gray-900 mb-1">Files to Change</h4>
+                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.files_to_change}</p>
+                </div>
+            `;
+        }
+        if (ticket.test_plan) {
+            fieldsHtml += `
+                <div>
+                    <h4 class="text-sm font-medium text-gray-900 mb-1">Test Plan</h4>
+                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.test_plan}</p>
+                </div>
+            `;
+        }
+        if (ticket.validation_steps) {
+            fieldsHtml += `
+                <div>
+                    <h4 class="text-sm font-medium text-gray-900 mb-1">Validation Steps</h4>
+                    <p class="text-gray-600 whitespace-pre-wrap">${ticket.validation_steps}</p>
+                </div>
+            `;
+        }
+        
+        // Git fields - Branch
+        if (ticket.branch_name) {
+            const branchUrl = ticket.pr_url ? generateBranchUrl(ticket.pr_url, ticket.branch_name) : null;
+            fieldsHtml += `
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <h4 class="text-sm font-medium text-gray-900">Branch</h4>
+                        <button type="button" 
+                                onclick="copyToClipboard('${ticket.branch_name.replace(/'/g, "\\'")}', this)" 
+                                class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors" 
+                                title="Copy branch name">
+                            Copy
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <code class="text-sm bg-gray-100 px-2 py-1 rounded flex-1 min-w-0 break-all">${ticket.branch_name}</code>
+                        ${branchUrl ? `<a href="${branchUrl}" target="_blank" class="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors whitespace-nowrap" title="View branch on git host">View Branch</a>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Git fields - PR URL
+        if (ticket.pr_url) {
+            const gitHost = getGitHostInfo(ticket.pr_url);
+            fieldsHtml += `
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <h4 class="text-sm font-medium text-gray-900">Pull Request</h4>
+                        <button type="button" 
+                                onclick="copyToClipboard('${ticket.pr_url.replace(/'/g, "\\'")}', this)" 
+                                class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors" 
+                                title="Copy PR URL">
+                            Copy
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <a href="${ticket.pr_url}" target="_blank" class="text-sm ${gitHost.color} underline break-all flex-1 min-w-0" title="Open PR on ${gitHost.label}">${gitHost.label}: ${ticket.pr_url}</a>
+                    </div>
+                </div>
+            `;
+        }
+        
+        const statusBadge = getStatusBadge(ticket.status);
+        const transitionButtons = renderTransitionButtons(ticket);
+        const transitionHistory = renderTransitions(ticket.transitions || []);
+        
+        return `
+            <div class="space-y-6">
+                <!-- Header with status and actions -->
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
+                    <div>
+                        <h2 class="text-xl font-semibold text-gray-900"><span class="ticket-id">${fullId}</span>: ${ticket.title}</h2>
+                        <div class="flex items-center gap-3 mt-2">
+                            ${statusBadge}
+                            <span class="text-sm text-gray-500">${ticket.type} • ${ticket.priority}${ticket.story_points ? ` • ${ticket.story_points} pts` : ''}</span>
+                            ${ticket.original_id ? `<span class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded" title="Original ID before project move">Formerly ${ticket.original_id}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <a href="/tickets/${ticket.id}/edit" class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Edit</a>
+                        <button class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                                hx-get="/tickets/${ticket.id}/move-project/modal"
+                                hx-target="#ticket-modal"
+                                hx-swap="innerHTML"
+                                title="Move to another project">
+                            Move Project
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Transition Actions -->
+                <div class="pb-4 border-b border-gray-200">
+                    <h3 class="text-sm font-medium text-gray-900 mb-2">Status Actions</h3>
+                    <div id="transition-buttons">
+                        ${transitionButtons}
+                    </div>
+                </div>
+                
+                <!-- Ticket Details -->
+                <div class="grid gap-4 md:grid-cols-2 pb-4 border-b border-gray-200">
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-900 mb-1">Project</h4>
+                        <p class="text-gray-600">${ticket.project_prefix} (ID: ${ticket.project_id})</p>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-900 mb-1">Sprint</h4>
+                        <p class="text-gray-600">${ticket.sprint_id ? `#${ticket.sprint_id}` : '—'}</p>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-900 mb-1">Created</h4>
+                        <p class="text-gray-600">${ticket.created_at ? new Date(ticket.created_at).toLocaleString() : '—'}</p>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-900 mb-1">Updated</h4>
+                        <p class="text-gray-600">${ticket.updated_at ? new Date(ticket.updated_at).toLocaleString() : '—'}</p>
+                    </div>
+                    ${ticket.completed_at ? `
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-900 mb-1">Completed</h4>
+                        <p class="text-gray-600">${new Date(ticket.completed_at).toLocaleString()}</p>
+                    </div>
+                    ` : ''}
+                </div>
+                
+                <!-- Additional Fields -->
+                ${fieldsHtml ? `
+                <div class="space-y-4 pb-4 border-b border-gray-200">
+                    <h3 class="text-sm font-medium text-gray-900 mb-3">Details</h3>
+                    <div class="space-y-4">
+                        ${fieldsHtml}
+                    </div>
+                </div>
+                ` : ''}
+                
+                <!-- Transition History -->
+                <div id="transition-history">
+                    <h3 class="text-sm font-medium text-gray-900 mb-3">Transition History</h3>
+                    ${transitionHistory}
+                </div>
+
+                <!-- Links Section -->
+                <div id="links-section-container">
+                    <div hx-get="/tickets/${ticket.id}/links"
+                         hx-target="#links-section-container"
+                         hx-swap="outerHTML"
+                         hx-trigger="load"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Handler for htmx response
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        if (evt.detail.target && evt.detail.target.id === 'ticket-content') {
+            // Parse the ticket data from the response
+            try {
+                const ticket = JSON.parse(evt.detail.xhr.responseText);
+                document.getElementById('ticket-title').textContent = ticket.full_id || `Ticket #${ticket.id}`;
+                document.getElementById('ticket-meta').textContent = `${ticket.type} • ${ticket.status} • ${ticket.priority}`;
+                document.getElementById('ticket-content').innerHTML = renderTicket(ticket);
+                // Process new HTMX elements in the rendered content
+                htmx.process(document.getElementById('ticket-content'));
+            } catch (e) {
+                console.error('Failed to parse ticket response:', e);
+            }
+        }
+        // Also process HTMX on modal content
+        if (evt.detail.target && evt.detail.target.id === 'ticket-modal') {
+            htmx.process(evt.detail.target);
+        }
+    });
+    
+    // Handle transition form submissions from modals
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+        // Check if this is a transition form submission
+        const target = evt.detail.target;
+        if (target && target.id === 'groom-form' && evt.detail.xhr.status === 200) {
+            console.log('Groom form submitted successfully, reloading ticket content');
+            // Extract ticket ID from the form's hx-post attribute
+            const hxPost = target.getAttribute('hx-post');
+            const match = hxPost && hxPost.match(/\/api\/v1\/tickets\/(\d+)\/transition/);
+            if (match) {
+                htmx.ajax('GET', '/api/v1/tickets/' + match[1], {target: '#ticket-content', swap: 'innerHTML'});
+            }
+        }
+    });
+    // Also listen for htmx:afterSwap on ticket-modal to process HTMX attributes
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        if (evt.detail.target && evt.detail.target.id === 'ticket-modal') {
+            htmx.process(evt.detail.target);
+        }
     });
 </script>
 {% endblock %}

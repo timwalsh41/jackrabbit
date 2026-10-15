@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Move Project - {{ ticket.full_id }}{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+            <h3 class="text-lg font-medium text-gray-900">Move Project</h3>
+            <button type="button" class="text-gray-400 hover:text-gray-500" onclick="closeModal()">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        
+        <div class="px-4 py-4 space-y-4">
+            <div class="bg-gray-50 rounded-lg p-3">
+                <p class="text-sm font-medium text-gray-900">Current Project</p>
+                <p class="text-sm text-gray-600 mt-1">{{ project.prefix if project else 'UNK' }}-{{ '%03d'|format(ticket.number) }}: {{ ticket.title }}</p>
+                {% if ticket.original_id %}
+                <p class="text-xs text-gray-500 mt-1">Formerly: {{ ticket.original_id }}</p>
+                {% endif %}
+            </div>
+            
+            <form hx-post="/api/v1/tickets/{{ ticket.id }}/move-project"
+                  hx-headers='{"Content-Type": "application/json"}'
+                  hx-vals='js:{project_id: document.getElementById("move-project-select").value}'
+                  hx-target="#ticket-content"
+                  hx-swap="innerHTML"
+                  hx-on::after-request="if(event.detail.successful) { closeModal(); }">
+                <div>
+                    <label for="move-project-select" class="block text-sm font-medium text-gray-700 mb-1">Select New Project</label>
+                    <select id="move-project-select" name="project_id" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            required>
+                        <option value="">Choose a project...</option>
+                        {% for p in projects %}
+                        <option value="{{ p.id }}">{{ p.prefix }} - {{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="pt-4 border-t border-gray-200 flex justify-end gap-3">
+                    <button type="button" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50" onclick="closeModal()">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" id="move-submit-btn" disabled>
+                        Move Ticket
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function closeModal() {
+    const modal = document.getElementById('ticket-modal');
+    if (modal) {
+        modal.innerHTML = '';
+        modal.classList.add('hidden');
+    }
+}
+
+// Enable submit button when project is selected
+document.getElementById('move-project-select').addEventListener('change', function() {
+    document.getElementById('move-submit-btn').disabled = !this.value;
+});
+</script>
+{% endblock %}

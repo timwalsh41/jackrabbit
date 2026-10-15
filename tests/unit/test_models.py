@@ -8,6 +8,7 @@ from jackrabbit.models import (
 )
 from jackrabbit.schemas import (
     ProjectCreate,
+    ProjectUpdate,
     SprintCreate,
     TicketCreate,
     TicketLinkCreate,
@@ -96,3 +97,34 @@ def test_ticket_link_create_schema() -> None:
     assert link.source_id == 1
     assert link.target_id == 2
     assert link.link_type == LinkType.BLOCKS
+
+
+def test_project_update_schema() -> None:
+    """Test ProjectUpdate schema validation."""
+    # Partial update
+    update = ProjectUpdate(name="New Name")
+    assert update.name == "New Name"
+    assert update.description is None
+    assert update.color is None
+
+    # Full update
+    update_full = ProjectUpdate(
+        name="Updated Project",
+        description="Updated description",
+        color="#ff0000",
+    )
+    assert update_full.name == "Updated Project"
+    assert update_full.description == "Updated description"
+    assert update_full.color == "#ff0000"
+
+    # Validation: empty name should fail
+    import pytest
+
+    with pytest.raises(ValueError):
+        ProjectUpdate(name="")
+
+    # Validation: invalid color should fail
+    with pytest.raises(ValueError):
+        ProjectUpdate(color="not-a-color")
+    with pytest.raises(ValueError):
+        ProjectUpdate(color="#GGGGGG")
