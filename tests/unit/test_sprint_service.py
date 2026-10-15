@@ -174,6 +174,42 @@ class TestSprintStatusDerived:
     def test_by_status_missing_sprint_returns_none(self, sprint_service):
         assert sprint_service.get_sprint_with_tickets_by_status(9999) is None
 
+    def test_get_sprint_with_tickets_groups_by_status(
+        self, sprint_service, ticket_service, project
+    ):
+        """get_sprint_with_tickets includes tickets grouped by status (ticket 07)."""
+        sprint = sprint_service.create_sprint(number=2601)
+        open_ticket = ticket_service.create_ticket(
+            project_id=project.id, title="Open one", sprint_id=sprint.id, status=TicketStatus.OPEN
+        )
+        done_ticket = ticket_service.create_ticket(
+            project_id=project.id,
+            title="Done one",
+            sprint_id=sprint.id,
+            status=TicketStatus.COMPLETE,
+        )
+        result = sprint_service.get_sprint_with_tickets(sprint.id)
+        grouped = result["tickets_by_status"]
+        # All six statuses present as keys
+        assert set(grouped.keys()) == {
+            "Open",
+            "Groomed",
+            "In Progress",
+            "Ready for Review",
+            "Complete",
+            "Rejected",
+        }
+        assert [t.id for t in grouped["Open"]] == [open_ticket.id]
+        assert [t.id for t in grouped["Complete"]] == [done_ticket.id]
+        assert grouped["Groomed"] == []
+
+    def test_get_sprint_with_tickets_empty_groups_when_no_tickets(
+        self, sprint_service, ticket_service, project
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        result = sprint_service.get_sprint_with_tickets(sprint.id)
+        assert all(g == [] for g in result["tickets_by_status"].values())
+
 
 class TestAssignTicketToSprint:
     def test_assign_ticket(self, sprint_service, ticket_service, project):

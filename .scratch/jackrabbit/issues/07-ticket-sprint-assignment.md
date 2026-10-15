@@ -4,11 +4,11 @@
 
 **Blocked by:** 04, 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] API: `POST /api/v1/sprints/{id}/tickets/{ticket_id}` — assign ticket to sprint (fails if ticket already in another sprint)
 - [x] API: `DELETE /api/v1/sprints/{id}/tickets/{ticket_id}` — unassign ticket from sprint
-- [ ] API: `GET /api/v1/sprints/{id}` returns sprint with nested tickets grouped by status
+- [x] API: `GET /api/v1/sprints/{id}` returns sprint with nested tickets grouped by status
 - [x] Ticket model: `sprint_id` FK (nullable), enforced unique per ticket via DB constraint
 - [x] Web: Sprint detail page `GET /sprints/{id}` — columns for each status (Open, Groomed, In Progress, Ready for Review, Complete, Rejected) showing tickets as cards
   - HTMX: drag-drop not required; "Move to Sprint" dropdown on ticket card in backlog → `hx-post` to assign
@@ -19,7 +19,32 @@
 
 ## Answer
 
-**Verified on branch `jackrabbit-integration`. 7 of 8 criteria checked; criterion 3 left unchecked due to an endpoint-shape deviation (functionality exists, but at a different URL).**
+**Ticket 07 completion (criterion 3 gap-closure, implemented by follow-up agent).** The prior audit verified criteria 1, 2, 4–8; criterion 3 (`GET /api/v1/sprints/{id}` returning nested tickets grouped by status) was the only unchecked item because grouping lived at a separate `/by-status` endpoint. This run closed that gap:
+
+- `SprintService.get_sprint_with_tickets` (`jackrabbit/services.py`) now returns `tickets_by_status` alongside the flat `tickets` list — a dict keyed by all six statuses (Open, Groomed, In Progress, Ready for Review, Complete, Rejected), every key present even when empty.
+- `SprintReadWithTickets` (`jackrabbit/schemas.py`) gained a `tickets_by_status: dict[str, list[TicketRead]]` field; `GET /api/v1/sprints/{id}` (`jackrabbit/api.py`) now returns nested tickets grouped by status, while keeping the flat `tickets` list and `status` for backward compatibility (web sprint-list view and existing tests depend on them).
+
+### Final state per criterion (cumulative, including prior work)
+1. POST assign endpoint — `api.py` `POST /sprints/{id}/tickets/{ticket_id}`; 409 on already-assigned (with current sprint info). ✓
+2. DELETE unassign endpoint — ✓
+3. GET `/sprints/{id}` nested tickets grouped by status — **now satisfied**: `tickets_by_status` in response with all six status keys. ✓
+4. Ticket model `sprint_id` nullable FK — ✓
+5. Web sprint detail page with six status columns, Move-to-Sprint dropdown (hx-post), Remove-from-Sprint (hx-delete) — ✓
+6. Backlog Sprint column + filter, unassigned shows "—" — ✓
+7. 409 with current sprint info on double-assign — ✓
+8. Unit/integration tests for assign, unassign, double-assign prevention, sprint-deletion cascade — ✓
+
+### Tests added this run
+- `tests/unit/test_sprint_service.py::TestSprintStatusDerived::test_get_sprint_with_tickets_groups_by_status` — all six status keys, correct bucket membership
+- `tests/unit/test_sprint_service.py::TestSprintStatusDerived::test_get_sprint_with_tickets_empty_groups_when_no_tickets`
+- `tests/integration/test_sprint_api.py::test_get_sprint_returns_tickets_grouped_by_status` — API response shape
+- `tests/integration/test_sprint_api.py::test_get_sprint_grouped_by_status_empty_sprint`
+
+### Validation
+- TDD: both new tests failed first (red), then passed after schema/service/API change (green).
+- `uv run pytest -x tests/unit tests/integration -q` → 335 passed.
+- `uv run ruff check jackrabbit tests` → clean.
+- `uv run mypy jackrabbit` → 31 errors, all pre-existing (verified identical before/after via stash).
 
 ### Criterion verdicts
 

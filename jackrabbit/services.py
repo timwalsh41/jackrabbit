@@ -686,7 +686,7 @@ class SprintService:
         return list(self.session.exec(query).all())
 
     def get_sprint_with_tickets(self, sprint_id: int) -> dict | None:
-        """Get sprint with tickets and derived status."""
+        """Get sprint with tickets (flat and grouped by status) and derived status."""
         sprint = self.get_sprint(sprint_id)
         if not sprint:
             return None
@@ -695,9 +695,15 @@ class SprintService:
 
         status = self._derive_status(sprint, tickets)
 
+        # Group tickets by status (ticket 07): every status key present
+        tickets_by_status: dict[str, list[Ticket]] = {status.value: [] for status in TicketStatus}
+        for ticket in tickets:
+            tickets_by_status[ticket.status.value].append(ticket)
+
         return {
             "sprint": sprint,
             "tickets": tickets,
+            "tickets_by_status": tickets_by_status,
             "status": status,
         }
 

@@ -167,6 +167,7 @@ def get_sprint(
 
     sprint = result["sprint"]
     tickets = result["tickets"]
+    tickets_by_status = result["tickets_by_status"]
     status = result["status"]
 
     return SprintReadWithTickets(
@@ -182,6 +183,7 @@ def get_sprint(
         created_at=sprint.created_at,
         updated_at=sprint.updated_at,
         tickets=tickets,
+        tickets_by_status=tickets_by_status,
         status=status,
     )
 
