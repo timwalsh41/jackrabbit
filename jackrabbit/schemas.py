@@ -171,6 +171,8 @@ class SprintUpdate(_EmptyStringToNoneMixin):
 
 class SprintReadWithTickets(SprintRead):
     tickets: list["TicketRead"] = []
+    # Nested tickets grouped by status (ticket 07); all six status keys present
+    tickets_by_status: dict[str, list["TicketRead"]] = {}
     status: str = "Planned"  # Planned, Active, Complete
 
 

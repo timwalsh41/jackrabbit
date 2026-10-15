@@ -177,6 +177,68 @@ async def test_get_sprint_with_tickets(
     assert len(data["tickets"]) == 2
 
 
+async def test_get_sprint_returns_tickets_grouped_by_status(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """GET /api/v1/sprints/{id} returns nested tickets grouped by status (ticket 07)."""
+    sprint_response = await client_with_seeds.post(
+        "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
+    )
+    sprint_id = sprint_response.json()["id"]
+
+    await client_with_seeds.post(
+        "/api/v1/tickets",
+        json={"project_id": 2, "title": "Open ticket", "sprint_id": sprint_id},
+    )
+    await client_with_seeds.post(
+        "/api/v1/tickets",
+        json={
+            "project_id": 2,
+            "title": "Done ticket",
+            "sprint_id": sprint_id,
+            "status": "Complete",
+        },
+    )
+
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    assert response.status_code == 200
+    data = response.json()
+    grouped = data["tickets_by_status"]
+    assert set(grouped.keys()) == {
+        "Open",
+        "Groomed",
+        "In Progress",
+        "Ready for Review",
+        "Complete",
+        "Rejected",
+    }
+    assert [t["title"] for t in grouped["Open"]] == ["Open ticket"]
+    assert [t["title"] for t in grouped["Complete"]] == ["Done ticket"]
+    assert grouped["Groomed"] == []
+
+
+async def test_get_sprint_grouped_by_status_empty_sprint(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Sprint with no tickets returns all six empty status buckets."""
+    sprint_response = await client_with_seeds.post(
+        "/api/v1/sprints", json={"number": 2601, "name": "Empty"}
+    )
+    sprint_id = sprint_response.json()["id"]
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    assert response.status_code == 200
+    grouped = response.json()["tickets_by_status"]
+    assert set(grouped.keys()) == {
+        "Open",
+        "Groomed",
+        "In Progress",
+        "Ready for Review",
+        "Complete",
+        "Rejected",
+    }
+    assert all(v == [] for v in grouped.values())
+
+
 async def test_update_sprint(
     client_with_seeds: AsyncClient,
 ) -> None:
