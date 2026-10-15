@@ -1,10 +1,13 @@
 """Shared test fixtures for Jackrabbit unit and integration tests."""
 
+import os
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
 import httpx
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from jackrabbit.config import Settings, get_settings
 from jackrabbit.main import create_app
@@ -17,8 +20,9 @@ from jackrabbit.models import (
     TicketType,
 )
 from jackrabbit.services import ProjectService, SprintService, TicketService
-from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 # Override settings for testing
@@ -34,16 +38,35 @@ def test_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
     )
 
 
-@pytest.fixture(scope="session")
-def test_engine(test_settings: Settings):
-    """Create a test database engine."""
-    engine = create_engine(
-        test_settings.database_url,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    # Create all tables
-    SQLModel.metadata.create_all(engine)
+@pytest.fixture(scope="module")
+def test_engine(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory):
+    """Fresh SQLite *file* database per test module, in a pytest temp directory.
+
+    The schema is applied via Alembic migrations (the schema source of truth),
+    not ``create_all``. Individual tests get isolation from the ``test_db``
+    fixture, which drops/recreates the tables inside this module-scoped file.
+    """
+    module_name = request.module.__name__.rsplit(".", 1)[-1]
+    db_dir = tmp_path_factory.mktemp(f"{module_name}-db")
+    db_path = db_dir / "test.db"
+    database_url = f"sqlite:///{db_path}"
+
+    engine = create_engine(database_url, connect_args={"check_same_thread": False})
+
+    # Apply migrations. Alembic's env.py resolves the URL from settings, so the
+    # DATABASE_URL env var must point at this module's temp database.
+    old_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = database_url
+    try:
+        alembic_cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        alembic_cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        command.upgrade(alembic_cfg, "head")
+    finally:
+        if old_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = old_url
+
     yield engine
     engine.dispose()
 

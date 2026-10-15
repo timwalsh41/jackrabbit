@@ -536,13 +536,11 @@ class TestTransitionAPI:
     """Integration tests for the transition API endpoints."""
 
     @pytest.fixture
-    def client(self):
-        """Create test client."""
-        import os
-
-        os.environ["DATABASE_URL"] = "sqlite:///./data/test_transition.db"
+    def client(self, tmp_path, monkeypatch):
+        """Create test client backed by a fresh temp SQLite file DB."""
         from jackrabbit.main import create_app
 
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test_transition.db'}")
         app = create_app()
         init_db()
 
@@ -550,11 +548,6 @@ class TestTransitionAPI:
 
         client = TestClient(app)
         yield client
-        # Cleanup
-        import os
-
-        if os.path.exists("./data/test_transition.db"):
-            os.remove("./data/test_transition.db")
 
     def test_can_transition_endpoint(self, client):
         """Test GET /tickets/{id}/transition/can endpoint."""
