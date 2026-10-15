@@ -1,4 +1,25 @@
-# INTERIM STATUS — implement-spec audit & remediation
+# INTERIM STATUS — RESOLVED: implement-spec completed 2026-10-15
+
+**Final state:** All 15 tickets implemented, review-remediated, and merged on
+`jackrabbit-integration` (HEAD `55bf75e`). PR #1 open against `main`
+(https://github.com/timwalsh41/jackrabbit/pull/1), branch pushed.
+Gates at HEAD: `uv run pytest -x` → 562 passed (unit+integration+e2e),
+`mypy jackrabbit` → 0 errors, `ruff check`+`format --check` clean.
+Full audit trail: per-ticket `## Answer` sections in `.scratch/jackrabbit/issues/`.
+
+**Review remediation included:** markdown URL-attribute XSS, backlog date
+filter (story 16), guarded PATCH status via TransitionService (ADR-0009 hole),
+DATA_DIR/--data-dir + CLI override propagation (stories 20-21), `/`→`/backlog`
+redirect, bare `server.py` invocation, mypy 31→0, e2e flake root-caused &
+fixed (htmx settle-delay race), plus 8 smaller edge-case hardenings.
+
+**Known repo hygiene leftover:** `.pre-commit-config.yaml` pins ruff 0.5.0
+while the project env runs 0.16.x — hook output can disagree with
+`ruff format --check`. Worth unpinning in a follow-up.
+
+---
+
+# INTERIM STATUS — implement-spec audit & remediation (historical)
 
 _Date: 2026-10-15 · Branch: `jackrabbit-integration` @ `ccd4068` · Written by: session `2026-10-14T23-30-04` (audit of `implement-02`)_
 
