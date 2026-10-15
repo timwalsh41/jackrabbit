@@ -18,7 +18,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    port: Annotated[int, Field(ge=1, le=65535)] = 8080
+    # port=0 is allowed: it means "pick a free port" (used by test fixtures).
+    port: Annotated[int, Field(ge=0, le=65535)] = 8080
     data_dir: Path = Path("./data")
     database_url: str = "sqlite:///./data/jackrabbit.db"
     log_level: str = "INFO"

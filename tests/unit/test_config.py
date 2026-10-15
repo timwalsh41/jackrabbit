@@ -31,6 +31,12 @@ def test_settings_cli_overrides() -> None:
     assert settings.log_level == "WARNING"
 
 
+def test_settings_port_zero_is_ephemeral() -> None:
+    """Port 0 means 'pick a free port' (used by the test fixtures)."""
+    settings = Settings(port=0)
+    assert settings.port == 0
+
+
 def test_settings_invalid_log_level() -> None:
     """Test that invalid log level raises error."""
     with pytest.raises(ValueError, match="log_level must be one of"):

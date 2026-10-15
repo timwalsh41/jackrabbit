@@ -85,6 +85,7 @@ Core domain: **Projects** (prefixes like `MSC`, `WEB`, `UNS`), **Tickets** (Epic
 - **ADR-0017**: UNS = real seeded Project record (prefix='UNS', is_system=true)
 - **ADR-0018** (ticket 03): Project prefix uniqueness enforced at the service layer (`ValueError` → API **409 Conflict**), not just a DB constraint, so duplicate prefixes never surface as 500s.
 - **ADR-0019** (ticket 03): HTMX Project forms submit to web routes (`POST /projects`, `PATCH /projects/{id}`, form-encoded, validated via `ProjectCreate`/`ProjectUpdate`) and receive the `project_row.html` row partial back; create success and full-page edit success set `HX-Redirect: /projects`, inline row edits swap the row in place (`HX-Target: project-row-*`).
+- **ADR-0020** (ticket 13): PORT=0 is a valid Settings value meaning "pick a free port" (test fixtures use it); `test_settings` overrides DATA_DIR to a pytest temp dir. `client` fixture is `httpx.AsyncClient` via `ASGITransport` (httpx 0.27+ deprecated the direct `app=` kwarg) with `base_url="http://test"`. `seeded_projects` = UNS + 2 test projects (WEB, API). `seeded_tickets` spans Open/Groomed/In-Progress/Ready-for-Review. CI runs E2E headed Chrome under Xvfb (`xvfb-run`).
 
 ### Schema Overview
 ```sql
