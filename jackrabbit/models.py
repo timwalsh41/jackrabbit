@@ -6,6 +6,7 @@ API request/response schemas are in `schemas.py`.
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 from sqlmodel._compat import NaiveDatetime
 
@@ -75,6 +76,11 @@ class Sprint(SQLModel, table=True):
 
 
 class Ticket(SQLModel, table=True):
+    __table_args__ = (
+        # Serial numbers are unique within a project (matches alembic migration 0001)
+        UniqueConstraint("project_id", "number", name="uq_ticket_project_number"),
+    )
+
     id: int | None = Field(default=None, primary_key=True)
     project_id: int = Field(foreign_key="project.id", index=True)
     sprint_id: int | None = Field(default=None, foreign_key="sprint.id", index=True)

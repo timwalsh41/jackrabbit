@@ -5,12 +5,13 @@ from jackrabbit.database import init_db
 from jackrabbit.models import (
     Priority,
     Project,
+    Ticket,
     TicketStatus,
     TicketType,
 )
 from jackrabbit.services import ProjectService, TicketService
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, create_engine
+from sqlmodel import Session, create_engine, select
 
 
 def get_test_engine():
@@ -163,6 +164,100 @@ class TestMoveTicketToProject:
         ticket_service.session.refresh(ticket3)
         assert ticket3.number == 3
 
+    def test_move_ticket_to_project_with_gap(self, ticket_service, setup_projects):
+        """Moving into a project with a numbering gap assigns MAX(number)+1."""
+        web = setup_projects["web"]
+        ticket_service.create_ticket(project_id=web.id, title="Web 1")
+        ticket2 = ticket_service.create_ticket(project_id=web.id, title="Web 2")
+        ticket_service.create_ticket(project_id=web.id, title="Web 3")
+
+        # Delete WEB-2, leaving a gap: WEB numbers are now {1, 3}
+        ticket_service.session.delete(ticket2)
+        ticket_service.session.commit()
+
+        uns = setup_projects["uns"]
+        mover = ticket_service.create_ticket(project_id=uns.id, title="Mover")
+
+        # MAX(number) in WEB is 3, so the moved ticket becomes WEB-4
+        result = ticket_service.move_ticket_to_project(mover.id, web.id)
+        assert result["new_full_id"] == "WEB-4"
+
+        ticket_service.session.refresh(mover)
+        assert mover.project_id == web.id
+        assert mover.number == 4
+        assert mover.original_id == "UNS-1"
+
+    def test_move_ticket_handles_concurrent_number_race(self, tmp_path):
+        """If a competing writer claims the target number between the MAX read
+        and the commit, the move retries and gets MAX(number)+1 instead of
+        creating a duplicate number."""
+        db_file = tmp_path / "race.db"
+        url = f"sqlite:///{db_file}"
+
+        # Seed shared schema + data
+        seed_engine = create_engine(url, connect_args={"check_same_thread": False})
+        from jackrabbit.models import SQLModel
+
+        SQLModel.metadata.create_all(seed_engine)
+        with Session(seed_engine) as seed:
+            seed.add(
+                Project(
+                    id=1,
+                    prefix="UNS",
+                    name="Unsorted",
+                    description="Default",
+                    color="#9ca3af",
+                    is_system=True,
+                )
+            )
+            seed.add(Project(id=2, prefix="WEB", name="Web Project", color="#3b82f6"))
+            seed.add(Ticket(project_id=2, number=1, title="web one"))
+            seed.add(Ticket(project_id=2, number=2, title="web two"))
+            seed.add(Ticket(project_id=1, number=1, title="racer"))
+            seed.commit()
+
+        # Two independent connections simulating concurrent writers
+        engine_a = create_engine(url, connect_args={"check_same_thread": False})
+        engine_b = create_engine(url, connect_args={"check_same_thread": False})
+        session_a = Session(engine_a)
+        session_b = Session(engine_b)
+        service_a = TicketService(session_a)
+
+        racer = session_a.exec(select(Ticket).where(Ticket.project_id == 1)).first()
+        assert racer is not None
+        racer_id = racer.id
+
+        hook_fired = {"done": False}
+        original_commit = session_a.commit
+
+        def racing_commit(*args, **kwargs):
+            # Fires while service_a is committing its move: a competing writer
+            # claims WEB-3 (the number service_a computed from a stale MAX read)
+            if not hook_fired["done"]:
+                hook_fired["done"] = True
+                session_b.add(Ticket(project_id=2, number=3, title="interloper"))
+                session_b.commit()
+            return original_commit(*args, **kwargs)
+
+        session_a.commit = racing_commit
+        try:
+            result = service_a.move_ticket_to_project(racer_id, 2)
+        finally:
+            session_a.commit = original_commit
+            session_a.close()
+            session_b.close()
+
+        # Retry must have recomputed MAX+1 = 4, not produced a duplicate WEB-3
+        assert result["new_full_id"] == "WEB-4"
+        with Session(engine_a) as verify:
+            moved = verify.get(Ticket, racer_id)
+            assert moved is not None
+            assert (moved.project_id, moved.number) == (2, 4)
+            web_numbers = sorted(
+                t.number for t in verify.exec(select(Ticket).where(Ticket.project_id == 2)).all()
+            )
+            assert web_numbers == [1, 2, 3, 4]
+
     def test_move_ticket_same_project_raises_error(
         self, ticket_service, test_ticket, setup_projects
     ):
@@ -304,6 +399,30 @@ class TestMoveProjectAPI:
         assert response.json()["original_id"] == "UNS-1"
         assert response.json()["old_full_id"] == "API-1"
         assert response.json()["new_full_id"] == "MOB-1"
+
+    def test_move_project_accepts_form_encoded_body(self, client):
+        """htmx forms post urlencoded bodies; the endpoint must accept them."""
+        client.post("/api/v1/projects", json={"prefix": "WEB", "name": "Web Project"})
+        response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
+        ticket_id = response.json()["id"]
+
+        response = client.post(
+            f"/api/v1/tickets/{ticket_id}/move-project", data={"project_id": "2"}
+        )
+        assert response.status_code == 200
+        assert response.json()["new_full_id"] == "WEB-1"
+
+    def test_move_project_accepts_target_project_id_field(self, client):
+        """The documented field name target_project_id is also accepted."""
+        client.post("/api/v1/projects", json={"prefix": "WEB", "name": "Web Project"})
+        response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
+        ticket_id = response.json()["id"]
+
+        response = client.post(
+            f"/api/v1/tickets/{ticket_id}/move-project", json={"target_project_id": 2}
+        )
+        assert response.status_code == 200
+        assert response.json()["new_full_id"] == "WEB-1"
 
     def test_move_project_same_project_returns_400(self, client):
         """Moving to same project returns 400."""
