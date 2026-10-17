@@ -40,6 +40,11 @@ uv run server.py seed                # Load idempotent demo data
 uv run server.py create-project PREFIX "Name"  # Create project
 ```
 
+`seed` is safe to re-run, and it refuses to write demo rows when the database
+already holds tickets it did not create (demo rows would consume real ticket
+serial numbers) or when `ENVIRONMENT` is anything other than
+`development`/`test`. `--force` overrides both.
+
 ## Configuration
 
 Configuration is loaded from `.env` file with CLI overrides:

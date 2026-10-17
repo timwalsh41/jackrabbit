@@ -17,6 +17,7 @@ data carries genuine audit history instead of a faked status column.
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from jackrabbit.models import (
@@ -240,6 +241,23 @@ class SeedResult:
             f"{len(self.sprints)} sprint(s), {self.links} link(s) and {self.moves} move(s) "
             f"across {self.transitions} recorded transition(s)."
         )
+
+
+def count_foreign_tickets(session: Session) -> int:
+    """Tickets the seeder did not write, i.e. data that is not demo data.
+
+    Every seeded ticket's description starts with ``DEMO_NOTE``, so a non-zero
+    count means real work lives in this database. The CLI uses this as the
+    safety check: ``ENVIRONMENT`` labels the *process*, but the data is what is
+    worth protecting, and the default label (``development``) is also the label
+    on a database somebody has been using for a month.
+
+    Raw SQL with a bound parameter because SQLModel types mapped columns as
+    plain ``str``, so ``Ticket.description.like(...)`` fails mypy and
+    ``sqlalchemy.col`` -- the usual escape hatch -- is gone in SQLAlchemy 2.1.
+    """
+    statement = text("select count(*) from ticket where description not like :marker")
+    return int(session.execute(statement, {"marker": f"{DEMO_NOTE}%"}).scalar_one())
 
 
 def _day_offset(days: int) -> datetime:

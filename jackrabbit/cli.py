@@ -156,28 +156,54 @@ def create_project(
     typer.echo(f"Created project: {project.prefix} - {project.name}")
 
 
+# Environments the seeder writes into on its own initiative. `development` is
+# the default and `test` is what the suite runs under; anything else has to be
+# forced, because ENVIRONMENT labels the process, not the data.
+_SEED_SAFE_ENVIRONMENTS = frozenset({"development", "test"})
+
+
 @app.command()
 def seed(
-    force: bool = typer.Option(False, "--force", help="Seed even when ENVIRONMENT=production"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Seed despite a non-development environment or existing non-demo tickets",
+    ),
 ) -> None:
     """Populate the database with demo data.
 
     Idempotent: entities are matched on their natural key, so a second run
     reports "already present" and changes nothing. See jackrabbit/seed.py.
+
+    Two safety checks, both overridable with --force: the environment must be
+    development/test, and the database must not already hold tickets the seeder
+    did not write, because demo rows would consume real ticket serial numbers.
     """
     from jackrabbit.database import get_session, init_db
-    from jackrabbit.seed import seed_demo_data
+    from jackrabbit.seed import count_foreign_tickets, seed_demo_data
 
     settings = get_settings()
-    if settings.environment == "production" and not force:
+    if settings.environment not in _SEED_SAFE_ENVIRONMENTS and not force:
         typer.echo(
-            "Refusing to write demo data into a production database; pass --force to override.",
+            f"Refusing to write demo data while ENVIRONMENT={settings.environment}; "
+            "pass --force to override.",
             err=True,
         )
         raise typer.Exit(code=1)
 
     init_db()
     session = next(get_session())
+
+    foreign = count_foreign_tickets(session)
+    if foreign and not force:
+        typer.echo(
+            f"Refusing to seed: this database holds {foreign} ticket(s) the seeder did not "
+            "create, and demo rows would consume real ticket serial numbers.\n"
+            "  pass --force to seed anyway, or use `make db-reset` for a throwaway database.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     result = seed_demo_data(session)
     typer.echo(result.summary())
 
