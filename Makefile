@@ -1,7 +1,7 @@
 # Jackrabbit Makefile
 # Provides convenient targets for development and CI tasks
 
-.PHONY: help install dev-install test test-unit test-int test-e2e test-e2e-headed test-e2e-idempotent lint typecheck format check build-css css-check migrate migrate-create migrate-history migrate-current clean
+.PHONY: help install dev-install test test-unit test-int test-fast test-e2e test-e2e-headed test-e2e-idempotent db-info lint typecheck format check build-css css-check migrate migrate-create migrate-history migrate-current clean
 
 # Default target
 help:
@@ -29,7 +29,7 @@ install:
 	uv sync --no-dev
 
 dev-install:
-	uv sync --all-extras
+	uv sync
 	uv run playwright install --with-deps chromium
 	npm --prefix frontend install --no-audit --no-fund
 
@@ -48,11 +48,10 @@ test-e2e:
 test-e2e-headed:
 	PLAYWRIGHT_BROWSER=chromium uv run pytest tests/e2e -v --tb=short --headed
 
-test-e2e-firefox:
-	PLAYWRIGHT_BROWSER=firefox uv run pytest tests/e2e -v --tb=short
 
-test-e2e-webkit:
-	PLAYWRIGHT_BROWSER=webkit uv run pytest tests/e2e -v --tb=short
+# Fast local loop: everything except the browser suite
+test-fast:
+	uv run pytest tests/unit tests/integration -q
 
 # Two runs back to back must both pass: proves the suite leaves no state behind
 test-e2e-idempotent:
@@ -84,7 +83,7 @@ format-check:
 
 # Type checking
 typecheck:
-	uv run mypy .
+	uv run mypy
 
 # Combined check (for CI)
 check: lint typecheck
@@ -121,6 +120,15 @@ migrate-downgrade:
 	uv run alembic downgrade $(REV)
 
 # Database targets
+# The sqlite3 CLI is not a dependency (and is often absent); this uses the app's
+# own driver so the database can always be inspected.
+db-info:
+	uv run python -c "from jackrabbit.database import get_engine;\
+from sqlalchemy import inspect, text;\
+e = get_engine(); i = inspect(e);\
+print(e.url);\
+[print(f'  {t}:', e.connect().execute(text(f'select count(*) from {t}')).scalar()) for t in i.get_table_names()]"
+
 db-init:
 	uv run python -c "from jackrabbit.database import init_db; init_db()"
 

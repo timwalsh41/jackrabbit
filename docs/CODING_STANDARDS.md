@@ -13,7 +13,7 @@
 ### Format & Lint
 - **Formatter**: `ruff format` (double quotes, 100 col, spaces) — CI enforces `--check`
 - **Linter**: `ruff check` with `select = ["E","W","F","I","UP","B","C4","T20"]` — CI enforces
-- **Pre-commit**: `ruff --fix`, `ruff format`, `mypy` run on every commit
+- **Pre-commit**: `ruff --fix` and `ruff format` run on every commit (mypy runs in CI)
 
 ### Types
 - **Type checker**: `mypy` strict mode
@@ -22,7 +22,9 @@
   - `strict_equality = true`
   - `warn_return_any = true`
   - `warn_unused_configs = true`
-- CI enforces `mypy .` with zero errors
+- CI enforces bare `uv run mypy` with zero errors (`mypy.ini` sets
+  `files = jackrabbit, alembic, server.py`; passing `.` overrides that list and
+  drags in the untyped test suite)
 
 ### API Design
 - **API-First**: Separate Pydantic request/response schemas in `schemas.py`
@@ -42,7 +44,7 @@
 |-------|------|---------|
 | Format | `ruff format --check` | Pre-commit + CI |
 | Lint | `ruff check` | Pre-commit + CI |
-| Types | `mypy` | Pre-commit + CI |
+| Types | `mypy` | CI (see note above) |
 | Tests | `pytest` | CI only |
 | Import sorting | `ruff check --select=I` | Pre-commit + CI |
 | Assets local (no CDN) | `pytest tests/unit/test_static_assets.py` | CI (unit) + e2e |
@@ -98,12 +100,12 @@
 # Local development
 uv run ruff check . --fix
 uv run ruff format .
-uv run mypy .
+uv run mypy
 uv run pytest
 
 # Pre-commit install
 uv run pre-commit install
 
 # CI simulation
-uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```

@@ -5,8 +5,7 @@ Ticket tracking and sprint management system.
 ## Quick Start
 
 ```bash
-# Install dependencies
-uv sync
+
 
 # Copy example env file
 cp .env.example .env
@@ -84,7 +83,7 @@ uv run ruff check .
 uv run ruff format .
 
 # Type check
-uv run mypy jackrabbit
+uv run mypy
 ```
 
 ## End-to-end tests

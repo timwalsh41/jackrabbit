@@ -58,6 +58,20 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark every test in this directory `e2e`.
+
+    Registering the marker without applying it bought nothing: `--strict-markers`
+    only rejects *unknown* names, so the suite was still selected purely by path
+    and `-m "not e2e"` matched no test. Marking from here keeps the whole
+    directory selectable/deselectable from one place.
+    """
+    here = Path(__file__).resolve().parent
+    for item in items:
+        if here in Path(str(item.fspath)).resolve().parents:
+            item.add_marker("e2e")
+
+
 def _is_headed(request: pytest.FixtureRequest) -> bool:
     if request.config.getoption("--headed"):
         return True
