@@ -78,7 +78,12 @@
         <div class="text-center text-gray-500 py-8">Loading ticket details...</div>
     </div>
 
-    <div id="ticket-modal" class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true"></div>
+    {# Modal mount. The dialog partial swapped into it supplies its own
+       `fixed inset-0` overlay, backdrop and role="dialog"; the mount itself must
+       stay a plain container that is hidden while :empty (see
+       jackrabbit/static/css/app.css) — an empty but positioned mount covers the
+       page and swallows every click behind it. #}
+    <div id="ticket-modal"></div>
 </div>
 
 <script>

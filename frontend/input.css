@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Button component classes used across the SSR templates (`btn btn-primary`,
+ * `btn btn-outline btn-sm`). Sizes/effects intentionally match the inline
+ * utility combinations used elsewhere, e.g. project_list.html's
+ * `bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700`.
+ * `.btn-sm` is declared after `.btn` so it wins the padding/font tie.
+ */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-indigo-600 text-white hover:bg-indigo-700 focus:ring-indigo-500;
+  }
+
+  .btn-outline {
+    @apply border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-indigo-500;
+  }
+
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+}

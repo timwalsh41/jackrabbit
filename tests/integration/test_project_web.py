@@ -33,10 +33,14 @@ async def test_project_list_page(
 async def test_base_template_nav_and_htmx(
     client_with_seeds: AsyncClient,
 ) -> None:
-    """Base template loads HTMX and has nav: Backlog, Sprints, Plan, Projects."""
+    """Base template loads HTMX locally and has nav: Backlog, Sprints, Plan, Projects."""
     response = await client_with_seeds.get("/projects")
     html = response.text
-    assert "htmx.org" in html
+    # ADR-0022: assets are served from /static, never from a CDN.
+    assert "/static/vendor/htmx.min.js" in html, "HTMX must be vendored under /static"
+    assert "/static/css/tailwind.css" in html, "the built stylesheet must be served from /static"
+    for cdn in ("unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "hyperscript"):
+        assert cdn not in html, f"base template still references {cdn}"
     for label, href in [
         ("Backlog", "/backlog"),
         ("Sprints", "/sprints"),

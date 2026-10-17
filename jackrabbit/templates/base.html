@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Jackrabbit{% endblock %}</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js"></script>
-    <script src="https://unpkg.com/hyperscript.org@0.9.12"></script>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css" rel="stylesheet">
-    <style>
-        .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
-        .htmx-request .htmx-indicator { opacity: 1; }
-        .htmx-request.htmx-indicator { opacity: 1; }
-    </style>
+    {# All assets are served from /static — the app must run offline (see
+       tests/unit/test_static_assets.py, which fails on any external URL).
+       Tailwind CSS is purged from the templates by `make build-css`; htmx and
+       its json-enc extension are vendored under jackrabbit/static/vendor/. #}
+    <link href="/static/css/tailwind.css" rel="stylesheet">
+    <link href="/static/css/app.css" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script src="/static/vendor/htmx-json-enc.js"></script>
     <!-- No inline <script> in base.html: Move-to-Sprint dropdown logic lives in /static/js -->
     <script src="/static/js/sprint-dropdown.js"></script>
 </head>

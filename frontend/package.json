@@ -1,0 +1,13 @@
+{
+  "name": "jackrabbit-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Build tooling for Jackrabbit's SSR templates. Output is committed; no Node runtime is needed to run the app.",
+  "scripts": {
+    "build": "tailwindcss -c tailwind.config.js -i input.css -o ../jackrabbit/static/css/tailwind.css --minify",
+    "watch": "tailwindcss -c tailwind.config.js -i input.css -o ../jackrabbit/static/css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.1"
+  }
+}

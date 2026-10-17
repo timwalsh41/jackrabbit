@@ -45,6 +45,8 @@
 | Types | `mypy` | Pre-commit + CI |
 | Tests | `pytest` | CI only |
 | Import sorting | `ruff check --select=I` | Pre-commit + CI |
+| Assets local (no CDN) | `pytest tests/unit/test_static_assets.py` | CI (unit) + e2e |
+| Stylesheet not stale | `make css-check` | CI (lint job) |
 
 **Required**: `.pre-commit-config.yaml` + `.github/workflows/ci.yml` in every repo.
 
@@ -83,7 +85,7 @@
 
 | Tool | Version | Config Location |
 |------|---------|-----------------|
-| ruff | `>=0.5.0` | `[tool.ruff]` |
+| ruff | `==0.16.10` | `[tool.ruff]` (pre-commit `rev` must match) |
 | mypy | `>=1.10.0` | `[tool.mypy]` |
 | pytest | `>=8.2.0` | `[tool.pytest.ini_options]` |
 | playwright | `>=1.44.0` | `tests/e2e/` |

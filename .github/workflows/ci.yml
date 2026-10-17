@@ -28,6 +28,19 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check .
 
+      # Frontend assets are local-only: the purged stylesheet is a committed
+      # build artifact, so a template change without a rebuild must fail CI.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify committed stylesheet is current
+        run: |
+          npm --prefix frontend install --no-audit --no-fund
+          npm --prefix frontend run build
+          git diff --quiet -- jackrabbit/static/css/tailwind.css || { echo "::error::jackrabbit/static/css/tailwind.css is stale - run 'make build-css' and commit the result"; exit 1; }
+
   typecheck:
     name: Type Check (mypy)
     runs-on: ubuntu-latest
@@ -125,33 +138,20 @@ jobs:
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - name: Start test server
-        run: |
-          uv run python -m jackrabbit.main &
-          SERVER_PID=$!
-          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
-          # Wait for server to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health > /dev/null; then
-              echo "Server is ready"
-              break
-            fi
-            sleep 0.5
-          done
-
+      # The e2e suite starts its own server: ephemeral port + throwaway
+      # DATA_DIR per ADR-0020, so no manual server/port coordination here.
       # Headed Chrome (per spec: "headed Chrome in CI"), driven under Xvfb
       - name: Run E2E tests
         run: xvfb-run --auto-servernum uv run pytest tests/e2e -v --tb=short -x
         env:
-          E2E_BASE_URL: http://localhost:8080
           CHROME_DEVTOOLS_AXI_HEADED: '1'
 
-      - name: Stop test server
-        if: always()
-        run: |
-          if [ -n "$SERVER_PID" ]; then
-            kill $SERVER_PID 2>/dev/null || true
-          fi
+      # Second consecutive run: proves the suite leaves no database state that
+      # the next run's numbering/date assertions would depend on
+      - name: Run E2E tests again (hermetic guard)
+        run: xvfb-run --auto-servernum uv run pytest tests/e2e -q -x
+        env:
+          CHROME_DEVTOOLS_AXI_HEADED: '1'
 
       - name: Upload E2E artifacts
         uses: actions/upload-artifact@v4

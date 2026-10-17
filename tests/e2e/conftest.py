@@ -10,14 +10,32 @@ Options:
 """
 
 import os
+import socket
+import subprocess
+import time
 from collections.abc import Generator
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 
-# Base URL for the test server
-BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:8080")
+# Repo containing these tests: the server is started from here so a
+# worktree/checkout runs its own code (and, via its own temp DATA_DIR, its own
+# database).
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _free_port() -> int:
+    """Return a port the OS just assigned to nothing.
+
+    ADR-0020 makes ``PORT=0`` mean "pick a free port" so suites can run in
+    parallel, but a detached uvicorn process cannot report the port it landed
+    on, so we bind-and-release first and pass the number explicitly.
+    """
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -47,9 +65,9 @@ def _is_headed(request: pytest.FixtureRequest) -> bool:
 
 
 @pytest.fixture(scope="session")
-def base_url() -> str:
-    """Provide the base URL for e2e tests."""
-    return BASE_URL
+def base_url(test_server: str) -> str:
+    """Base URL of the server under test (owned by the ``test_server`` fixture)."""
+    return test_server
 
 
 @pytest.fixture(scope="session")
@@ -150,41 +168,41 @@ def authenticated_page(page: Page) -> Generator[Page, None, None]:
 
 # Fixtures for specific page objects
 @pytest.fixture
-def home_page(page: Page) -> Page:
+def home_page(page: Page, base_url: str) -> Page:
     """Navigate to home page."""
-    page.goto(f"{BASE_URL}/")
+    page.goto(f"{base_url}/")
     page.wait_for_load_state("networkidle")
     return page
 
 
 @pytest.fixture
-def projects_page(page: Page) -> Page:
+def projects_page(page: Page, base_url: str) -> Page:
     """Navigate to projects page."""
-    page.goto(f"{BASE_URL}/projects")
+    page.goto(f"{base_url}/projects")
     page.wait_for_load_state("networkidle")
     return page
 
 
 @pytest.fixture
-def tickets_page(page: Page) -> Page:
+def tickets_page(page: Page, base_url: str) -> Page:
     """Navigate to tickets page."""
-    page.goto(f"{BASE_URL}/tickets")
+    page.goto(f"{base_url}/tickets")
     page.wait_for_load_state("networkidle")
     return page
 
 
 @pytest.fixture
-def sprints_page(page: Page) -> Page:
+def sprints_page(page: Page, base_url: str) -> Page:
     """Navigate to sprints page."""
-    page.goto(f"{BASE_URL}/sprints")
+    page.goto(f"{base_url}/sprints")
     page.wait_for_load_state("networkidle")
     return page
 
 
 @pytest.fixture
-def plan_page(page: Page) -> Page:
+def plan_page(page: Page, base_url: str) -> Page:
     """Navigate to plan page."""
-    page.goto(f"{BASE_URL}/plan")
+    page.goto(f"{base_url}/plan")
     page.wait_for_load_state("networkidle")
     return page
 
@@ -393,58 +411,92 @@ def e2e_test_data(base_url):
 
 # Fixture to run test server (if needed for standalone e2e)
 @pytest.fixture(scope="session", autouse=True)
-def test_server():
-    """Start the test server for e2e tests."""
-    import os
-    import subprocess
-    import time
+def test_server(tmp_path_factory: pytest.TempPathFactory) -> Generator[str, None, None]:
+    """Serve the app for the whole session on a throwaway database.
 
+    Per ADR-0020 the suite owns its server. Every run gets a per-session
+    ``DATA_DIR`` under pytest's temp root — never the developer's
+    ``data/jackrabbit.db`` — and an ephemeral port, so two runs back to back
+    see identical empty state. The previous fixture hardcoded
+    ``sqlite:///./data/e2e_test.db`` (so run N+1 inherited run N's tickets and
+    numbering-dependent tests failed) and only deleted the main file on
+    teardown, orphaning the ``-wal``/``-shm`` sidecars in ``data/``.
+
+    ``E2E_BASE_URL`` opts out: a server already answering there is reused
+    as-is, and its port is also honoured when the fixture starts its own.
+    """
     import httpx
 
-    # Check if server is already running
-    try:
-        response = httpx.get(f"{BASE_URL}/health", timeout=2)
-        if response.status_code == 200:
-            yield BASE_URL
+    def _healthy(url: str) -> bool:
+        try:
+            return httpx.get(f"{url}/health", timeout=2).status_code == 200
+        except Exception:
+            return False
+
+    override = os.environ.get("E2E_BASE_URL")
+    if override:
+        if _healthy(override.rstrip("/")):
+            yield override.rstrip("/")
             return
-    except Exception:
-        pass
+        port = httpx.URL(override).port or 8080
+    else:
+        port = _free_port()
 
-    # Start server in background (from the repo containing these tests, so a
-    # worktree/checkout runs its own code and its own database)
+    url = f"http://127.0.0.1:{port}"
+    data_dir = tmp_path_factory.mktemp("e2e-data")
+    log_path = data_dir / "server.log"
+
+    # Inherit the ambient environment but drop anything that would steer the
+    # server onto a real database or a fixed port: DATABASE_URL outranks
+    # DATA_DIR in Settings precedence (see jackrabbit/config.py).
     env = os.environ.copy()
-    env["DATABASE_URL"] = "sqlite:///./data/e2e_test.db"
-    env["PORT"] = str(BASE_URL.split(":")[-1].split("/")[0]) if ":" in BASE_URL else "8080"
-
-    proc = subprocess.Popen(
-        ["uv", "run", "python", "-m", "jackrabbit.main"],
-        env=env,
-        cwd=Path(__file__).resolve().parents[2],
+    env.pop("DATABASE_URL", None)
+    env.update(
+        {
+            "DATA_DIR": str(data_dir),
+            "PORT": str(port),
+            "ENVIRONMENT": "test",
+            "LOG_LEVEL": "WARNING",
+        }
     )
 
-    # Wait for server to be ready
-    for _ in range(30):
+    with log_path.open("wb") as log_file:
+        proc = subprocess.Popen(
+            ["uv", "run", "python", "-m", "jackrabbit.main"],
+            env=env,
+            cwd=REPO_ROOT,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
         try:
-            response = httpx.get(f"{BASE_URL}/health", timeout=1)
-            if response.status_code == 200:
-                break
-        except Exception:
-            pass
-        time.sleep(0.5)
-    else:
-        proc.terminate()
-        raise RuntimeError("Test server failed to start")
+            ready = False
+            for _ in range(60):
+                if _healthy(url):
+                    ready = True
+                    break
+                if proc.poll() is not None:  # exited early: no point waiting
+                    break
+                time.sleep(0.5)
+            if not ready:
+                if proc.poll() is None:
+                    proc.terminate()
+                raise RuntimeError(
+                    f"e2e test server failed to start on {url} "
+                    f"(database under {data_dir}); server log:\n"
+                    f"{log_path.read_text(errors='replace')[-2000:]}"
+                )
+            yield url
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:  # pragma: no cover - hung server
+                    proc.kill()
+                    proc.wait(timeout=5)
 
-    yield BASE_URL
-
-    proc.terminate()
-    proc.wait(timeout=5)
-
-    # Cleanup
-    import os
-
-    if os.path.exists("./data/e2e_test.db"):
-        os.remove("./data/e2e_test.db")
+    # `data_dir` is owned by pytest's tmp_path_factory, so the SQLite file and
+    # its WAL sidecars disappear with the run — nothing is written to ./data.
 
 
 # Browser-specific fixtures for different viewports

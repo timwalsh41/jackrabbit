@@ -37,6 +37,7 @@ install:
 dev-install:
 	{{UV}} sync --all-extras
 	{{UV}} run {{PLAYWRIGHT}} install --with-deps chromium
+	npm --prefix frontend install --no-audit --no-fund
 
 # Test recipes
 test:
@@ -51,72 +52,21 @@ test-int:
 	{{UV}} run pytest tests/integration -v --tb=short
 
 test-e2e:
-	@echo "Starting test server..."
-	{{UV}} run {{PYTHON}} -m jackrabbit.main &
-	SERVER_PID=$!
-	echo "Waiting for server..."
-	for i in {1..30}; do
-		if curl -s http://localhost:8080/health > /dev/null; then
-			echo "Server ready"
-			break
-		fi
-		sleep 0.5
-	done
-	E2E_BASE_URL=http://localhost:8080 {{UV}} run pytest tests/e2e -v --tb=short
-	TEST_EXIT=$?
-	kill $SERVER_PID 2>/dev/null || true
-	exit $TEST_EXIT
+	{{UV}} run pytest tests/e2e -v --tb=short
 
 test-e2e-headed:
-	@echo "Starting test server..."
-	{{UV}} run {{PYTHON}} -m jackrabbit.main &
-	SERVER_PID=$!
-	echo "Waiting for server..."
-	for i in {1..30}; do
-		if curl -s http://localhost:8080/health > /dev/null; then
-			echo "Server ready"
-			break
-		fi
-		sleep 0.5
-	done
-	E2E_BASE_URL=http://localhost:8080 PLAYWRIGHT_BROWSER=chromium CHROME_DEVTOOLS_AXI_HEADED=1 {{UV}} run pytest tests/e2e -v --tb=short
-	TEST_EXIT=$?
-	kill $SERVER_PID 2>/dev/null || true
-	exit $TEST_EXIT
+	PLAYWRIGHT_BROWSER=chromium {{UV}} run pytest tests/e2e -v --tb=short --headed
 
 test-e2e-firefox:
-	@echo "Starting test server..."
-	{{UV}} run {{PYTHON}} -m jackrabbit.main &
-	SERVER_PID=$!
-	echo "Waiting for server..."
-	for i in {1..30}; do
-		if curl -s http://localhost:8080/health > /dev/null; then
-			echo "Server ready"
-			break
-		fi
-		sleep 0.5
-	done
-	E2E_BASE_URL=http://localhost:8080 PLAYWRIGHT_BROWSER=firefox {{UV}} run pytest tests/e2e -v --tb=short
-	TEST_EXIT=$?
-	kill $SERVER_PID 2>/dev/null || true
-	exit $TEST_EXIT
+	PLAYWRIGHT_BROWSER=firefox {{UV}} run pytest tests/e2e -v --tb=short
 
 test-e2e-webkit:
-	@echo "Starting test server..."
-	{{UV}} run {{PYTHON}} -m jackrabbit.main &
-	SERVER_PID=$!
-	echo "Waiting for server..."
-	for i in {1..30}; do
-		if curl -s http://localhost:8080/health > /dev/null; then
-			echo "Server ready"
-			break
-		fi
-		sleep 0.5
-	done
-	E2E_BASE_URL=http://localhost:8080 PLAYWRIGHT_BROWSER=webkit {{UV}} run pytest tests/e2e -v --tb=short
-	TEST_EXIT=$?
-	kill $SERVER_PID 2>/dev/null || true
-	exit $TEST_EXIT
+	PLAYWRIGHT_BROWSER=webkit {{UV}} run pytest tests/e2e -v --tb=short
+
+# Two runs back to back must both pass: proves the suite leaves no state behind
+test-e2e-idempotent:
+	{{UV}} run pytest tests/e2e -q
+	{{UV}} run pytest tests/e2e -q
 
 # Test with coverage
 test-cov:
@@ -186,6 +136,14 @@ dev:
 
 dev-reload:
 	{{UV}} run uvicorn jackrabbit.main:create_app --factory --reload --port 8080
+
+# Stylesheet build (output is committed; the app serves no CDN assets)
+build-css:
+	npm --prefix frontend install --no-audit --no-fund
+	npm --prefix frontend run build
+
+css-check: build-css
+	@git diff --quiet -- jackrabbit/static/css/tailwind.css || { echo "jackrabbit/static/css/tailwind.css is stale - run 'just build-css' and commit"; exit 1; }
 
 # Build
 build:

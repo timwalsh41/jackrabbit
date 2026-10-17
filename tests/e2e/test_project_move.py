@@ -4,8 +4,31 @@ Self-contained: creates a ticket in a known project, moves it via the Move Proje
 modal, and verifies the new prefix plus the "Formerly" badge.
 """
 
+import httpx
 import pytest
 from playwright.sync_api import Page, expect
+
+
+def _numbers_in_project(client: httpx.Client, project_id: int) -> list[int]:
+    """Every ticket serial in one project, following pagination.
+
+    ``GET /api/v1/tickets`` defaults to page_size=50, so scanning a single
+    unfiltered page silently under-counts once a database holds more than 50
+    tickets — which is exactly what made this test depend on the suite's
+    accumulated state. Filtering by project and paging through the result keeps
+    the expectations true against a database in any state.
+    """
+    numbers: list[int] = []
+    page = 1
+    while True:
+        body = client.get(
+            "/api/v1/tickets",
+            params={"project_id": project_id, "page": page, "page_size": 100},
+        ).json()
+        numbers.extend(ticket["number"] for ticket in body["items"])
+        if not body["items"] or page >= body["total_pages"]:
+            return numbers
+        page += 1
 
 
 class TestProjectMove:
@@ -89,18 +112,20 @@ class TestProjectMove:
     def test_move_back_renumbers_next_available(self, page: Page, base_url: str, seeded_projects):
         """Move back to the source project gets the next available number.
 
-        Scenario (MSC/WEB per ticket 15 flow 3): ticket created in a fresh MSC
-        project gets MSC-001; moving it to WEB renumbers it to WEB's next
-        available serial; a filler ticket then re-occupies MSC-001; moving the
-        original back must therefore yield MSC-002 (next available), with
-        original_id still pointing at MSC-001.
-        """
-        import httpx
+        Scenario (MSC/WEB per ticket 15 flow 3): a ticket created in MSC takes
+        MSC's next available serial; moving it to WEB renumbers it to WEB's next
+        available serial; a filler ticket then re-occupies the serial the move
+        freed; moving the original back must therefore yield the next
+        available serial in MSC, with ``original_id`` still pointing at the
+        serial it was created with.
 
+        Every expectation is derived from the projects' live numbering, so the
+        test holds against an empty database and a database already carrying
+        prior runs' tickets alike.
+        """
         web = seeded_projects[1]
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            # Fresh MSC project (reuse if a previous run created it)
             existing = {p["prefix"]: p for p in client.get("/api/v1/projects").json()}
             msc = (
                 existing.get("MSC")
@@ -109,25 +134,15 @@ class TestProjectMove:
                     json={"prefix": "MSC", "name": "Misc", "description": "move-test"},
                 ).json()
             )
-            msc_numbers = [
-                t["number"]
-                for t in client.get("/api/v1/tickets").json()["items"]
-                if t["project_id"] == msc["id"]
-            ]
-            web_numbers = [
-                t["number"]
-                for t in client.get("/api/v1/tickets").json()["items"]
-                if t["project_id"] == web["id"]
-            ]
-            fresh_msc = not msc_numbers
+            msc_numbers = _numbers_in_project(client, msc["id"])
+            web_numbers = _numbers_in_project(client, web["id"])
+            expected_msc_number = max(msc_numbers, default=0) + 1
+
             ticket = client.post(
                 "/api/v1/tickets",
                 json={"project_id": msc["id"], "title": "Move Back Ticket"},
             ).json()
-
-            # Fresh MSC: the first ticket is MSC-001
-            if fresh_msc:
-                assert ticket["number"] == 1
+            assert ticket["number"] == expected_msc_number
 
             # Move to WEB -> next available number in WEB
             move_resp = client.post(
@@ -138,14 +153,22 @@ class TestProjectMove:
             expected_web_number = max(web_numbers, default=0) + 1
             moved = client.get(f"/api/v1/tickets/{ticket['id']}").json()
             assert moved["number"] == expected_web_number
+            assert moved["original_id"] == f"MSC-{expected_msc_number:03d}"
 
-            # Filler ticket re-occupies MSC-001 (dense renumbering)
+            # Filler ticket re-occupies the serial the move freed (dense renumbering):
+            # the moved ticket held MSC's highest serial, so the filler lands on it.
+            freed_number = expected_msc_number
             filler = client.post(
                 "/api/v1/tickets",
                 json={"project_id": msc["id"], "title": "MSC Filler"},
             ).json()
-            if fresh_msc:
-                assert filler["number"] == 1
+            assert filler["number"] == freed_number, (
+                "dense renumbering should reuse the freed serial"
+            )
+
+            # Snapshot MSC numbering before the move-back so the expected serial
+            # (max + 1, per ADR-0005) does not depend on the move already applied.
+            expected_back_number = max(_numbers_in_project(client, msc["id"]), default=0) + 1
 
             # Move the original back via the UI modal
         page.goto(f"{base_url}/ticket/{ticket['id']}")
@@ -161,10 +184,12 @@ class TestProjectMove:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)
 
-        # Next available in MSC (filler holds 001) -> MSC-002
-        expect(page.locator(".ticket-id")).to_contain_text("MSC-002", timeout=10000)
-        # original_id still points at the very first ID
-        expect(page.locator("text=Formerly MSC-001").first).to_be_visible()
+        # Next available in MSC (the filler holds the freed serial) -> one above it
+        expect(page.locator(".ticket-id")).to_contain_text(
+            f"MSC-{expected_back_number:03d}", timeout=10000
+        )
+        # original_id still points at the serial the ticket was created with
+        expect(page.locator(f"text=Formerly MSC-{expected_msc_number:03d}").first).to_be_visible()
 
 
 if __name__ == "__main__":

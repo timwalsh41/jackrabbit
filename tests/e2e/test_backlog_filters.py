@@ -3,7 +3,13 @@
 The Backlog filter form applies filters only when submitted (via the Filter
 button, an hx-get that swaps a fresh tbody into #tickets-table-body), so every
 test selects its filters and clicks Filter before asserting.
+
+Titles asserted against are run-unique: the `q` filter is a substring match over
+titles, so a fixed title would also match the same test's leftovers in a
+database that has been used before.
 """
+
+import uuid
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -96,9 +102,8 @@ class TestBacklogFilters:
     def test_combined_filters(self, page: Page, base_url: str, seeded_projects, make_ticket):
         """Combined filters use AND logic: only the fully matching ticket remains."""
         web = seeded_projects[1]
-        match = make_ticket(
-            project_id=web["id"], title="AND Match Combo", ticket_type="Story", status="Open"
-        )
+        needle = f"AND Match Combo {uuid.uuid4().hex[:8]}"
+        match = make_ticket(project_id=web["id"], title=needle, ticket_type="Story", status="Open")
         # Same project+type but different status
         make_ticket(
             project_id=web["id"],
@@ -112,7 +117,7 @@ class TestBacklogFilters:
         page.select_option("select[name='project_id']", str(web["id"]))
         page.select_option("select[name='type']", "Story")
         page.select_option("select[name='status']", "Open")
-        page.fill("input[name='q']", "AND Match Combo")
+        page.fill("input[name='q']", needle)
         self._apply(page)
 
         rows = page.locator("#tickets-table-body tr")
@@ -120,13 +125,20 @@ class TestBacklogFilters:
         expect(page.locator(f"#ticket-row-{match['id']}")).to_be_visible()
 
     def test_filter_by_date(self, page: Page, base_url: str, seeded_projects, make_ticket):
-        """Filtering by created date (US16): bounds are inclusive calendar dates."""
+        """Filtering by created date (US16): bounds are inclusive calendar dates.
+
+        The date window is combined with a unique-title search so the result set
+        is exactly this test's ticket: otherwise the empty-state assertion would
+        only hold on a database with no other tickets in it.
+        """
         from datetime import date, timedelta
 
-        ticket = make_ticket(title="Date Filter Member")
+        needle = f"Date Filter Member {uuid.uuid4().hex[:8]}"
+        ticket = make_ticket(title=needle)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
+        page.fill("input[name='q']", needle)
 
         # A window ending tomorrow includes the freshly created ticket.
         tomorrow = (date.today() + timedelta(days=1)).isoformat()

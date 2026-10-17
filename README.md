@@ -60,7 +60,9 @@ jackrabbit/
 ├── cli.py          # Typer CLI commands
 ├── main.py         # FastAPI app factory
 ├── templates/      # Jinja2 templates
-└── static/         # Static assets
+└── static/         # css/, js/, and vendored third-party assets
+
+frontend/           # Tailwind build tooling (not needed to run the app)
 ```
 
 ## Development
@@ -79,3 +81,26 @@ uv run ruff format .
 # Type check
 uv run mypy jackrabbit
 ```
+
+## End-to-end tests
+
+The Playwright suite owns its server: `pytest tests/e2e` boots
+`jackrabbit.main` on a free port with a throwaway `DATA_DIR` under pytest's temp
+root (ADR-0023), so `./data` is never written and two runs in a row must both
+pass (`make test-e2e-idempotent`). Set `E2E_BASE_URL` to point the suite at a
+server you started yourself instead.
+
+## Frontend assets
+
+Every asset is served from `/static` — the app loads nothing from a CDN, so page
+loads work offline (ADR-0022). htmx and its `json-enc` extension are vendored in
+`jackrabbit/static/vendor/`; `jackrabbit/static/css/tailwind.css` is a
+**committed build artifact** purged from the templates:
+
+```bash
+make build-css   # needs Node only at build time (frontend/package.json)
+make css-check   # fails if the committed stylesheet is stale
+```
+
+Change Tailwind classes in a template → run `make build-css` and commit the
+regenerated file, or `tests/unit/test_static_assets.py` fails.

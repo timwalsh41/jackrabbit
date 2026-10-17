@@ -1,0 +1,26 @@
+/*
+ * Hand-written styles the purged Tailwind build cannot produce. Loaded after
+ * tailwind.css; keep additions here minimal.
+ */
+
+/* HTMX request indicator: hidden until htmx adds .htmx-request. */
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 200ms ease-in;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  opacity: 1;
+}
+
+/*
+ * Modal mounts are empty until htmx swaps a dialog into them. An empty mount
+ * that is still laid out can cover the page and silently swallow clicks meant
+ * for the content behind it — which is invisible to DOM-only assertions, and
+ * invisible entirely while no stylesheet loads at all (ADR-0022).
+ */
+#ticket-modal:empty,
+#sprint-modal:empty,
+#link-modal-container:empty {
+  display: none;
+}
