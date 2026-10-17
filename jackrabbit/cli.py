@@ -37,7 +37,7 @@ def apply_env_overrides(overrides: Mapping[str, str]) -> None:
         os.environ[key] = value
 
 
-_COMMANDS = {"server", "init_db", "create_project"}
+_COMMANDS = {"server", "init_db", "create_project", "seed"}
 
 
 def main(args: list[str] | None = None) -> None:
@@ -154,6 +154,32 @@ def create_project(
     service = ProjectService(session)
     project = service.create_project(prefix=prefix, name=name, description=description, color=color)
     typer.echo(f"Created project: {project.prefix} - {project.name}")
+
+
+@app.command()
+def seed(
+    force: bool = typer.Option(False, "--force", help="Seed even when ENVIRONMENT=production"),
+) -> None:
+    """Populate the database with demo data.
+
+    Idempotent: entities are matched on their natural key, so a second run
+    reports "already present" and changes nothing. See jackrabbit/seed.py.
+    """
+    from jackrabbit.database import get_session, init_db
+    from jackrabbit.seed import seed_demo_data
+
+    settings = get_settings()
+    if settings.environment == "production" and not force:
+        typer.echo(
+            "Refusing to write demo data into a production database; pass --force to override.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    init_db()
+    session = next(get_session())
+    result = seed_demo_data(session)
+    typer.echo(result.summary())
 
 
 if __name__ == "__main__":
