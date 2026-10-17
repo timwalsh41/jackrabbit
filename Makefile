@@ -132,8 +132,11 @@ print(e.url);\
 db-init:
 	uv run python -c "from jackrabbit.database import init_db; init_db()"
 
+# Wipe the local database and rebuild it from migrations. The -wal/-shm
+# sidecars go too: WAL mode leaves them behind, and a stale WAL next to a fresh
+# database is a confusing thing to debug.
 db-reset:
-	rm -f data/jackrabbit.db
+	rm -f data/jackrabbit.db data/jackrabbit.db-wal data/jackrabbit.db-shm
 	uv run python -c "from jackrabbit.database import init_db; init_db()"
 
 db-seed:
