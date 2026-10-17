@@ -25,11 +25,15 @@ Use **SQLite** as the primary data store.
 
 ### Negative
 - **Not git-diffable** — binary file, though schema migrations are reviewable
-- **Less human-readable** — requires tooling to inspect (sqlite3 CLI, DB Browser)
+- **Less human-readable** — requires tooling to inspect. `make db-info` prints
+  table counts through the app's own driver, so inspection never depends on the
+  `sqlite3` CLI (not a dependency, and absent on many machines) or DB Browser
+  being installed
 - **Schema changes require migrations** — more ceremony than adding JSON fields
 
 ### Mitigations
-- Export/import to JSON for debugging/portability
+- Export/import to JSON for debugging/portability — **not implemented**; listed
+  here as the intended escape hatch, not a current capability
 - Alembic migrations are plain SQL, reviewable in PRs
 - Single file makes "consolidated backup" trivial
 
