@@ -1,6 +1,10 @@
+# Keep this rev identical to the pinned ruff in pyproject.toml: the formatter
+# output changes between ruff versions, and CI enforces `ruff format --check`
+# with the project's own ruff. A stale rev here reformats files into a style CI
+# then rejects.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.0
+    rev: v0.16.10
     hooks:
       - id: ruff
         args: [--fix]
