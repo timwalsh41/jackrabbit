@@ -96,6 +96,28 @@ class TestTicketsCRUD:
         # Unchanged fields stay
         assert data["project_id"] == two_projects["web"]
 
+    async def test_patch_ticket_with_empty_sprint_id_string(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        """Regression for the edit-form bug: ticket_form.html posts
+        sprint_id as "" when 'No Sprint' is selected (<option value="">).
+        Without the empty-string -> None validator on sprint_id this 422'd.
+        It must PATCH successfully and leave sprint_id null."""
+        created = await _create_ticket(client_with_seeds, two_projects["web"], "Sprintless edit")
+        assert (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()[
+            "sprint_id"
+        ] is None
+
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{created['id']}",
+            json={"title": "Renamed via edit form", "sprint_id": ""},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["title"] == "Renamed via edit form"
+        assert data["sprint_id"] is None
+        assert data["status"] == "Open"
+
     async def test_patch_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
         response = await client_with_seeds.patch("/api/v1/tickets/9999", json={"title": "nope"})
         assert response.status_code == 404

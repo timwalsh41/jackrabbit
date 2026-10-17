@@ -202,7 +202,7 @@ class TicketCreate(TicketBase):
     # strings -> int so HTMX/API callers submitting form fields still validate.
     story_points: int | None = None
 
-    @field_validator("story_points", mode="before")
+    @field_validator("story_points", "sprint_id", mode="before")
     @classmethod
     def empty_str_to_none(cls, v: Any) -> Any:
         if v == "" or v is None:
@@ -225,7 +225,7 @@ class TicketUpdate(BaseModel):
     # strings -> int so HTMX/API callers submitting form fields still validate.
     story_points: int | None = None
 
-    @field_validator("story_points", mode="before")
+    @field_validator("story_points", "sprint_id", mode="before")
     @classmethod
     def empty_str_to_none(cls, v: Any) -> Any:
         if v == "" or v is None:

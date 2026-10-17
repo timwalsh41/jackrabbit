@@ -12,6 +12,7 @@ from jackrabbit.schemas import (
     SprintCreate,
     TicketCreate,
     TicketLinkCreate,
+    TicketUpdate,
 )
 
 
@@ -79,6 +80,26 @@ def test_ticket_create_schema() -> None:
     assert ticket_full.type == TicketType.BUG
     assert ticket_full.priority == Priority.HIGH
     assert ticket_full.story_points == 5
+
+
+def test_ticket_update_schema_empty_strings_coerce_to_none() -> None:
+    """HTML forms submit "" for untouched optional selects (the edit form's
+    'No Sprint' <option value="">) and for empty number inputs; the schema
+    must treat those as absent, otherwise PATCH /tickets/{id} 422s on a ticket
+    with no sprint. Mirrors test_ticket_create_schema's story_points coverage."""
+    # "No Sprint" selected -> sprint_id submitted as ""
+    update = TicketUpdate(sprint_id="", story_points="")
+    assert update.sprint_id is None
+    assert update.story_points is None
+
+    # numeric strings coerce to int (a sprint id / points sent as "5"/"8")
+    typed = TicketUpdate(sprint_id="5", story_points="8")
+    assert typed.sprint_id == 5
+    assert typed.story_points == 8
+
+    # explicit None and omitted both stay None
+    assert TicketUpdate().sprint_id is None
+    assert TicketUpdate(sprint_id=None).sprint_id is None
 
 
 def test_sprint_create_schema() -> None:

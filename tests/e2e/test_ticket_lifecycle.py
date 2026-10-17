@@ -264,6 +264,37 @@ class TestTicketLifecycle:
         # Complete: only Rejected is possible forward/backward-wise here
         assert_invalid_absent("In Progress", "Groomed", "Open")
 
+    def test_edit_ticket_via_form_with_no_sprint(
+        self,
+        page: Page,
+        base_url: str,
+        seeded_projects,
+        make_ticket,
+    ):
+        """Regression for the edit-form 422: editing a ticket with no sprint via
+        the full-page edit form posts sprint_id="" (the 'No Sprint' option).
+        Without the empty-string -> None validator this 422'd; it must succeed
+        and land on the backlog with the updated title."""
+        ticket = make_ticket(title="Edit me via form", status="Open")
+        tid = ticket["id"]
+        assert ticket["sprint_id"] is None
+
+        page.goto(f"{base_url}/tickets/{tid}/edit")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#ticket-form", timeout=10000)
+
+        # 'No Sprint' (option value="") is selected by default for sprintless
+        page.fill("input[name='title']", "Edited via UI form")
+        page.select_option("select[name='priority']", "High")
+
+        with page.expect_navigation():
+            page.click("button:has-text('Save Changes')")
+        page.wait_for_load_state("networkidle")
+
+        expect(
+            page.locator("#tickets-table-body tr:has-text('Edited via UI form')").first
+        ).to_be_visible(timeout=10000)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
