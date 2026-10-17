@@ -14,6 +14,9 @@ cp .env.example .env
 # Initialize database
 uv run server.py init-db
 
+# Load demo data (idempotent; safe to re-run)
+uv run server.py seed
+
 # Create a project
 uv run server.py create-project WEB "Web Project"
 
@@ -34,6 +37,7 @@ uv run server.py --help              # Show all commands
 uv run server.py server --help       # Show server options
 uv run server.py server --port 3000  # Override port
 uv run server.py init-db             # Initialize database
+uv run server.py seed                # Load idempotent demo data
 uv run server.py create-project PREFIX "Name"  # Create project
 ```
 
@@ -46,6 +50,7 @@ Configuration is loaded from `.env` file with CLI overrides:
 - `DATABASE_URL` - Database URL (default: sqlite:///./data/jackrabbit.db)
 - `LOG_LEVEL` - Log level (default: INFO)
 - `ENVIRONMENT` - Environment (default: development)
+- `DEBUG_SQL` - Echo every SQL statement (default: false)
 
 ## Project Structure
 

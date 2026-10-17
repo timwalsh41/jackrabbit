@@ -118,3 +118,46 @@ def test_full_downgrade_to_base_and_reupgrade(tmp_path: Path, monkeypatch):
     engine = create_engine(database_url)
     assert {"project", "sprint", "ticket", "ticketlink", "transition"} <= _tables(engine)
     engine.dispose()
+
+
+def test_init_db_runs_from_any_working_directory(tmp_path: Path, monkeypatch) -> None:
+    """Regression: alembic.ini and script_location used to resolve against the CWD.
+
+    `init_db()` runs in the app's startup lifespan, so starting the server (or
+    the CLI) from anywhere other than the repo root failed outright.
+    """
+    from alembic.script import ScriptDirectory
+    from jackrabbit import database
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    database_url = f"sqlite:///{tmp_path / 'from-elsewhere.db'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.chdir(elsewhere)
+
+    database.init_db()
+
+    engine = database.get_engine()
+    try:
+        tables = set(inspect(engine).get_table_names())
+        assert {
+            "project",
+            "sprint",
+            "ticket",
+            "ticketlink",
+            "transition",
+            "alembic_version",
+        } <= tables
+        version = engine.connect().execute(text("select version_num from alembic_version")).scalar()
+        head = ScriptDirectory.from_config(_alembic_config(database_url)).get_current_head()
+        assert version == head
+    finally:
+        engine.dispose()
+        database._engines.pop(database_url, None)
+
+
+def test_repo_root_is_exported_from_the_database_module() -> None:
+    from jackrabbit import database
+
+    assert (database.REPO_ROOT / "alembic.ini").is_file()
+    assert (database.REPO_ROOT / "alembic" / "env.py").is_file()

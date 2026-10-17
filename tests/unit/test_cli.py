@@ -66,6 +66,7 @@ class TestEnvOverrides:
             database_url="sqlite:///x.db",
             log_level="debug",
             environment="production",
+            debug_sql=True,
         )
         assert env == {
             "PORT": "9000",
@@ -73,10 +74,16 @@ class TestEnvOverrides:
             "DATABASE_URL": "sqlite:///x.db",
             "LOG_LEVEL": "debug",
             "ENVIRONMENT": "production",
+            "DEBUG_SQL": "True",
         }
 
     def test_cli_overrides_to_env_skips_unset(self):
         env = cli_module._cli_overrides_to_env(
-            port=None, data_dir=None, database_url=None, log_level=None, environment=None
+            port=None,
+            data_dir=None,
+            database_url=None,
+            log_level=None,
+            environment=None,
+            debug_sql=None,
         )
         assert env == {}

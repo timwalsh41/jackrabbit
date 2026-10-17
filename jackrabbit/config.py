@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     database_url: str = ""
     log_level: str = "INFO"
     environment: str = "development"
+    # Echo every SQL statement. Deliberately independent of `environment`:
+    # development is the default, so keying SQL logging off it dumped thousands
+    # of INFO lines per page render (the backlog view issues one query per
+    # ticket) and made server logs unreadable.
+    debug_sql: bool = False
 
     @field_validator("log_level")
     @classmethod
@@ -77,6 +82,7 @@ def get_settings(
     database_url: Annotated[str | None, typer.Option(help="Database URL")] = None,
     log_level: Annotated[str | None, typer.Option(help="Log level")] = None,
     environment: Annotated[str | None, typer.Option(help="Environment")] = None,
+    debug_sql: Annotated[bool | None, typer.Option(help="Echo SQL statements")] = None,
 ) -> Settings:
     """Create settings with CLI overrides."""
     overrides: dict[str, Any] = {}
@@ -90,5 +96,7 @@ def get_settings(
         overrides["log_level"] = log_level
     if environment is not None:
         overrides["environment"] = environment
+    if debug_sql is not None:
+        overrides["debug_sql"] = debug_sql
 
     return Settings(**overrides) if overrides else Settings()

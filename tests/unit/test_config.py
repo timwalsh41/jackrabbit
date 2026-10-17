@@ -87,3 +87,53 @@ class TestDatabaseUrlResolution:
         monkeypatch.delenv("DATABASE_URL", raising=False)
         settings = get_settings()
         assert settings.database_url == f"sqlite:///{tmp_path}/jackrabbit.db"
+
+
+class TestDebugSql:
+    """SQL echo is an explicit setting, never a side effect of ENVIRONMENT."""
+
+    def test_defaults_to_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("DEBUG_SQL", raising=False)
+        assert Settings().debug_sql is False
+        assert Settings(environment="development").debug_sql is False
+
+    def test_read_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEBUG_SQL", "true")
+        assert Settings().debug_sql is True
+
+    def test_cli_override(self) -> None:
+        assert get_settings(debug_sql=True).debug_sql is True
+        assert get_settings(debug_sql=False).debug_sql is False
+
+
+class TestEngineEchoFollowsDebugSql:
+    """Regression: development used to echo every statement (thousands of INFO
+    lines per backlog render)."""
+
+    @staticmethod
+    def _engine_for(tmp_path, monkeypatch: pytest.MonkeyPatch, url: str):
+        from jackrabbit import database
+
+        monkeypatch.setenv("DATABASE_URL", url)
+        engine = database.get_engine()
+        database._engines.pop(url, None)  # get_engine() caches by URL
+        return engine
+
+    def test_development_engine_does_not_echo(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.delenv("DEBUG_SQL", raising=False)
+        engine = self._engine_for(tmp_path, monkeypatch, f"sqlite:///{tmp_path / 'quiet.db'}")
+        try:
+            assert engine.echo is False
+        finally:
+            engine.dispose()
+
+    def test_debug_sql_engine_echoes(self, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEBUG_SQL", "true")
+        engine = self._engine_for(tmp_path, monkeypatch, f"sqlite:///{tmp_path / 'loud.db'}")
+        try:
+            assert engine.echo is True
+        finally:
+            engine.dispose()

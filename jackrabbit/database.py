@@ -1,6 +1,7 @@
 """Database configuration and session management."""
 
 from collections.abc import Generator
+from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
@@ -9,6 +10,12 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session, create_engine
 
 from jackrabbit.config import get_settings
+
+# Repo root, resolved from this file: alembic.ini and script_location are
+# relative to CWD by default, which made `init_db()` (and therefore app
+# startup, which calls it in its lifespan) fail whenever the server was started
+# from anywhere other than the repo root.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
@@ -31,7 +38,9 @@ def get_engine() -> Engine:
     url = settings.database_url
     engine = _engines.get(url)
     if engine is None:
-        engine = create_engine(url, echo=settings.environment == "development")
+        # SQL echo is an explicit operator choice (DEBUG_SQL), not a side effect
+        # of running in development.
+        engine = create_engine(url, echo=settings.debug_sql)
 
         # Enable WAL mode for SQLite
         if url.startswith("sqlite"):
@@ -44,7 +53,9 @@ def get_engine() -> Engine:
 def run_migrations() -> None:
     """Run Alembic migrations to head."""
     settings = get_settings()
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    # Absolute paths keep migrations working from any CWD.
+    alembic_cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
     alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
     command.upgrade(alembic_cfg, "head")
 

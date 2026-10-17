@@ -22,6 +22,7 @@ _ENV_OVERRIDES: dict[str, str] = {
     "database_url": "DATABASE_URL",
     "log_level": "LOG_LEVEL",
     "environment": "ENVIRONMENT",
+    "debug_sql": "DEBUG_SQL",
 }
 
 
@@ -60,6 +61,7 @@ def _cli_overrides_to_env(
     database_url: str | None,
     log_level: str | None,
     environment: str | None,
+    debug_sql: bool | None = None,
 ) -> dict[str, str]:
     """Map explicitly-provided CLI options to their environment variables."""
     provided: dict[str, str] = {}
@@ -69,6 +71,7 @@ def _cli_overrides_to_env(
         "database_url": database_url,
         "log_level": log_level,
         "environment": environment,
+        "debug_sql": debug_sql,
     }
     for field, value in values.items():
         if value is None:
@@ -86,6 +89,11 @@ def server(
     database_url: str | None = typer.Option(None, "--database-url", help="Database URL"),
     log_level: str | None = typer.Option(None, "--log-level", help="Log level"),
     environment: str | None = typer.Option(None, "--environment", "-e", help="Environment"),
+    debug_sql: bool | None = typer.Option(
+        None,
+        "--debug-sql/--no-debug-sql",
+        help="Echo every SQL statement (verbose; off by default)",
+    ),
     reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
 ) -> None:
     """Start the FastAPI server with Uvicorn."""
@@ -95,6 +103,7 @@ def server(
         database_url=database_url,
         log_level=log_level,
         environment=environment,
+        debug_sql=debug_sql,
     )
 
     # Propagate CLI overrides into the (fresh) uvicorn process via env vars;
@@ -106,6 +115,7 @@ def server(
             database_url=database_url,
             log_level=log_level,
             environment=environment,
+            debug_sql=debug_sql,
         )
     )
 
