@@ -16,6 +16,19 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine, select
 
 
+def _utc_date(offset_days: int = 0) -> date:
+    """Calendar date, N days from now, on the **UTC** calendar.
+
+    `services._start_of_day`/`_end_of_day` deliberately anchor day boundaries at
+    UTC midnight, so a test that backdates with `datetime.now(UTC)` must build
+    its expectations from the same calendar. `date.today()` is the *local*
+    calendar: on a box west of UTC between 20:00 and 23:59 local, UTC has
+    already rolled to the next day, and a one-day-backdated ticket lands on
+    "today" by the test's own reckoning but not by the filter's.
+    """
+    return (datetime.now(UTC) + timedelta(days=offset_days)).date()
+
+
 def get_test_engine():
     """Create an in-memory SQLite database for testing."""
     engine = create_engine(
@@ -298,13 +311,13 @@ class TestListTickets:
         ticket_service.update_ticket(many_tickets[0], created_at=old)
         ticket_service.update_ticket(many_tickets[1], created_at=recent)
 
-        # The recent ticket was backdated one day: strictly before today's midnight.
-        today = date.today().isoformat()
+        # The recent ticket was backdated one day: strictly before today's UTC midnight.
+        today = _utc_date().isoformat()
         tickets, total = ticket_service.list_tickets(created_after=today)
         assert total == 3
         assert all(t.id not in (many_tickets[0].id, many_tickets[1].id) for t in tickets)
 
-        week_ago = (date.today() - timedelta(days=5)).isoformat()
+        week_ago = _utc_date(-5).isoformat()
         tickets, total = ticket_service.list_tickets(created_after=week_ago)
         assert total == 4
         assert all(t.id != many_tickets[0].id for t in tickets)
@@ -315,8 +328,8 @@ class TestListTickets:
         ticket_service.update_ticket(many_tickets[0], created_at=old)
         ticket_service.update_ticket(many_tickets[1], created_at=datetime.now(UTC))
 
-        yesterday = (date.today() - timedelta(days=5)).isoformat()
-        tickets, total = ticket_service.list_tickets(created_before=yesterday)
+        five_days_ago = _utc_date(-5).isoformat()
+        tickets, total = ticket_service.list_tickets(created_before=five_days_ago)
         assert total == 1
         assert tickets[0].id == many_tickets[0].id
 
@@ -324,8 +337,8 @@ class TestListTickets:
         """Both bounds combine with AND logic and the end date is inclusive."""
         old = datetime.now(UTC) - timedelta(days=10)
         ticket_service.update_ticket(many_tickets[0], created_at=old)
-        start = (date.today() - timedelta(days=5)).isoformat()
-        end = (date.today() + timedelta(days=1)).isoformat()
+        start = _utc_date(-5).isoformat()
+        end = _utc_date(1).isoformat()
         tickets, total = ticket_service.list_tickets(created_after=start, created_before=end)
         assert total == 4
         assert all(t.id != many_tickets[0].id for t in tickets)

@@ -53,7 +53,8 @@ Verified against branch `jackrabbit-integration` on 2026 checkout.
 **Test run:** `uv run pytest tests/integration/test_plan_api.py tests/unit/test_sprint_service.py -q` → 40 passed.
 
 **Gaps:** only the horizontal-scroll criterion is unmet; API response shape deviates cosmetically from the ticket sketch (flat list + `unsprinted_count` instead of nested `date_range` entries) but contains all specified data fields.
-**Status:** unchanged (`resolved`).
+Status line deliberately left unchanged (`resolved`) — a verifier records evidence, it does not close tickets.
+
 ## Answer
 
 Plan view was already largely present from an earlier checkpoint (API `GET /api/v1/plan` via `SprintService.get_plan_data`, web `/plan` rendering `plan.html` with HTMX project filter, empty state, and unsprinted-ticket callout). This run verified all previously checked criteria against the passing test suite (`tests/integration/test_plan_api.py`, 8 tests) and completed the one unchecked criterion.

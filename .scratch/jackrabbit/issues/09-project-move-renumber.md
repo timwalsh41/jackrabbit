@@ -58,5 +58,3 @@ Note: an initial run of `TestMoveProjectAPI` failed with sqlite `disk I/O error`
    - Plus integration tests in `tests/integration/test_move_project_web.py`: modal dropdown excludes current project, form-encoded move updates ticket, unknown ticket modal → 404, empty project_id → 400.
 3. **Concurrency hardening.** `TicketService.move_ticket_to_project` now retries (up to 5 attempts) on `IntegrityError` with a fresh `MAX(number)` read; added `UniqueConstraint("project_id","number", name="uq_ticket_project_number")` to the `Ticket` SQLModel (previously only in the alembic migration — model/migration drift meant `create_all`-based test schemas lacked the guard).
 4. Full gate: `uv run pytest -x tests/unit tests/integration` → 339 passed; ruff check/format clean on touched files; `mypy jackrabbit` unchanged from baseline (31 pre-existing errors, 0 new).
-
-**Status:** resolved
