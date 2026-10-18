@@ -5,8 +5,6 @@ Ticket tracking and sprint management system.
 ## Quick Start
 
 ```bash
-
-
 # Copy example env file
 cp .env.example .env
 

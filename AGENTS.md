@@ -45,3 +45,7 @@ Default canonical labels: needs-triage, needs-info, ready-for-agent, ready-for-h
 
 Single-context: GLOSSARY.md + docs/adr/ at repo root. See `docs/agents/domain.md`.
 
+## Verification
+
+Full suite `uv run pytest -x`; fast subset `uv run pytest -x tests/unit tests/integration`; base branch main; PRs via gh-axi. See `docs/agents/verification.md`.
+
