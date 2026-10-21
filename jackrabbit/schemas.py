@@ -433,3 +433,23 @@ class PlanResponse(BaseModel):
     unsprinted_count: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TriageRoleRead(BaseModel):
+    """A canonical triage role and the label that records it."""
+
+    role: str
+    label: str
+
+
+class TriageRoleSet(BaseModel):
+    """Record a ticket's triage role."""
+
+    role: str
+
+
+class TriageRead(BaseModel):
+    """A ticket's triage role, and the label recording it."""
+
+    role: str | None = None
+    label: LabelRead | None = None

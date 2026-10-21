@@ -38,6 +38,9 @@
 **Priority**
 : One of: `Low`, `Medium`, `High`, `Critical`.
 
+**Triage Role**
+: Where a ticket sits in the triage workflow. One of: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. A role is recorded as a label in the `triage:` namespace (`triage:ready-for-agent`), not as a keyword in the ticket description, so it is visible in the interface and queryable. A ticket carries at most one triage role.
+
 ## Technical
 
 **API-First**

@@ -39,9 +39,26 @@ Issues tracked as Jackrabbit tickets (prod instance, project `JRB`; epics for sp
 
 ## Triage labels
 
-Default canonical labels (needs-triage, needs-info, ready-for-agent, ready-for-human,
-wontfix), recorded as a `**TRIAGE_STATUS**:` keyword in the ticket description since
-Jackrabbit has no labels. See `docs/agents/triage-labels.md`.
+The five canonical triage roles — `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human` and `wontfix` — are recorded as labels in a `triage:` namespace
+(`triage:needs-triage`, `triage:needs-info`, `triage:ready-for-agent`,
+`triage:ready-for-human`, `triage:wontfix`). A ticket's triage role is recorded
+and read as a label, never as a keyword in the ticket description.
+
+Record a role (the label is created on demand, and replaces any previous role):
+
+    curl -s -X POST http://localhost:8080/api/v1/tickets/<id>/triage \
+      -H 'Content-Type: application/json' -d '{"role": "ready-for-agent"}'
+
+Read a role back:
+
+    curl -s http://localhost:8080/api/v1/tickets/<id>/triage
+    curl -s http://localhost:8080/api/v1/triage/roles   # the canonical roles
+
+> Until the label feature is deployed, the `**TRIAGE_STATUS**: <role>` keyword in
+> the ticket description remains the authoritative triage marker. The change of
+> authority happens at deployment: from then on the label is what counts. See
+> `docs/agents/triage-labels.md`.
 
 ## Domain docs
 
