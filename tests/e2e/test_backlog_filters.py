@@ -181,3 +181,237 @@ class TestBacklogFilters:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestBacklogFiltersSurviveSortingAndPaging:
+    """JRB-002: the filter form carries the active filters into sort/page requests.
+
+    Before the prefactor every sortable header and every pagination link
+    restated the filter values by hand, so a filter could be dropped by an
+    unrelated click. Now the requests include the filter form, so the filters
+    ride along with the sort and the page.
+    """
+
+    @pytest.fixture
+    def scenario(self, base_url, seeded_projects, make_ticket, make_sprint):
+        """Four matching tickets in a sprint, plus two outsiders."""
+        import httpx
+
+        marker = uuid.uuid4().hex[:8]
+        uns, web, _ = seeded_projects
+        sprint = make_sprint()
+
+        matching = [
+            make_ticket(
+                project_id=uns["id"],
+                title=f"Match {marker} {suffix}",
+                ticket_type="Story",
+                status="Open",
+                priority="Medium",
+            )
+            for suffix in ("A", "B", "C", "D")
+        ]
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            for ticket in matching:
+                resp = client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+                assert resp.status_code == 200
+
+        # Matches the free-text search, but differs in every other filter.
+        matchable_outsider = make_ticket(
+            project_id=web["id"],
+            title=f"Outsider {marker}",
+            ticket_type="Bug",
+            status="Groomed",
+            priority="Critical",
+        )
+        # Matches no filter of the scenario.
+        other_outsider = make_ticket(
+            project_id=uns["id"],
+            title=f"Other {uuid.uuid4().hex[:8]}",
+            ticket_type="Bug",
+            status="Groomed",
+            priority="Critical",
+        )
+        return {
+            "marker": marker,
+            "sprint": sprint,
+            "uns": uns,
+            "matching": matching,
+            "matchable_outsider": matchable_outsider,
+            "other_outsider": other_outsider,
+        }
+
+    @staticmethod
+    def _row_ids(page: Page) -> list[int]:
+        """Ids of the tickets currently listed in the backlog table."""
+        ids = page.eval_on_selector_all(
+            "#tickets-table-body tr[id^='ticket-row-']",
+            "els => els.map(e => e.id)",
+        )
+        return [int(row_id.replace("ticket-row-", "")) for row_id in ids]
+
+    @staticmethod
+    def _apply(page: Page) -> None:
+        page.click("button:has-text('Filter')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(200)
+
+    @staticmethod
+    def _record_urls(page: Page) -> list[str]:
+        """Collect the URLs of the requests the page makes."""
+        urls: list[str] = []
+        page.on("request", lambda request, urls=urls: urls.append(request.url))
+        return urls
+
+    @staticmethod
+    def _last_backlog_url(urls: list[str]) -> str:
+        backlog = [url for url in urls if "/backlog?" in url]
+        assert backlog, f"no backlog request was issued: {urls}"
+        return backlog[-1]
+
+    def _set_filter(self, page: Page, name: str, value: str) -> None:
+        if page.locator(f"select[name='{name}']").count():
+            page.select_option(f"select[name='{name}']", value)
+        else:
+            page.fill(f"input[name='{name}']", value)
+
+    def test_each_filter_survives_sorting_and_paging(self, page: Page, base_url: str, scenario):
+        """Every pre-existing filter still applies after sorting and after paging."""
+        from datetime import date
+
+        marker = scenario["marker"]
+        matchable_outsider = scenario["matchable_outsider"]["id"]
+        other_outsider = scenario["other_outsider"]["id"]
+        matching_ids = {t["id"] for t in scenario["matching"]}
+        today = date.today().isoformat()
+
+        cases = [
+            # (filter, value, the ticket the filter must keep out of the list)
+            ("project_id", str(scenario["uns"]["id"]), matchable_outsider),
+            ("type", "Story", matchable_outsider),
+            ("status", "Open", matchable_outsider),
+            ("priority", "Medium", matchable_outsider),
+            ("sprint_id", str(scenario["sprint"]["id"]), matchable_outsider),
+            ("q", marker, other_outsider),
+            ("created_after", today, other_outsider),
+            ("created_before", today, other_outsider),
+        ]
+
+        for name, value, excluded in cases:
+            page.goto(f"{base_url}/backlog?page_size=3")
+            page.wait_for_load_state("networkidle")
+            # The free-text search isolates the scenario's tickets; the filter
+            # under test is applied on top of it.
+            page.fill("input[name='q']", marker)
+            if name != "q":
+                self._set_filter(page, name, value)
+            self._apply(page)
+
+            rows = self._row_ids(page)
+            assert excluded not in rows, f"{name} filter not applied"
+            assert rows, f"{name} filter left an empty list"
+            assert matching_ids & set(rows), f"{name} filter hid the matching tickets"
+
+            # Sorting a column must carry the filter along.
+            urls = self._record_urls(page)
+            page.click("th:has-text('Title')")
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(200)
+            url = self._last_backlog_url(urls)
+            assert f"{name}={value}" in url, f"sorting dropped the {name} filter: {url}"
+            assert "sort=title" in url
+            assert "page=1" in url, "sorting must return to the first page"
+            rows = self._row_ids(page)
+            assert excluded not in rows, f"{name} filter dropped by sorting"
+            assert matching_ids & set(rows), f"{name} filter hid the matching tickets"
+
+            # Paging must carry the filter along as well.
+            urls.clear()
+            page.click("a:has-text('Next')")
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(200)
+            url = self._last_backlog_url(urls)
+            assert f"{name}={value}" in url, f"paging dropped the {name} filter: {url}"
+            assert "page=2" in url
+            rows = self._row_ids(page)
+            assert excluded not in rows, f"{name} filter dropped by paging"
+
+    def test_date_filter_still_applies_after_sorting(self, page: Page, base_url: str, scenario):
+        """A created-from/created-to window is still applied after sorting."""
+        from datetime import date, timedelta
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        # A window that starts tomorrow excludes every ticket created so far.
+        page.fill("input[name='created_after']", (date.today() + timedelta(days=1)).isoformat())
+        self._apply(page)
+        expect(page.locator("text=No tickets found")).to_be_visible()
+
+        page.click("th:has-text('Title')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(200)
+        expect(page.locator("text=No tickets found")).to_be_visible()
+
+        # A window that ended yesterday excludes them just as well.
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        page.fill("input[name='created_before']", (date.today() - timedelta(days=1)).isoformat())
+        self._apply(page)
+        expect(page.locator("text=No tickets found")).to_be_visible()
+
+    def test_project_scoped_view_keeps_working(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """The project-scoped ticket view shares the filter form and still sorts."""
+        uns, web, _ = seeded_projects
+        mine = make_ticket(project_id=web["id"], title=f"Scoped {uuid.uuid4().hex[:8]}")
+        elsewhere = make_ticket(project_id=uns["id"], title=f"Elsewhere {uuid.uuid4().hex[:8]}")
+
+        page.goto(f"{base_url}/projects/{web['id']}/tickets")
+        page.wait_for_load_state("networkidle")
+        expect(page.locator("#backlog-filter-form")).to_be_visible()
+        expect(page.locator(f"#ticket-row-{mine['id']}")).to_be_visible()
+        assert page.locator(f"#ticket-row-{elsewhere['id']}").count() == 0
+
+        # Sorting a column keeps the view scoped to the project.
+        page.click("th:has-text('Title')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(200)
+        expect(page.locator(f"#ticket-row-{mine['id']}")).to_be_visible()
+        assert page.locator(f"#ticket-row-{elsewhere['id']}").count() == 0
+
+    def test_column_header_sorts_and_paging_keeps_the_sort(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Clicking a header sorts and returns to page one; paging keeps the sort."""
+        marker = uuid.uuid4().hex[:8]
+        uns = seeded_projects[0]
+        # Created in an order that differs from the title order, so a lost sort
+        # is visible in the rows: by number desc C, D, A, B; by title desc D, C, B, A.
+        tickets = {
+            suffix: make_ticket(project_id=uns["id"], title=f"{suffix}-{marker}")
+            for suffix in ("B", "A", "D", "C")
+        }
+
+        page.goto(f"{base_url}/backlog?page_size=2")
+        page.wait_for_load_state("networkidle")
+        page.fill("input[name='q']", marker)
+        self._apply(page)
+
+        # Move to the second page first, so the sort has to return to page one.
+        page.click("a:has-text('Next')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(200)
+        assert self._row_ids(page) == [tickets["A"]["id"], tickets["B"]["id"]]
+
+        page.click("th:has-text('Title')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(200)
+        # Sorted by title, descending, and back on the first page.
+        assert self._row_ids(page) == [tickets["D"]["id"], tickets["C"]["id"]]
+
+        page.click("a:has-text('Next')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(200)
+        # Paging did not change the sort: the second page of a title-desc list.
+        assert self._row_ids(page) == [tickets["B"]["id"], tickets["A"]["id"]]

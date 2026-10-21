@@ -10,6 +10,7 @@ Covers:
 """
 
 import json
+import re
 
 import httpx
 import pytest
@@ -405,3 +406,124 @@ class TestPatchReturnsRow:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("application/json")
         assert r.json()["story_points"] == 3
+
+
+class TestBacklogFilterFormCarriesTheFilters:
+    """JRB-002: the filter form is the single source of truth for the active filters.
+
+    The sortable headers and the pagination links must *include* the filter form
+    instead of hand-listing every filter, so that no filter can be silently
+    dropped when the table is sorted or paged.
+    """
+
+    FILTER_FORM_ID = "backlog-filter-form"
+    FILTER_NAMES = (
+        "project_id",
+        "type",
+        "status",
+        "priority",
+        "sprint_id",
+        "q",
+        "created_after",
+        "created_before",
+    )
+
+    @staticmethod
+    def _sortable_headers(html: str) -> list[str]:
+        """The <th> elements that trigger a sort request."""
+        return [th for th in re.findall(r"<th\b[^>]*>", html) if "hx-vals" in th]
+
+    @staticmethod
+    def _hx_vals(html: str) -> list[str]:
+        """Every hx-vals payload rendered on the page."""
+        return re.findall(r"hx-vals='js:(\{[^']*\})'", html)
+
+    @staticmethod
+    def _hx_vals_keys(payload: str) -> set[str]:
+        """The keys of an hx-vals payload (values are not keys)."""
+        return set(re.findall(r'"([a-z_]+)":', payload))
+
+    async def test_backlog_page_has_a_filter_form_with_an_id(self, client, backlog_tickets):
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        assert f'id="{self.FILTER_FORM_ID}"' in r.text
+
+    async def test_sortable_headers_include_the_filter_form(self, client, backlog_tickets):
+        r = await _get(client, "/backlog")
+        headers = self._sortable_headers(r.text)
+        assert len(headers) == 7, "the backlog table has seven sortable columns"
+        for th in headers:
+            assert f'hx-include="#{self.FILTER_FORM_ID}"' in th, th
+
+    async def test_pagination_links_include_the_filter_form(self, client, backlog_tickets):
+        # page_size=1 over three tickets gives three pages; the middle page
+        # renders both the Previous and the Next link.
+        r = await _get(client, "/backlog", params={"page_size": 1, "page": 2})
+        assert r.status_code == 200
+        links = [a for a in re.findall(r"<a\b[^>]*>", r.text) if "hx-vals" in a]
+        assert len(links) == 2, "Previous and Next links"
+        for link in links:
+            assert f'hx-include="#{self.FILTER_FORM_ID}"' in link, link
+
+    async def test_no_request_hand_lists_the_filters(self, client, backlog_tickets):
+        """Neither the headers nor the pagination restate the filter values."""
+        r = await _get(client, "/backlog", params={"page_size": 1})
+        assert r.status_code == 200
+        payloads = self._hx_vals(r.text)
+        assert payloads, "the page still carries sort/page requests"
+        for payload in payloads:
+            keys = self._hx_vals_keys(payload)
+            for name in self.FILTER_NAMES:
+                assert name not in keys, payload
+
+    async def test_headers_specify_sort_order_and_first_page(self, client, backlog_tickets):
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        payloads = self._hx_vals(r.text)
+        sorts = {re.search(r'"sort": "([^"]*)"', p).group(1) for p in payloads if '"sort"' in p}
+        assert sorts == {
+            "number",
+            "title",
+            "type",
+            "status",
+            "priority",
+            "story_points",
+            "sprint_id",
+        }
+        for payload in payloads:
+            if '"sort"' in payload:
+                assert '"order"' in payload
+                assert '"page": 1' in payload, "sorting returns to the first page"
+
+    async def test_pagination_links_specify_the_page(self, client, backlog_tickets):
+        r = await _get(client, "/backlog", params={"page_size": 1, "page": 2})
+        assert r.status_code == 200
+        pages = {
+            int(re.search(r'"page": (\d+)', p).group(1))
+            for p in self._hx_vals(r.text)
+            if '"page"' in p and '"sort"' not in p
+        }
+        assert pages == {1, 3}, "Previous (page 1) and Next (page 3)"
+
+    async def test_filter_form_hidden_fields_carry_the_active_state(self, client, backlog_tickets):
+        """The form's own hidden fields hold the active sort, order and page."""
+        r = await _get(
+            client, "/backlog", params={"sort": "title", "order": "asc", "page": 2, "page_size": 1}
+        )
+        assert r.status_code == 200
+        assert 'name="sort" value="title"' in r.text
+        assert 'name="order" value="asc"' in r.text
+        assert 'name="page" value="2"' in r.text
+
+    async def test_project_ticket_view_shares_the_filter_form(
+        self, client_with_seeds, seeded_projects, backlog_tickets
+    ):
+        """The project-scoped view uses the same filter form and headers."""
+        _, web, _ = seeded_projects
+        r = await _get(client_with_seeds, f"/projects/{web.id}/tickets")
+        assert r.status_code == 200
+        assert f'id="{self.FILTER_FORM_ID}"' in r.text
+        headers = self._sortable_headers(r.text)
+        assert headers
+        for th in headers:
+            assert f'hx-include="#{self.FILTER_FORM_ID}"' in th, th
