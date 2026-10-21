@@ -3,7 +3,10 @@
 ## Core Domain
 
 **Ticket**
-: A unit of work in the backlog. Has a unique identifier (`{project}-{number}`), type, status, optional sprint assignment, and optional links to other tickets.
+: A unit of work in the backlog. Has a unique identifier (`{project}-{number}`), type, status, optional sprint assignment, optional links to other tickets, and any number of labels.
+
+**Label**
+: A free-form tag that categorises a ticket independently of its type, project, status, sprint and priority. A ticket may carry many labels; a label is shared across all projects and may be applied to any ticket regardless of its type. Labels are created on demand and are identified case-insensitively, so `Backend` and `backend` are the same label.
 
 **Ticket Type**
 : One of: `Epic`, `Story`, `Bug`, `Spike`. `Epic` represents a large multi-feature plan but is a flat type — hierarchy is expressed via links, not schema.
@@ -55,7 +58,7 @@
 ## UI Views
 
 **Backlog View**
-: Filterable, sortable list of all tickets (filter by project, type, status, date).
+: Filterable, sortable list of all tickets (filter by project, type, status, label, date).
 
 **Sprint View**
 : Status board of tickets assigned to the current sprint.

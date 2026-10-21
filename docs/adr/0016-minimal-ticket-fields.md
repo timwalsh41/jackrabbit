@@ -1,7 +1,7 @@
 # ADR-0016: Minimal Ticket Fields
 
 ## Status
-Accepted
+Accepted — the `labels`/`tags` exclusion below is superseded by ADR-0024
 
 ## Context
 Beyond spec-mandated fields (type, status, links, sprint, project), what else? Options:
@@ -39,7 +39,7 @@ User chose **Minimal**: Title, description, priority, story points (+ system: cr
 
 ### Not Included (YAGNI)
 - `assignee` — single-user tool; no user table
-- `labels`/`tags` — priority + type + project + sprint cover filtering
+- `labels`/`tags` — priority + type + project + sprint cover filtering (superseded by ADR-0024)
 - `components` — not needed for personal/small-team use
 - `fix_version`/`affects_version` — sprint serves this role
 - `reporter` — single user
