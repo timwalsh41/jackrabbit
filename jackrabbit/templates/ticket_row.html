@@ -21,6 +21,12 @@
         {% if ticket.description %}
         <p class="text-sm text-gray-500 truncate max-w-xs mt-1">{{ ticket.description }}</p>
         {% endif %}
+        {# The triage role is a label in the `triage:` namespace (ADR-0024). #}
+        {% if ticket.triage_role %}
+        <span class="inline-flex items-center px-2 py-0.5 mt-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800"
+              data-triage-role="{{ ticket.triage_role }}"
+              title="Triage role">Triage: {{ ticket.triage_role }}</span>
+        {% endif %}
     </td>
     <td class="px-4 py-3">
         {% set row_labels = (labels_by_ticket or {}).get(ticket.id, []) %}

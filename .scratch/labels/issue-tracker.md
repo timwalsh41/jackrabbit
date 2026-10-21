@@ -57,10 +57,15 @@ needs `branch_name`, `Ready for Review` needs `pr_url`; see ADR-0009).
 
 ## Triage
 
-Jackrabbit has no labels/comments/tags fields, so the five triage roles are recorded as a
-keyword line at the top of the ticket **description** — `**TRIAGE_STATUS**: <role>`
-(e.g. `**TRIAGE_STATUS**: ready-for-agent`). See `triage-labels.md`. (Stopgap until a
-labels feature is added to Jackrabbit; when deployed to prod, update these instructions.)
+Jackrabbit has labels, so the five triage roles are recorded as labels in a `triage:`
+namespace — `triage:needs-triage`, `triage:needs-info`, `triage:ready-for-agent`,
+`triage:ready-for-human` and `triage:wontfix`. Set a role with
+`POST /api/v1/tickets/{id}/triage` (`{"role": "ready-for-agent"}`) and read it back
+with `GET /api/v1/tickets/{id}/triage`. See `triage-labels.md`.
+
+(The `**TRIAGE_STATUS**: <role>` keyword in the description was the stopgap used
+before labels existed; it remains authoritative until the label feature is deployed,
+and the change of authority happens at deployment.)
 
 ## Testing against a local instance
 

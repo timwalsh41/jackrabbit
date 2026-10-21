@@ -26,6 +26,11 @@ from jackrabbit.models import (
     TicketType,
     Transition,
 )
+from jackrabbit.triage import (
+    TriageRole,
+    is_triage_label_name,
+    triage_role_from_labels,
+)
 
 
 def utc_now() -> datetime:
@@ -1497,3 +1502,40 @@ class LabelService:
         for link, label in rows:
             result.setdefault(link.ticket_id, []).append(label)
         return result
+
+
+class TriageService:
+    """Records a ticket's triage role as a label (ADR-0024).
+
+    The five canonical roles are labels in the ``triage:`` namespace. Setting a
+    role attaches its label and detaches any other triage label, so a ticket
+    carries exactly one triage role and the backlog can be sliced by it.
+    """
+
+    def __init__(self, session: Session, label_service: LabelService | None = None):
+        self.session = session
+        self.label_service = label_service or LabelService(session)
+
+    def set_role(self, ticket_id: int, role: str | TriageRole) -> TriageRole:
+        """Record a ticket's triage role as a label.
+
+        The role's label is created on demand. Any other triage label the
+        ticket carries is detached, so the ticket ends up with exactly one
+        triage role.
+
+        Raises:
+            ValueError: If the role is not one of the five canonical roles.
+        """
+        parsed = TriageRole(role)
+        wanted_key = parsed.label_name.lower()
+
+        for label in self.label_service.labels_for_ticket(ticket_id):
+            if is_triage_label_name(label.name) and label.name_key != wanted_key:
+                self.label_service.detach(ticket_id, cast(int, label.id))
+
+        self.label_service.attach(ticket_id, parsed.label_name)
+        return parsed
+
+    def role_for(self, ticket_id: int) -> TriageRole | None:
+        """The triage role a ticket carries, or None if it carries none."""
+        return triage_role_from_labels(self.label_service.labels_for_ticket(ticket_id))

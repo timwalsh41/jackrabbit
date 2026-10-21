@@ -11,6 +11,7 @@ from sqlmodel import Field, Relationship, SQLModel
 from sqlmodel._compat import NaiveDatetime
 
 from jackrabbit.labels import label_color
+from jackrabbit.triage import TriageRole, triage_role_from_labels
 
 
 class TicketType(StrEnum):
@@ -123,8 +124,24 @@ class Ticket(SQLModel, table=True):
     )
     transitions: list["Transition"] = Relationship(back_populates="ticket")
     # Label attachments. Deleting the ticket removes the attachments with it
-    # (the labels themselves stay in the registry).
-    label_links: list["TicketLabel"] = Relationship(back_populates="ticket", cascade_delete=True)
+    # (the labels themselves stay in the registry). The links (and the labels
+    # behind them) are loaded eagerly, so rendering a list of tickets does not
+    # trigger a query per row.
+    label_links: list["TicketLabel"] = Relationship(
+        back_populates="ticket",
+        cascade_delete=True,
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
+
+    @property
+    def triage_role(self) -> TriageRole | None:
+        """The triage role this ticket carries as a label, if any.
+
+        A triage role is a label in the ``triage:`` namespace (ADR-0024), so
+        the role is read from the ticket's labels rather than from a keyword
+        in its description.
+        """
+        return triage_role_from_labels([link.label for link in self.label_links])
 
 
 class Label(SQLModel, table=True):
@@ -164,7 +181,10 @@ class TicketLabel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
     ticket: Ticket = Relationship(back_populates="label_links")
-    label: Label = Relationship(back_populates="ticket_links")
+    label: Label = Relationship(
+        back_populates="ticket_links",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
 
 
 class TicketLink(SQLModel, table=True):

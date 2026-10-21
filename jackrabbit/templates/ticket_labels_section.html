@@ -15,6 +15,16 @@
         </button>
     </div>
 
+    {# The triage role is a label in the `triage:` namespace (ADR-0024), shown
+       here as the role it records rather than as a raw label chip. #}
+    {% if ticket.triage_role %}
+    <div class="mb-3">
+        <span class="triage-badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800"
+              data-triage-role="{{ ticket.triage_role }}"
+              title="Triage role">Triage: {{ ticket.triage_role }}</span>
+    </div>
+    {% endif %}
+
     {% if not labels %}
     <p class="text-sm text-gray-500" id="no-labels-hint">No labels yet. Click "Add Label" to categorise this ticket.</p>
     {% else %}

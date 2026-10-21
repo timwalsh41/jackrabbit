@@ -103,8 +103,16 @@ tokenised. The backlog's search field is relabelled from "Search Title" to "Sear
 
 ### Triage
 The five canonical triage roles move from the `**TRIAGE_STATUS**:` description keyword
-to real labels in a `triage:` namespace. Until this feature is deployed, the keyword
-remains authoritative; the change of authority happens at deployment.
+to real labels in a `triage:` namespace: `triage:needs-triage`, `triage:needs-info`,
+`triage:ready-for-agent`, `triage:ready-for-human` and `triage:wontfix`. The
+vocabulary lives in `jackrabbit/triage.py`; `TriageService` records a role by
+attaching its label and detaching any other triage label, so a ticket carries at
+most one triage role. The role is read back from the ticket's labels, and the
+agent-facing triage instructions (`docs/agents/triage-labels.md`, summarised in
+`AGENTS.md`) were updated to match.
+
+Until this feature is deployed, the keyword remains authoritative; the change of
+authority happens at deployment.
 
 ## Consequences
 
