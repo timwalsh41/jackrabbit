@@ -79,6 +79,11 @@ The sort, order and page values continue to override the form's own values. This
 the filter form the single source of truth, so a filter cannot be silently dropped when
 the table is sorted or paged.
 
+The filter form pushes its request into the browser's URL, so the active filters — the
+label selection and the match mode among them — are visible in the address bar and a
+filtered view can be bookmarked and shared. Reloading such a URL restores the filter,
+because the server reads the label ids and the match mode from the query string.
+
 ### Search
 The ticket listing service's free-text search widens from title-only to **title,
 description and label names**: a ticket matches when the search text occurs in any of

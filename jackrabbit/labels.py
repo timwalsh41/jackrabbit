@@ -12,9 +12,17 @@ user-editable colour.
 """
 
 import re
+from collections.abc import Sequence
 
 # Maximum length of a label name.
 LABEL_NAME_MAX_LENGTH = 50
+
+# The match modes of the label filter: a ticket must carry *all* the selected
+# labels, or *any* of them.
+LABEL_MATCH_MODES: tuple[str, ...] = ("all", "any")
+
+# The default match mode.
+LABEL_MATCH_DEFAULT = "all"
 
 # Human-readable description of the allowed character set, used in error messages.
 LABEL_NAME_ALLOWED_CHARS = "letters, digits, spaces, hyphens, underscores and colons"
@@ -84,3 +92,51 @@ def label_color(name_key: str) -> str:
     ticket page.
     """
     return LABEL_PALETTE[_fnv1a(name_key) % len(LABEL_PALETTE)]
+
+
+def parse_label_ids(values: Sequence[str] | None) -> list[int]:
+    """Parse the label ids of a filter request.
+
+    A label filter travels as a repeated query parameter
+    (``label_ids=1&label_ids=2``) and may also be written as a comma-separated
+    list (``label_ids=1,2``); both are accepted. Duplicates are dropped, and
+    the order of the ids is kept.
+
+    Args:
+        values: The raw query values.
+
+    Returns:
+        The label ids, in order, without duplicates.
+
+    Raises:
+        ValueError: If a value is not an integer.
+    """
+    ids: list[int] = []
+    for value in values or []:
+        for part in str(value).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError as e:
+                raise ValueError(f"label id must be an integer: {part!r}") from e
+    return list(dict.fromkeys(ids))
+
+
+def parse_label_match(value: str | None) -> str:
+    """Parse the match mode of the label filter.
+
+    Args:
+        value: The raw query value.
+
+    Returns:
+        ``"all"`` (the default) or ``"any"``.
+
+    Raises:
+        ValueError: If the value is not a known match mode.
+    """
+    mode = (value or LABEL_MATCH_DEFAULT).strip().lower()
+    if mode not in LABEL_MATCH_MODES:
+        raise ValueError(f"label match mode must be one of: {', '.join(LABEL_MATCH_MODES)}")
+    return mode

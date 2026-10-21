@@ -23,6 +23,21 @@
         {% endif %}
     </td>
     <td class="px-4 py-3">
+        {% set row_labels = (labels_by_ticket or {}).get(ticket.id, []) %}
+        {% if row_labels %}
+        <div class="flex flex-wrap gap-1">
+            {% for label in row_labels %}
+            <span class="label-chip inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                  data-label-id="{{ label.id }}"
+                  data-label-name="{{ label.name }}"
+                  style="background-color: {{ label.color }}">{{ label.name }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <span class="text-gray-400 text-xs">—</span>
+        {% endif %}
+    </td>
+    <td class="px-4 py-3">
         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
             {% if ticket.type == 'Epic' %}bg-purple-100 text-purple-800
             {% elif ticket.type == 'Story' %}bg-blue-100 text-blue-800

@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from jackrabbit.database import get_session
+from jackrabbit.labels import parse_label_ids, parse_label_match
 from jackrabbit.models import (
     Project,
     Sprint,
@@ -294,10 +295,18 @@ def _ticket_row_response(request: Request, ticket_id: int, session: Session) -> 
 
     ticket = TicketService(session).get_ticket(ticket_id)
     sprints = SprintService(session).list_sprints()
+    label_service = LabelService(session)
+    labels_by_ticket = (
+        {cast(int, ticket.id): label_service.labels_for_ticket(ticket_id)} if ticket else {}
+    )
     return templates.TemplateResponse(
         request,
         "ticket_row.html",
-        {"ticket": ticket, "sprints": sprints},
+        {
+            "ticket": ticket,
+            "sprints": sprints,
+            "labels_by_ticket": labels_by_ticket,
+        },
     )
 
 
@@ -429,7 +438,9 @@ def list_tickets(
     status: TicketStatus | None = Query(None),
     type: TicketType | None = Query(None),
     sprint_id: int | None = Query(None),
-    q: str | None = Query(None, description="Search in title"),
+    q: str | None = Query(None, description="Search in title, description and label names"),
+    label_ids: list[str] = Query(default=[], description="Label ids to filter by"),
+    label_match: str = Query("all", description="Label match mode: all or any"),
     sort: str = Query(
         "number",
         description="Sort field: number, title, type, status, priority, story_points, created_at",
@@ -440,12 +451,20 @@ def list_tickets(
     service: TicketService = Depends(get_ticket_service),
     label_service: LabelService = Depends(get_label_service),
 ) -> PaginatedResponse:
+    try:
+        parsed_label_ids = parse_label_ids(label_ids)
+        match_mode = parse_label_match(label_match)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
     tickets, total = service.list_tickets(
         project_id=project_id,
         status=status,
         type=type,
         sprint_id=sprint_id,
         q=q,
+        label_ids=parsed_label_ids,
+        label_match=match_mode,
         sort=sort,
         order=order,
         page=page,
@@ -591,7 +610,13 @@ def update_ticket(
             return templates.TemplateResponse(
                 request,
                 "ticket_row.html",
-                {"ticket": ticket, "sprints": sprints},
+                {
+                    "ticket": ticket,
+                    "sprints": sprints,
+                    "labels_by_ticket": {
+                        cast(int, ticket.id): label_service.labels_for_ticket(ticket_id)
+                    },
+                },
             )
         # Full-page edit form: send the user back to the backlog.
         response = HTMLResponse("")

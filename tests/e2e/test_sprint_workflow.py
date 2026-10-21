@@ -63,8 +63,9 @@ class TestSprintWorkflow:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)
 
-        # The row's Sprint cell (7th td) now shows the sprint number
-        expect(page.locator(f"#ticket-row-{tid} td:nth-child(7)")).to_contain_text(
+        # The row's Sprint cell (8th td, after the labels column) now shows the
+        # sprint number
+        expect(page.locator(f"#ticket-row-{tid} td:nth-child(8)")).to_contain_text(
             sprint_number, timeout=10000
         )
 

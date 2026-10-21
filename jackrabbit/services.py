@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, time
 from typing import Any, cast
 from urllib.parse import urlparse
 
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
@@ -506,6 +507,8 @@ class TicketService:
         q: str | None = None,
         created_after: date | str | None = None,
         created_before: date | str | None = None,
+        label_ids: Sequence[int] | None = None,
+        label_match: str = "all",
         sort: str = "number",
         order: str = "desc",
         page: int = 1,
@@ -517,6 +520,14 @@ class TicketService:
         whose sprint_id is NULL. ``sprint_id=None`` applies no sprint filter.
         ``created_after``/``created_before`` are inclusive calendar-date bounds
         on ``Ticket.created_at``; ``None`` applies no date filter.
+
+        ``label_ids`` selects the tickets carrying the given labels. With
+        ``label_match="all"`` (the default) a ticket must carry *every* listed
+        label; with ``label_match="any"`` it must carry at least one. An empty
+        or missing ``label_ids`` applies no label filter.
+
+        ``q`` is a case-insensitive substring match over the ticket's title,
+        its description and the names of its labels.
         """
         query = select(Ticket)
         count_query = select(func.count(Ticket.id))  # type: ignore[arg-type]
@@ -541,8 +552,37 @@ class TicketService:
             query = query.where(Ticket.sprint_id == sprint_id)
             count_query = count_query.where(Ticket.sprint_id == sprint_id)
         if q:
-            query = query.where(Ticket.title.ilike(f"%{q}%"))  # type: ignore[attr-defined]
-            count_query = count_query.where(Ticket.title.ilike(f"%{q}%"))  # type: ignore[attr-defined]
+            # The free-text search covers the title, the description and the
+            # names of the ticket's labels (ADR-0024).
+            like = f"%{q}%"
+            labelled = (
+                select(TicketLabel.ticket_id)
+                .join(Label, TicketLabel.label_id == Label.id)  # type: ignore[arg-type]
+                .where(Label.name.ilike(like))  # type: ignore[attr-defined]
+            )
+            search = or_(
+                Ticket.title.ilike(like),  # type: ignore[attr-defined]
+                Ticket.description.ilike(like),  # type: ignore[attr-defined]
+                Ticket.id.in_(labelled),  # type: ignore[union-attr]
+            )
+            query = query.where(search)
+            count_query = count_query.where(search)
+        label_ids = [int(label_id) for label_id in (label_ids or [])]
+        if label_ids:
+            if str(label_match).strip().lower() == "any":
+                carrying = select(TicketLabel.ticket_id).where(
+                    TicketLabel.label_id.in_(label_ids)  # type: ignore[attr-defined]
+                )
+            else:
+                # "all": a ticket must carry every one of the selected labels.
+                carrying = (
+                    select(TicketLabel.ticket_id)
+                    .where(TicketLabel.label_id.in_(label_ids))  # type: ignore[attr-defined]
+                    .group_by(TicketLabel.ticket_id)  # type: ignore[arg-type]
+                    .having(func.count(func.distinct(TicketLabel.label_id)) == len(label_ids))
+                )
+            query = query.where(Ticket.id.in_(carrying))  # type: ignore[union-attr]
+            count_query = count_query.where(Ticket.id.in_(carrying))  # type: ignore[union-attr]
         if created_after is not None:
             after = _start_of_day(created_after)
             query = query.where(Ticket.created_at >= after)
