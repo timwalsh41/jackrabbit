@@ -10,6 +10,8 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 from sqlmodel._compat import NaiveDatetime
 
+from jackrabbit.labels import label_color
+
 
 class TicketType(StrEnum):
     EPIC = "Epic"
@@ -120,6 +122,49 @@ class Ticket(SQLModel, table=True):
         back_populates="source", sa_relationship_kwargs={"foreign_keys": "TicketLink.source_id"}
     )
     transitions: list["Transition"] = Relationship(back_populates="ticket")
+    # Label attachments. Deleting the ticket removes the attachments with it
+    # (the labels themselves stay in the registry).
+    label_links: list["TicketLabel"] = Relationship(back_populates="ticket", cascade_delete=True)
+
+
+class Label(SQLModel, table=True):
+    """A globally scoped label (ADR-0024).
+
+    A label belongs to no project and to no ticket type. Its identity is the
+    lower-cased ``name_key`` (unique across the registry); ``name`` keeps the
+    spelling that was first typed.
+    """
+
+    __table_args__ = (UniqueConstraint("name_key", name="uq_label_name_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, max_length=50)
+    name_key: str = Field(index=True, max_length=50)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    ticket_links: list["TicketLabel"] = Relationship(back_populates="label", cascade_delete=True)
+
+    @property
+    def color(self) -> str:
+        """The label's colour, derived from its identity key (never stored)."""
+        return label_color(self.name_key)
+
+
+class TicketLabel(SQLModel, table=True):
+    """Attachment of a label to a ticket."""
+
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "label_id", name="uq_ticket_label_ticket_label"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="ticket.id", index=True)
+    label_id: int = Field(foreign_key="label.id", index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    ticket: Ticket = Relationship(back_populates="label_links")
+    label: Label = Relationship(back_populates="ticket_links")
 
 
 class TicketLink(SQLModel, table=True):

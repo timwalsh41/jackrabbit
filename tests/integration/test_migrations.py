@@ -37,7 +37,15 @@ def test_upgrade_creates_all_tables(tmp_path: Path, monkeypatch):
 
     engine = create_engine(database_url)
     tables = _tables(engine)
-    assert {"project", "sprint", "ticket", "ticketlink", "transition"} <= tables
+    assert {
+        "project",
+        "sprint",
+        "ticket",
+        "ticketlink",
+        "transition",
+        "label",
+        "ticketlabel",
+    } <= tables
     # The head migration renamed ticket_transition -> transition
     assert "ticket_transition" not in tables
 
@@ -69,12 +77,14 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
     assert "transition" in _tables(engine)
     engine.dispose()
 
-    # Downgrade one step: back to 0001, table is named ticket_transition again
+    # Downgrade one step: the labels migration (the head step) is undone, so
+    # the label tables are gone while everything older stays in place.
     command.downgrade(cfg, "-1")
     engine = create_engine(database_url)
     tables = _tables(engine)
-    assert "ticket_transition" in tables
-    assert "transition" not in tables
+    assert "label" not in tables
+    assert "ticketlabel" not in tables
+    assert "transition" in tables
 
     # Data survives the rename round-trip: insert a row at the downgraded
     # revision and confirm it is still there after re-upgrading.
@@ -97,7 +107,7 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
     # The 0001 migration seeds the UNS system project; the inserted row must
     # also have survived the downgrade -> re-upgrade round-trip.
     assert prefixes == {"UNS", "RT"}
-    assert revision == "dd5c9a836974"
+    assert revision == "b2f6c1d4e7a9"
     engine.dispose()
 
 
@@ -116,7 +126,15 @@ def test_full_downgrade_to_base_and_reupgrade(tmp_path: Path, monkeypatch):
 
     command.upgrade(cfg, "head")
     engine = create_engine(database_url)
-    assert {"project", "sprint", "ticket", "ticketlink", "transition"} <= _tables(engine)
+    assert {
+        "project",
+        "sprint",
+        "ticket",
+        "ticketlink",
+        "transition",
+        "label",
+        "ticketlabel",
+    } <= _tables(engine)
     engine.dispose()
 
 
@@ -146,6 +164,8 @@ def test_init_db_runs_from_any_working_directory(tmp_path: Path, monkeypatch) ->
             "ticket",
             "ticketlink",
             "transition",
+            "label",
+            "ticketlabel",
             "alembic_version",
         } <= tables
         version = engine.connect().execute(text("select version_num from alembic_version")).scalar()

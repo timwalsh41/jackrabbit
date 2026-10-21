@@ -392,6 +392,14 @@
                          hx-swap="outerHTML"
                          hx-trigger="load"></div>
                 </div>
+
+                <!-- Labels Section -->
+                <div id="labels-section-container">
+                    <div hx-get="/tickets/${ticket.id}/labels"
+                         hx-target="#labels-section-container"
+                         hx-swap="outerHTML"
+                         hx-trigger="load"></div>
+                </div>
             </div>
         `;
     }

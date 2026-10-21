@@ -16,6 +16,18 @@ from jackrabbit.models import (
 )
 
 
+def _label_names_from_form(value: Any) -> Any:
+    """Accept label names as a list, or as a comma-separated string.
+
+    The JSON API takes a list of names; an HTML form cannot submit a list, so
+    it submits the names comma-separated. Label names may not contain a comma
+    (the allowed character set excludes it), so splitting is unambiguous.
+    """
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    return value
+
+
 class ProjectBase(BaseModel):
     prefix: str
     name: str
@@ -191,6 +203,28 @@ class TicketBase(BaseModel):
     # story_points defined in subclasses to allow different validation
 
 
+class LabelCreate(BaseModel):
+    """Attach a label to a ticket by name (created on demand)."""
+
+    name: str
+
+
+class LabelRead(BaseModel):
+    """A label as returned to clients."""
+
+    id: int
+    name: str
+    color: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LabelWithUsage(LabelRead):
+    """A label in the vocabulary, with the number of tickets carrying it."""
+
+    usage_count: int = 0
+
+
 class TicketCreate(TicketBase):
     approach: str = ""
     files_to_change: str = ""
@@ -198,6 +232,14 @@ class TicketCreate(TicketBase):
     validation_steps: str = ""
     sprint_id: int | None = None
     status: TicketStatus = TicketStatus.OPEN
+    # Label names to attach; a name that does not exist yet is created.
+    labels: list[str] = []
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def _parse_labels(cls, v: Any) -> Any:
+        return _label_names_from_form(v)
+
     # Declared int|None; the before-validator converts "" -> None and numeric
     # strings -> int so HTMX/API callers submitting form fields still validate.
     story_points: int | None = None
@@ -245,6 +287,15 @@ class TicketUpdate(BaseModel):
     # Audit-trail reason recorded on the Transition when the PATCH also changes
     # status (status changes go through the guarded TransitionService).
     transition_reason: str | None = None
+    # Label names. When present, the ticket's whole label set is replaced, so
+    # a label is removed by updating without it. When absent, labels are left
+    # untouched.
+    labels: list[str] | None = None
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def _parse_labels(cls, v: Any) -> Any:
+        return _label_names_from_form(v)
 
 
 class TicketRead(TicketBase):
@@ -263,6 +314,8 @@ class TicketRead(TicketBase):
     updated_at: datetime
     completed_at: datetime | None = None
     story_points: int | None = None
+    # The ticket's labels, each with its id, name and colour.
+    labels: list[LabelRead] = []
 
     model_config = ConfigDict(from_attributes=True)
 

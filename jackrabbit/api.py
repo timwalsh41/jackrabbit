@@ -18,6 +18,9 @@ from jackrabbit.models import (
 )
 from jackrabbit.schemas import (
     CanTransitionResponse,
+    LabelCreate,
+    LabelRead,
+    LabelWithUsage,
     MoveProjectResponse,
     PaginatedResponse,
     PlanResponse,
@@ -42,6 +45,7 @@ from jackrabbit.schemas import (
 )
 from jackrabbit.services import (
     ConflictError,
+    LabelService,
     LinkService,
     ProjectService,
     SprintService,
@@ -66,6 +70,22 @@ def get_sprint_service(session: Session = Depends(get_session)) -> SprintService
 
 def get_link_service(session: Session = Depends(get_session)) -> LinkService:
     return LinkService(session)
+
+
+def get_label_service(session: Session = Depends(get_session)) -> LabelService:
+    return LabelService(session)
+
+
+def _label_reads(labels: list[Any]) -> list[LabelRead]:
+    """Convert label rows into their API representation."""
+    return [LabelRead.model_validate(label) for label in labels]
+
+
+def _ticket_read(ticket: Ticket, labels: list[Any]) -> TicketRead:
+    """A ticket payload including the labels it carries."""
+    read = TicketRead.model_validate(ticket)
+    read.labels = _label_reads(labels)
+    return read
 
 
 # Project endpoints
@@ -369,8 +389,17 @@ def delete_sprint(
 def create_ticket(
     ticket_in: TicketCreate,
     service: TicketService = Depends(get_ticket_service),
-) -> Ticket:
-    return service.create_ticket(
+    label_service: LabelService = Depends(get_label_service),
+) -> TicketRead:
+    # Validate the label names BEFORE creating the ticket, so an invalid name
+    # leaves no half-created ticket behind.
+    try:
+        for name in ticket_in.labels:
+            label_service.normalize_name(name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    ticket = service.create_ticket(
         project_id=ticket_in.project_id,
         title=ticket_in.title,
         type=ticket_in.type,
@@ -384,6 +413,14 @@ def create_ticket(
         sprint_id=ticket_in.sprint_id,
         status=ticket_in.status,
     )
+
+    if ticket_in.labels:
+        try:
+            label_service.replace(cast(int, ticket.id), ticket_in.labels)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    return _ticket_read(ticket, label_service.labels_for_ticket(cast(int, ticket.id)))
 
 
 @router.get("/tickets", response_model=PaginatedResponse)
@@ -401,6 +438,7 @@ def list_tickets(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     service: TicketService = Depends(get_ticket_service),
+    label_service: LabelService = Depends(get_label_service),
 ) -> PaginatedResponse:
     tickets, total = service.list_tickets(
         project_id=project_id,
@@ -414,8 +452,15 @@ def list_tickets(
         page_size=page_size,
     )
     total_pages = (total + page_size - 1) // page_size
+    labels_by_ticket = label_service.labels_for_tickets(
+        [cast(int, t.id) for t in tickets if t.id is not None]
+    )
     return PaginatedResponse(
-        items=[TicketRead.model_validate(t) for t in tickets],
+        items=[
+            _ticket_read(t, labels_by_ticket.get(cast(int, t.id), []))
+            for t in tickets
+            if t.id is not None
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -428,6 +473,7 @@ def get_ticket(
     ticket_id: int,
     service: TicketService = Depends(get_ticket_service),
     link_service: LinkService = Depends(get_link_service),
+    label_service: LabelService = Depends(get_label_service),
 ) -> TicketReadWithDetails:
     result = service.get_ticket_with_details(ticket_id, link_service)
     if not result:
@@ -458,6 +504,7 @@ def get_ticket(
         project_prefix=result["project_prefix"],
         links=result["links"],
         transitions=result["transitions"],
+        labels=_label_reads(label_service.labels_for_ticket(ticket_id)),
     )
 
 
@@ -466,11 +513,12 @@ def get_ticket_by_full_id(
     project_prefix: str,
     number: int,
     service: TicketService = Depends(get_ticket_service),
-) -> Ticket:
+    label_service: LabelService = Depends(get_label_service),
+) -> TicketRead:
     ticket = service.get_ticket_by_full_id(project_prefix, number)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return ticket
+    return _ticket_read(ticket, label_service.labels_for_ticket(cast(int, ticket.id)))
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketRead)
@@ -479,12 +527,23 @@ def update_ticket(
     ticket_in: TicketUpdate,
     request: Request,
     service: TicketService = Depends(get_ticket_service),
-) -> Ticket | Response:
+    label_service: LabelService = Depends(get_label_service),
+) -> TicketRead | Response:
     ticket = service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     update_data = ticket_in.model_dump(exclude_unset=True)
+
+    # Labels are not a ticket column: they are applied separately, and an
+    # update REPLACES the ticket's whole label set.
+    new_labels = cast(list[str] | None, update_data.pop("labels", None))
+    if new_labels is not None:
+        try:
+            for name in new_labels:
+                label_service.normalize_name(name)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
 
     # Status changes go through the guarded TransitionService (same rules as
     # POST /transition: guarded forward, free backward, reject/restore) so they
@@ -514,6 +573,12 @@ def update_ticket(
             # Guard failure (or invalid move) -> 400, ticket unchanged in DB
             raise HTTPException(status_code=400, detail=str(e)) from e
 
+    if new_labels is not None:
+        try:
+            label_service.replace(ticket_id, new_labels)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
     # HTMX-aware PATCH: the edit form hx-patches this endpoint directly.
     if request.headers.get("HX-Request"):
         from jackrabbit.services import SprintService
@@ -533,7 +598,7 @@ def update_ticket(
         response.headers["HX-Redirect"] = "/backlog"
         return response
 
-    return ticket
+    return _ticket_read(ticket, label_service.labels_for_ticket(ticket_id))
 
 
 @router.delete("/tickets/{ticket_id}", status_code=204)
@@ -741,3 +806,78 @@ def get_ticket_blocked(
     ticket_id: int, service: LinkService = Depends(get_link_service)
 ) -> list[TicketLink]:
     return service.get_blocked(ticket_id)
+
+
+# Label endpoints
+@router.get("/labels", response_model=list[LabelWithUsage])
+def list_labels(service: LabelService = Depends(get_label_service)) -> list[LabelWithUsage]:
+    """The label vocabulary, with the number of tickets carrying each label."""
+    return [
+        LabelWithUsage(
+            id=cast(int, entry["label"].id),
+            name=entry["label"].name,
+            color=entry["label"].color,
+            usage_count=entry["usage_count"],
+        )
+        for entry in service.list_labels_with_usage()
+    ]
+
+
+@router.get("/tickets/{ticket_id}/labels", response_model=list[LabelRead])
+def get_ticket_labels(
+    ticket_id: int,
+    service: LabelService = Depends(get_label_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> list[LabelRead]:
+    if not ticket_service.get_ticket(ticket_id):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return _label_reads(service.labels_for_ticket(ticket_id))
+
+
+@router.post("/tickets/{ticket_id}/labels", response_model=None, status_code=201)
+def attach_label(
+    request: Request,
+    ticket_id: int,
+    label_in: LabelCreate,
+    service: LabelService = Depends(get_label_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> LabelRead | Response:
+    """Attach a label to a ticket by name, creating the label on demand."""
+    if not ticket_service.get_ticket(ticket_id):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    try:
+        label = service.attach(ticket_id, label_in.name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    # HTMX-aware: the Add Label modal swaps the refreshed labels section in
+    # place (same pattern as the links section).
+    if request.headers.get("HX-Request"):
+        from jackrabbit.web import _labels_section_response
+
+        return _labels_section_response(request, ticket_id, ticket_service, service)
+    return LabelRead.model_validate(label)
+
+
+@router.delete("/tickets/{ticket_id}/labels/{label_id}", status_code=204, response_model=None)
+def detach_label(
+    request: Request,
+    ticket_id: int,
+    label_id: int,
+    service: LabelService = Depends(get_label_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> Response:
+    """Detach a label from a ticket."""
+    if not ticket_service.get_ticket(ticket_id):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if not service.detach(ticket_id, label_id):
+        raise HTTPException(status_code=404, detail="Label not found for this ticket")
+
+    # HTMX-aware: the chip's remove button swaps the refreshed labels section.
+    if request.headers.get("HX-Request"):
+        from jackrabbit.web import _labels_section_response
+
+        return _labels_section_response(request, ticket_id, ticket_service, service)
+    return Response(status_code=204)

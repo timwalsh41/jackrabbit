@@ -1,0 +1,43 @@
+{# Chip input for a ticket's labels (used by the create and edit forms).
+
+   Typed text is committed as a chip on Enter; the hidden `labels` input holds
+   the ticket's label names, comma-separated, so the form submits them. #}
+{% with field_id = field_id | default("labels"), current_labels = current_labels | default([]), label_suggestions = label_suggestions | default([]) %}
+<div class="labels-field" data-labels-field>
+    <label for="{{ field_id }}-input" class="block text-sm font-medium text-gray-700 mb-1">Labels</label>
+
+    <div class="flex flex-wrap gap-2 mb-2" data-label-chips>
+        {% for label in current_labels %}
+        <span class="label-chip inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium text-white"
+              data-label-name="{{ label.name }}"
+              style="background-color: {{ label.color }}">
+            <span class="label-chip-name">{{ label.name }}</span>
+            <button type="button"
+                    class="label-chip-remove opacity-70 hover:opacity-100"
+                    data-label-remove
+                    title="Remove label"
+                    aria-label="Remove label {{ label.name }}">×</button>
+        </span>
+        {% endfor %}
+    </div>
+
+    <input type="text"
+           id="{{ field_id }}-input"
+           data-label-input
+           list="{{ field_id }}-suggestions"
+           autocomplete="off"
+           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+           placeholder="Type a label and press Enter...">
+    <datalist id="{{ field_id }}-suggestions">
+        {% for suggestion in label_suggestions %}
+        <option value="{{ suggestion.name }}"></option>
+        {% endfor %}
+    </datalist>
+
+    <p class="mt-1 text-xs text-gray-500">Press Enter to add a label. A label that does not exist yet is created.</p>
+    <div data-label-error class="hidden mt-1 text-xs text-red-700" role="alert"></div>
+
+    {# The submitted value: the ticket's label names, comma-separated. #}
+    <input type="hidden" name="labels" data-label-values value="{{ current_labels | map(attribute='name') | join(',') }}">
+</div>
+{% endwith %}

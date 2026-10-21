@@ -21,6 +21,7 @@
  */
 #ticket-modal:empty,
 #sprint-modal:empty,
-#link-modal-container:empty {
+#link-modal-container:empty,
+#label-modal-container:empty {
   display: none;
 }
