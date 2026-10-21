@@ -352,10 +352,13 @@ class TestBacklogFiltersSurviveSortingAndPaging:
         page.wait_for_timeout(200)
         expect(page.locator("text=No tickets found")).to_be_visible()
 
-        # A window that ended yesterday excludes them just as well.
+        # A window that ended before any ticket could have been created
+        # excludes them just as well. The bound is absolute on purpose: the
+        # e2e server can run against a database that also holds tickets
+        # created on earlier days, and "yesterday" would keep those.
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.fill("input[name='created_before']", (date.today() - timedelta(days=1)).isoformat())
+        page.fill("input[name='created_before']", "2000-01-01")
         self._apply(page)
         expect(page.locator("text=No tickets found")).to_be_visible()
 
