@@ -23,7 +23,13 @@ from jackrabbit.models import (
     TicketType,
 )
 from jackrabbit.schemas import ProjectCreate, ProjectUpdate
-from jackrabbit.services import LinkService, ProjectService, SprintService, TicketService
+from jackrabbit.services import (
+    LabelService,
+    LinkService,
+    ProjectService,
+    SprintService,
+    TicketService,
+)
 
 router = APIRouter()
 
@@ -62,6 +68,10 @@ def get_link_service(session: Session = Depends(get_session)) -> LinkService:
     return LinkService(session)
 
 
+def get_label_service(session: Session = Depends(get_session)) -> LabelService:
+    return LabelService(session)
+
+
 @router.get("/")
 async def index(request: Request) -> RedirectResponse:
     """Redirect to the backlog (spec Web Routes: GET / -> /backlog)."""
@@ -75,6 +85,7 @@ async def ticket_new(
     ticket_service: TicketService = Depends(get_ticket_service),
     project_service: ProjectService = Depends(get_project_service),
     sprint_service: SprintService = Depends(get_sprint_service),
+    label_service: LabelService = Depends(get_label_service),
 ) -> HTMLResponse:
     projects = project_service.list_projects()
     sprints = sprint_service.list_sprints()
@@ -101,6 +112,8 @@ async def ticket_new(
             "action": "/api/v1/tickets",
             "TicketType": TicketType,
             "Priority": Priority,
+            "current_labels": [],
+            "label_suggestions": label_service.list_labels_in_use(),
         },
     )
 
@@ -112,6 +125,7 @@ async def ticket_edit(
     ticket_service: TicketService = Depends(get_ticket_service),
     project_service: ProjectService = Depends(get_project_service),
     sprint_service: SprintService = Depends(get_sprint_service),
+    label_service: LabelService = Depends(get_label_service),
 ) -> HTMLResponse:
     ticket = ticket_service.get_ticket(ticket_id)
     if not ticket:
@@ -119,6 +133,8 @@ async def ticket_edit(
 
     projects = project_service.list_projects()
     sprints = sprint_service.list_sprints()
+    current_labels = label_service.labels_for_ticket(ticket_id)
+    label_suggestions = label_service.list_labels_in_use()
 
     # HTMX request (Edit button in a ticket row): return the modal partial
     # whose form hx-patches the API and swaps the updated row back in place.
@@ -131,6 +147,8 @@ async def ticket_edit(
                 "action": f"/api/v1/tickets/{ticket_id}",
                 "TicketType": TicketType,
                 "Priority": Priority,
+                "current_labels": current_labels,
+                "label_suggestions": label_suggestions,
             },
         )
 
@@ -146,6 +164,8 @@ async def ticket_edit(
             "TicketType": TicketType,
             "Priority": Priority,
             "TicketStatus": TicketStatus,
+            "current_labels": current_labels,
+            "label_suggestions": label_suggestions,
         },
     )
 
@@ -320,6 +340,63 @@ async def ticket_link_modal(
             "LinkType": LinkType,
             "TicketType": TicketType,
             "TicketStatus": TicketStatus,
+        },
+    )
+
+
+# Label web routes
+def _labels_section_response(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService,
+    label_service: LabelService,
+) -> HTMLResponse:
+    """Render the labels section partial (shared by the GET route and the
+    HTMX-aware attach/detach endpoints, which swap this section in place)."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    return templates.TemplateResponse(
+        request,
+        "ticket_labels_section.html",
+        {
+            "ticket": ticket,
+            "labels": label_service.labels_for_ticket(ticket_id),
+            "suggestions": label_service.list_labels_in_use(),
+        },
+    )
+
+
+@router.get("/tickets/{ticket_id}/labels", response_class=HTMLResponse)
+async def ticket_labels_section(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    label_service: LabelService = Depends(get_label_service),
+) -> HTMLResponse:
+    """The ticket page's labels section: chips, remove buttons, add button."""
+    return _labels_section_response(request, ticket_id, ticket_service, label_service)
+
+
+@router.get("/tickets/{ticket_id}/labels/modal", response_class=HTMLResponse)
+async def ticket_label_modal(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    label_service: LabelService = Depends(get_label_service),
+) -> HTMLResponse:
+    """Modal for adding a label, offering the labels already in use."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    return templates.TemplateResponse(
+        request,
+        "ticket_label_modal.html",
+        {
+            "ticket": ticket,
+            "suggestions": label_service.list_labels_in_use(),
         },
     )
 

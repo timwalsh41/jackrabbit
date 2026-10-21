@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, time
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -10,12 +11,15 @@ from urllib.parse import urlparse
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
+from jackrabbit.labels import normalize_label_name
 from jackrabbit.models import (
+    Label,
     LinkType,
     Priority,
     Project,
     Sprint,
     Ticket,
+    TicketLabel,
     TicketLink,
     TicketStatus,
     TicketType,
@@ -1260,3 +1264,196 @@ class LinkService:
                 )
             ).all()
         )
+
+
+class LabelService:
+    """Owns the label vocabulary and the labels attached to tickets (ADR-0024).
+
+    Labels are global: they belong to no project and to no ticket type, and
+    any ticket may carry any number of them. Identity is case-insensitive —
+    the identity key is the lower-cased name — while the display name keeps
+    the spelling that was first typed.
+    """
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    # -- naming -----------------------------------------------------------
+
+    def normalize_name(self, name: str) -> str:
+        """Trim and validate a label name (raises ValueError with a reason)."""
+        return normalize_label_name(name)
+
+    # -- registry ---------------------------------------------------------
+
+    def get_label(self, label_id: int) -> Label | None:
+        return self.session.get(Label, label_id)
+
+    def find_by_name(self, name: str) -> Label | None:
+        """Find a label by name, case-insensitively."""
+        name_key = normalize_label_name(name).lower()
+        return self.session.exec(select(Label).where(Label.name_key == name_key)).first()
+
+    def find_or_create(self, name: str) -> tuple[Label, bool]:
+        """Find a label by name, creating it if it does not exist yet.
+
+        Returns:
+            A ``(label, created)`` tuple. ``created`` is False when an
+            existing label was found, so its first spelling is preserved.
+        """
+        display_name = normalize_label_name(name)
+        name_key = display_name.lower()
+
+        existing = self.session.exec(select(Label).where(Label.name_key == name_key)).first()
+        if existing:
+            return existing, False
+
+        label = Label(name=display_name, name_key=name_key)
+        self.session.add(label)
+        try:
+            self.session.commit()
+        except IntegrityError:
+            # A concurrent writer created the same label first: the unique
+            # constraint turns the race into an IntegrityError, and the
+            # already-existing label is the correct result.
+            self.session.rollback()
+            existing = self.session.exec(select(Label).where(Label.name_key == name_key)).first()
+            if existing:
+                return existing, False
+            raise
+        self.session.refresh(label)
+        return label, True
+
+    def list_labels(self) -> list[Label]:
+        """The whole registry, including labels no ticket carries."""
+        return list(self.session.exec(select(Label).order_by(Label.name_key)).all())
+
+    def list_labels_with_usage(self) -> list[dict]:
+        """The registry with a usage count (tickets carrying the label)."""
+        counts: dict[int, int] = {}
+        rows = self.session.exec(
+            select(TicketLabel.label_id, func.count(TicketLabel.id)).group_by(TicketLabel.label_id)  # type: ignore[arg-type]  # type: ignore[arg-type]
+        ).all()
+        for row in rows:
+            counts[row[0]] = row[1]
+        return [
+            {"label": label, "usage_count": counts.get(label.id or 0, 0)}
+            for label in self.list_labels()
+        ]
+
+    def list_labels_in_use(self) -> list[Label]:
+        """The labels at least one ticket carries (offered as suggestions)."""
+        used = {
+            entry["label"].id for entry in self.list_labels_with_usage() if entry["usage_count"]
+        }
+        return [label for label in self.list_labels() if label.id in used]
+
+    # -- attachments ------------------------------------------------------
+
+    def attach(self, ticket_id: int, name: str) -> Label:
+        """Attach a label to a ticket, creating the label on demand.
+
+        Attaching a label the ticket already carries is a no-op.
+        """
+        label, _ = self.find_or_create(name)
+        self._attach_label(ticket_id, label)
+        return label
+
+    def _attach_label(self, ticket_id: int, label: Label) -> None:
+        existing = self.session.exec(
+            select(TicketLabel).where(
+                TicketLabel.ticket_id == ticket_id,
+                TicketLabel.label_id == label.id,
+            )
+        ).first()
+        if existing:
+            return
+
+        link = TicketLabel(ticket_id=ticket_id, label_id=cast(int, label.id))
+        self.session.add(link)
+        try:
+            self.session.commit()
+        except IntegrityError:
+            # Concurrent attach of the same pair: the unique constraint makes
+            # it an IntegrityError, and "already attached" is the right result.
+            self.session.rollback()
+        self.session.refresh(label)
+
+    def detach(self, ticket_id: int, label_id: int) -> bool:
+        """Detach a label from a ticket. Returns False if it was not attached."""
+        link = self.session.exec(
+            select(TicketLabel).where(
+                TicketLabel.ticket_id == ticket_id,
+                TicketLabel.label_id == label_id,
+            )
+        ).first()
+        if not link:
+            return False
+        self.session.delete(link)
+        self.session.commit()
+        return True
+
+    def replace(self, ticket_id: int, names: Sequence[str]) -> list[Label]:
+        """Replace a ticket's whole set of labels.
+
+        Every name is validated first, so an invalid name leaves the ticket's
+        labels untouched. Names that do not exist yet are created.
+        """
+        display_names = [normalize_label_name(name) for name in names]
+
+        wanted: list[Label] = []
+        seen_keys: set[str] = set()
+        for display_name in display_names:
+            name_key = display_name.lower()
+            if name_key in seen_keys:
+                continue
+            seen_keys.add(name_key)
+            label, _ = self.find_or_create(display_name)
+            wanted.append(label)
+
+        wanted_ids = {cast(int, label.id) for label in wanted}
+        current = self.session.exec(
+            select(TicketLabel).where(TicketLabel.ticket_id == ticket_id)
+        ).all()
+        for link in current:
+            if link.label_id not in wanted_ids:
+                self.session.delete(link)
+
+        attached_ids = {link.label_id for link in current if link.label_id in wanted_ids}
+        for label in wanted:
+            label_id = cast(int, label.id)
+            if label_id in attached_ids:
+                continue
+            self.session.add(TicketLabel(ticket_id=ticket_id, label_id=label_id))
+
+        self.session.commit()
+        return wanted
+
+    # -- reading ----------------------------------------------------------
+
+    def labels_for_ticket(self, ticket_id: int) -> list[Label]:
+        """The labels attached to a ticket, in the order they were attached."""
+        return list(
+            self.session.exec(
+                select(Label)
+                .join(TicketLabel, TicketLabel.label_id == Label.id)  # type: ignore[arg-type]
+                .where(TicketLabel.ticket_id == ticket_id)
+                .order_by(TicketLabel.id)  # type: ignore[arg-type]
+            ).all()
+        )
+
+    def labels_for_tickets(self, ticket_ids: Sequence[int]) -> dict[int, list[Label]]:
+        """Labels for many tickets at once (avoids a query per ticket)."""
+        ids = list(ticket_ids)
+        if not ids:
+            return {}
+        result: dict[int, list[Label]] = {ticket_id: [] for ticket_id in ids}
+        rows = self.session.exec(
+            select(TicketLabel, Label)
+            .join(Label, TicketLabel.label_id == Label.id)  # type: ignore[arg-type]
+            .where(TicketLabel.ticket_id.in_(ids))  # type: ignore[attr-defined]
+            .order_by(TicketLabel.ticket_id, TicketLabel.id)  # type: ignore[arg-type]
+        ).all()
+        for link, label in rows:
+            result.setdefault(link.ticket_id, []).append(label)
+        return result

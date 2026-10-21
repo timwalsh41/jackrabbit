@@ -1,0 +1,42 @@
+{# Labels section for the ticket detail page #}
+<div class="space-y-4" id="labels-section">
+    <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-gray-900">Labels</h2>
+        <button
+            class="btn btn-primary btn-sm"
+            hx-get="/tickets/{{ ticket.id }}/labels/modal"
+            hx-target="#label-modal-container"
+            hx-swap="innerHTML"
+        >
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Add Label
+        </button>
+    </div>
+
+    {% if not labels %}
+    <p class="text-sm text-gray-500" id="no-labels-hint">No labels yet. Click "Add Label" to categorise this ticket.</p>
+    {% else %}
+    <div class="flex flex-wrap gap-2" id="ticket-labels">
+        {% for label in labels %}
+        <span class="label-chip inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium text-white"
+              data-label-id="{{ label.id }}"
+              data-label-name="{{ label.name }}"
+              style="background-color: {{ label.color }}">
+            <span class="label-chip-name">{{ label.name }}</span>
+            <button type="button"
+                    class="label-chip-remove opacity-70 hover:opacity-100"
+                    title="Remove label"
+                    aria-label="Remove label {{ label.name }}"
+                    hx-delete="/api/v1/tickets/{{ ticket.id }}/labels/{{ label.id }}"
+                    hx-target="#labels-section"
+                    hx-swap="outerHTML"
+                    hx-confirm="Remove the label {{ label.name }}?">×</button>
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div id="label-modal-container"></div>
+</div>
