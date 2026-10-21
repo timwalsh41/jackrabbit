@@ -35,11 +35,13 @@ Batch related `read`/`bash` calls. Avoid re-reading files within a session — c
 
 ## Issue tracker
 
-Local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues tracked as Jackrabbit tickets (prod instance, project `JRB`; epics for specs, stories for implementation stages). See `docs/agents/issue-tracker.md`.
 
 ## Triage labels
 
-Default canonical labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+Default canonical labels (needs-triage, needs-info, ready-for-agent, ready-for-human,
+wontfix), recorded as a `**TRIAGE_STATUS**:` keyword in the ticket description since
+Jackrabbit has no labels. See `docs/agents/triage-labels.md`.
 
 ## Domain docs
 
