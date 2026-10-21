@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from jackrabbit.database import get_session
+from jackrabbit.labels import parse_label_ids, parse_label_match
 from jackrabbit.markdown import render_markdown
 from jackrabbit.models import (
     LinkType,
@@ -458,6 +459,22 @@ def _parse_optional_enum[E: StrEnum](
         raise HTTPException(status_code=422, detail=f"{field} must be one of: {valid}") from e
 
 
+def _parse_label_ids(values: list[str]) -> list[int]:
+    """Parse the label ids of the label filter (""/absent means "no filter")."""
+    try:
+        return parse_label_ids(values)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+def _parse_label_match(value: str) -> str:
+    """Parse the match mode of the label filter ("all" or "any")."""
+    try:
+        return parse_label_match(value)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
 def _build_backlog_context(
     ticket_service: TicketService,
     project_service: ProjectService,
@@ -474,6 +491,8 @@ def _build_backlog_context(
     order: str,
     page: int,
     page_size: int,
+    label_ids: list[int] | None = None,
+    label_match: str = "all",
     project: Project | None = None,
 ) -> dict:
     """Shared context builder for /backlog and /projects/{id}/tickets."""
@@ -488,6 +507,8 @@ def _build_backlog_context(
         q=q,
         created_after=created_after,
         created_before=created_before,
+        label_ids=label_ids or [],
+        label_match=label_match,
         sort=sort,
         order=order,
         page=page,
@@ -497,6 +518,14 @@ def _build_backlog_context(
 
     projects = project_service.list_projects()
     sprints = sprint_service.list_sprints()
+
+    # The labels in use are offered in the filter panel, and every listed
+    # ticket shows the labels it carries.
+    label_service = LabelService(ticket_service.session)
+    labels_in_use = label_service.list_labels_in_use()
+    labels_by_ticket = label_service.labels_for_tickets(
+        [cast(int, ticket.id) for ticket in tickets if ticket.id is not None]
+    )
 
     # Find UNS project for default selection
     uns_project = project_service.get_project_by_prefix("UNS")
@@ -509,6 +538,8 @@ def _build_backlog_context(
         "total_pages": total_pages,
         "projects": projects,
         "sprints": sprints,
+        "labels_in_use": labels_in_use,
+        "labels_by_ticket": labels_by_ticket,
         "uns_project_id": uns_project.id if uns_project else None,
         "current_filters": {
             "project_id": project_id,
@@ -519,6 +550,8 @@ def _build_backlog_context(
             "q": q,
             "created_after": created_after,
             "created_before": created_before,
+            "label_ids": list(label_ids or []),
+            "label_match": label_match,
             "sort": sort,
             "order": order,
         },
@@ -526,6 +559,9 @@ def _build_backlog_context(
         "TicketType": TicketType,
         "Priority": Priority,
         "project": project,
+        # The backlog's own requests (filter, sort, page) stay in the view
+        # they were started from: the project-scoped view keeps its scope.
+        "backlog_url": f"/projects/{project.id}/tickets" if project else "/backlog",
     }
 
 
@@ -540,6 +576,8 @@ async def backlog(
     q: str = Query(""),
     created_after: str = Query(""),
     created_before: str = Query(""),
+    label_ids: list[str] = Query(default=[]),
+    label_match: str = Query("all"),
     sort: str = Query("number"),
     order: str = Query("desc"),
     page: int = Query(1),
@@ -561,6 +599,8 @@ async def backlog(
         q=q or None,
         created_after=_parse_optional_date(created_after, "created_after"),
         created_before=_parse_optional_date(created_before, "created_before"),
+        label_ids=_parse_label_ids(label_ids),
+        label_match=_parse_label_match(label_match),
         sort=sort,
         order=order,
         page=page,
@@ -679,6 +719,8 @@ async def project_tickets(
     q: str = Query(""),
     created_after: str = Query(""),
     created_before: str = Query(""),
+    label_ids: list[str] = Query(default=[]),
+    label_match: str = Query("all"),
     sort: str = Query("number"),
     order: str = Query("desc"),
     page: int = Query(1),
@@ -703,6 +745,8 @@ async def project_tickets(
         q=q or None,
         created_after=_parse_optional_date(created_after, "created_after"),
         created_before=_parse_optional_date(created_before, "created_before"),
+        label_ids=_parse_label_ids(label_ids),
+        label_match=_parse_label_match(label_match),
         sort=sort,
         order=order,
         page=page,
