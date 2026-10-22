@@ -6,7 +6,7 @@ Separate from SQLModel table classes to maintain API-First design.
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 from jackrabbit.models import (
     LinkType,
@@ -327,6 +327,7 @@ class TicketReadWithDetails(TicketRead):
     links: list["TicketLinkRead"] = []
     transitions: list[dict] = []
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def full_id(self) -> str:
         return f"{self.project_prefix}-{self.number:03d}"

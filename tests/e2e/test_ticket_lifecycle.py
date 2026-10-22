@@ -12,6 +12,28 @@ from playwright.sync_api import Page, expect
 class TestTicketLifecycle:
     """Tests for the complete ticket lifecycle flow."""
 
+    def test_ticket_title_shows_full_id_not_raw_number(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Verify that the ticket view displays the full ID (e.g., MSC-006)
+        and does not fall back to the raw database number (e.g., 'Ticket #6')."""
+        ticket = make_ticket(status="Open")
+        tid = ticket["id"]
+
+        page.goto(f"{base_url}/tickets/{tid}")
+        page.wait_for_load_state("networkidle")
+
+        # Wait for ticket content to load via HTMX
+        page.wait_for_selector("#ticket-content .space-y-6", state="visible", timeout=10000)
+
+        title_text = page.inner_text("#ticket-title")
+        assert "Ticket #" not in title_text, (
+            f"Raw number fallback 'Ticket #' was displayed: {title_text}"
+        )
+
+        # The title should use the full ID format (Prefix-Number)
+        assert "-" in title_text, f"Full ID format (Prefix-Number) was not displayed: {title_text}"
+
     def test_create_ticket(self, page: Page, base_url: str, seeded_projects):
         """Test creating a ticket via the Backlog UI."""
         unique_title = "UI Created Ticket for E2E"

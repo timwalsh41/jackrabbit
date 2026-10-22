@@ -339,7 +339,6 @@
                 <!-- Header with status and actions -->
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
                     <div>
-                        <h2 class="text-xl font-semibold text-gray-900"><span class="ticket-id">${fullId}</span>: ${escapeHtml(ticket.title)}</h2>
                         <div class="flex items-center gap-3 mt-2 flex-wrap">
                             ${statusBadge}
                             <span class="text-sm text-gray-500">${ticket.type} • ${ticket.priority}${ticket.story_points ? ` • ${ticket.story_points} pts` : ''}</span>
@@ -443,8 +442,14 @@
             // Parse the ticket data from the response
             try {
                 const ticket = JSON.parse(evt.detail.xhr.responseText);
-                document.getElementById('ticket-title').textContent = ticket.full_id || `Ticket #${ticket.id}`;
+                // Update the ticket ID and meta; the raw database number must
+                // never be displayed, so there is no fallback to `Ticket #id`.
+                const idEl = document.querySelector('#ticket-title .ticket-id');
+                if (idEl && ticket.full_id) {
+                    idEl.textContent = ticket.full_id;
+                }
                 document.getElementById('ticket-meta').textContent = `${ticket.type} • ${ticket.status} • ${ticket.priority}`;
+                // Render the ticket fields.
                 document.getElementById('ticket-content').innerHTML = renderTicket(ticket);
                 // Process new HTMX elements in the rendered content
                 htmx.process(document.getElementById('ticket-content'));
