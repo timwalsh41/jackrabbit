@@ -22,4 +22,6 @@ Prefer these commands over hand-assembled ones; they're the same ones `.github/w
 ## Pull requests
 
 - **PR surface:** yes
-- **How to open one:** `gh-axi pr create --title "..." --body-file <file> --base main --head <integration-branch>` (`gh-axi` is the repo's `gh` wrapper on `PATH`). PRs are opened only once the full-suite gate is green on the integration branch.
+- **How to open one:** `npx -y gh-axi pr create --title "..." --body-file <file> --base main --head <integration-branch>`. The `gh-axi` skill wraps the `gh` CLI; it is invoked through `npx`, not as a bare binary on `PATH`. It needs `gh >= 2.99.0` installed.
+- **Before opening one:** the head branch must exist on the remote — `git push -u origin <integration-branch>` first, or the request cannot be created.
+- PRs are opened only once the full-suite gate is green on the integration branch.

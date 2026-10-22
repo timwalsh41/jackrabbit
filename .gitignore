@@ -1,8 +1,10 @@
 # Agent config (local)
+# NOTE: docs/agents/ is deliberately NOT ignored. The tracked AGENTS.md points
+# at those files, and the subagent roles read them from their own worktrees,
+# where a gitignored file does not exist.
 .agents/
 .pi/
 skills-lock.json
-docs/agents
 
 # Bytecode
 __pycache__/
