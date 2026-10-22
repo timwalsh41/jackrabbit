@@ -5,6 +5,7 @@
 - Prefer established reputable third party libraries to building functionality from scratch
 - Ensure for any new feature or fix that we add appropriate and complementary unit and end-to-end test coverage
 - Fast-forward merges only, no merge commits
+- Use "Conventional Commit" style messages for commits and PR titles
 - Refer to `docs/CODING_STANDARDS.md` for project standards
 
 # Tools and utilities
