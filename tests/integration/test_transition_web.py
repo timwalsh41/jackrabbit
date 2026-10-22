@@ -52,10 +52,36 @@ class TestGuardFailureErrorContract:
         assert isinstance(detail, str)
         assert "Approach is required" in detail
 
-    async def test_invalid_pr_url_guard_returns_400_with_detail(
+    async def test_ready_for_review_without_pr_url_succeeds(
         self, client_with_seeds, client: httpx.AsyncClient
     ):
-        """Groomed -> In Progress ... -> Ready for Review guard message is surfaced."""
+        """In Progress -> Ready for Review succeeds without a PR URL (optional)."""
+        ticket = await _create_ticket(client)
+        # Drive to In Progress via API
+        await client.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={
+                "to_status": "Groomed",
+                "approach": "a",
+                "files_to_change": "f",
+                "test_plan": "t",
+                "validation_steps": "v",
+            },
+        )
+        await client.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "In Progress", "branch_name": "feature/test-001"},
+        )
+        response = await client.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Ready for Review"},
+        )
+        assert response.status_code == 200
+
+    async def test_invalid_pr_url_still_returns_400_with_detail(
+        self, client_with_seeds, client: httpx.AsyncClient
+    ):
+        """A supplied-but-invalid PR URL is still rejected when provided."""
         ticket = await _create_ticket(client)
         # Drive to In Progress via API
         await client.post(

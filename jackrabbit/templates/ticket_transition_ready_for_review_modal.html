@@ -28,7 +28,7 @@
                     <div class="space-y-4">
                         <div>
                             <label for="pr_url" class="block text-sm font-medium text-gray-700 mb-1">
-                                PR URL <span class="text-red-500">*</span>
+                                PR URL
                             </label>
                             <input type="url" 
                                    id="pr_url" 
@@ -36,7 +36,6 @@
                                    value="{{ ticket.pr_url or '' }}"
                                    placeholder="https://github.com/org/repo/pull/123"
                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border"
-                                   required
                                    autocomplete="off">
                             <p class="mt-1 text-xs text-gray-500">Enter the full URL to the Pull Request (GitHub, GitLab, Bitbucket, Azure DevOps)</p>
                         </div>

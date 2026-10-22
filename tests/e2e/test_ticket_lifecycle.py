@@ -244,10 +244,10 @@ class TestTicketLifecycle:
         # In Progress: Ready for Review and Rejected only
         assert_invalid_absent("Complete")
 
-        # --- In Progress -> Ready for Review (PR URL required) ---
+        # --- In Progress -> Ready for Review (PR URL optional, can submit empty) ---
         page.click("button:has-text('Ready for Review')")
         page.wait_for_selector("#review-form", state="visible", timeout=10000)
-        page.fill("input[name='pr_url']", "https://github.com/test/repo/pull/42")
+        # Leave the PR URL field empty: the transition must not gate on it.
         page.click("button:has-text('Submit for Review')")
         expect(
             page.locator("#ticket-content span:has-text('Ready for Review')").first

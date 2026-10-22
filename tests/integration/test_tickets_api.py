@@ -276,10 +276,11 @@ class TestPatchStatusIsGuarded:
         assert response.status_code == 400
         assert "Cannot skip statuses" in response.json()["detail"]
 
-    async def test_patch_ready_for_review_without_pr_rejected_400(
+    async def test_patch_ready_for_review_without_pr_succeeds(
         self, client_with_seeds: AsyncClient, two_projects
     ):
-        """The PR-URL guard itself (In Progress, no PR -> Ready for Review)."""
+        """The PR URL is optional: In Progress -> Ready for Review succeeds
+        via PATCH with no PR URL set (guard no longer gates on it)."""
         created = await _create_ticket(
             client_with_seeds,
             two_projects["web"],
@@ -294,8 +295,9 @@ class TestPatchStatusIsGuarded:
         response = await client_with_seeds.patch(
             f"/api/v1/tickets/{created['id']}", json={"status": "Ready for Review"}
         )
-        assert response.status_code == 400
-        assert "PR URL is required" in response.json()["detail"]
+        assert response.status_code == 200, response.text
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        assert data["status"] == "Ready for Review"
 
     async def test_patch_to_rejected_then_restore(
         self, client_with_seeds: AsyncClient, two_projects

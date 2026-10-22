@@ -148,19 +148,22 @@ class TestCanTransition:
         assert can
         assert error is None
 
-    def test_in_progress_to_ready_for_review_requires_pr_url(self, ticket_service, test_ticket):
-        """In Progress -> Ready for Review requires pr_url."""
+    def test_in_progress_to_ready_for_review_pr_url_optional(self, ticket_service, test_ticket):
+        """In Progress -> Ready for Review does not require pr_url (optional field).
+
+        An empty/missing PR URL must not gate the transition. If a PR URL is
+        provided, it is still validated as an HTTP/HTTPS URL."""
         test_ticket.status = TicketStatus.IN_PROGRESS
         test_ticket.branch_name = "feature/test"
         ticket_service.session.add(test_ticket)
         ticket_service.session.commit()
 
-        # No PR URL - should fail
+        # No PR URL - transition is allowed (PR URL is optional)
         can, error = ticket_service.can_transition(test_ticket, TicketStatus.READY_FOR_REVIEW)
-        assert not can
-        assert "PR URL is required" in error
+        assert can
+        assert error is None
 
-        # Invalid URL format
+        # Invalid URL format - still rejected when a URL is supplied
         test_ticket.pr_url = "not-a-url"
         ticket_service.session.add(test_ticket)
         ticket_service.session.commit()

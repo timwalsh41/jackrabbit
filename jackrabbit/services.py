@@ -362,12 +362,15 @@ class TicketService:
                         "hyphens, underscores, and slashes"
                     )
         elif to_status == TicketStatus.READY_FOR_REVIEW and from_status == TicketStatus.IN_PROGRESS:
-            if not ticket.pr_url or not ticket.pr_url.strip():
-                return "PR URL is required to transition to Ready for Review"
-            # Validate URL format
+            # PR URL is optional: an empty/missing URL must not gate the
+            # transition. Validate the format only when a URL is supplied.
             import re
 
-            if not re.match(r"^https?://.+", ticket.pr_url.strip()):
+            if (
+                ticket.pr_url
+                and ticket.pr_url.strip()
+                and not re.match(r"^https?://.+", ticket.pr_url.strip())
+            ):
                 return "PR URL must be a valid HTTP/HTTPS URL"
         elif to_status == TicketStatus.COMPLETE and from_status == TicketStatus.READY_FOR_REVIEW:
             # Guard: requires PR merged or Spike report accepted - this is manual confirmation
