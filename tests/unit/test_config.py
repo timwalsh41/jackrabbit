@@ -1,4 +1,11 @@
-"""Tests for Jackrabbit configuration."""
+"""Tests for Jackrabbit configuration.
+
+Hermeticity (JRB-006): the whole suite must not depend on the developer's
+local ``.env`` file. The autouse ``_hermetic_settings`` fixture in
+``tests/conftest.py`` disables ``env_file`` loading for every test, so
+``Settings()``/``get_settings()`` only read the OS environment (controlled
+by ``monkeypatch``) and their own defaults — never the local ``.env`` file.
+"""
 
 import pytest
 from jackrabbit.config import Settings, get_settings
@@ -47,6 +54,34 @@ def test_settings_invalid_environment() -> None:
     """Test that invalid environment raises error."""
     with pytest.raises(ValueError, match="environment must be one of"):
         Settings(environment="invalid")
+
+
+class TestHermeticAgainstLocalDotenv:
+    """Proof that the suite ignores a checkout's .env file (JRB-006).
+
+    The test-plan item: create a .env whose values differ from the defaults,
+    then check that settings still show the built-in defaults. Regression
+    context: the repo's real .env sets PORT=8081, which used to make
+    ``test_settings_defaults`` fail in any normal checkout.
+    """
+
+    def test_local_dotenv_is_ignored(self, tmp_path, monkeypatch) -> None:
+        # Clear env vars so only the .env file (not the ambient environment)
+        # could influence the result — and it must not.
+        for var in ("PORT", "LOG_LEVEL", "ENVIRONMENT", "DATABASE_URL", "DATA_DIR"):
+            monkeypatch.delenv(var, raising=False)
+        (tmp_path / ".env").write_text(
+            "PORT=9999\nLOG_LEVEL=ERROR\nENVIRONMENT=production\n"
+            "DATABASE_URL=sqlite:///./data/jackrabbit.db\n"
+        )
+        monkeypatch.chdir(tmp_path)  # env_file=".env" resolves against cwd
+
+        settings = Settings()
+        assert settings.port == 8080
+        assert settings.log_level == "INFO"
+        assert settings.environment == "development"
+        # The .env's database URL must not leak in either.
+        assert settings.database_url == "sqlite:///data/jackrabbit.db"
 
 
 class TestDatabaseUrlResolution:

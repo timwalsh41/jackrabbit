@@ -460,14 +460,18 @@ def test_server(tmp_path_factory: pytest.TempPathFactory) -> Generator[str, None
     data_dir = tmp_path_factory.mktemp("e2e-data")
     log_path = data_dir / "server.log"
 
-    # Inherit the ambient environment but drop anything that would steer the
-    # server onto a real database or a fixed port: DATABASE_URL outranks
-    # DATA_DIR in Settings precedence (see jackrabbit/config.py).
+    # Inherit the ambient environment, then pin the settings that would
+    # otherwise steer the server onto the developer's real database or a
+    # fixed port. Popping DATABASE_URL is not enough: pydantic-settings also
+    # reads the repo's .env file, so the server could still start against
+    # sqlite:///./data/jackrabbit.db (seen live in the JRB-001 run). Set the
+    # env var explicitly instead — env vars outrank dotenv files in Settings
+    # precedence (see jackrabbit/config.py).
     env = os.environ.copy()
-    env.pop("DATABASE_URL", None)
     env.update(
         {
             "DATA_DIR": str(data_dir),
+            "DATABASE_URL": f"sqlite:///{data_dir}/jackrabbit.db",
             "PORT": str(port),
             "ENVIRONMENT": "test",
             "LOG_LEVEL": "WARNING",
@@ -497,6 +501,20 @@ def test_server(tmp_path_factory: pytest.TempPathFactory) -> Generator[str, None
                 raise RuntimeError(
                     f"e2e test server failed to start on {url} "
                     f"(database under {data_dir}); server log:\n"
+                    f"{log_path.read_text(errors='replace')[-2000:]}"
+                )
+            # Hermeticity check (JRB-006): init_db() runs in the server's
+            # lifespan, so by the time /health answers the database must exist
+            # in the throwaway data dir. If it doesn't, the server's settings
+            # were redirected elsewhere (e.g. a .env we failed to outrank) and
+            # running the suite could mutate the developer's real database.
+            if not (data_dir / "jackrabbit.db").exists():
+                proc.terminate()
+                raise RuntimeError(
+                    f"e2e server is not using its throwaway database: expected "
+                    f"{data_dir}/jackrabbit.db to exist after startup. "
+                    f"Refusing to run tests against an unknown database; "
+                    f"server log:\n"
                     f"{log_path.read_text(errors='replace')[-2000:]}"
                 )
             yield url

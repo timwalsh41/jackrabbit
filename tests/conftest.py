@@ -25,6 +25,24 @@ from sqlmodel import Session, SQLModel, create_engine
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the whole suite hermetic to a developer's local .env (JRB-006).
+
+    ``Settings.model_config`` points ``env_file`` at the repo's ``.env``, so a
+    bare ``Settings()`` in any test would silently read local configuration
+    (a checkout that sets ``PORT=8081`` there made ``test_settings_defaults``
+    fail). Disable .env loading for the duration of every test: settings come
+    only from explicit kwargs and from environment variables the test itself
+    sets via ``monkeypatch``.
+
+    Applies to unit and integration tests here, and to in-process code in the
+    e2e tier. The e2e *server* runs in a subprocess and needs its own pin —
+    see ``tests/e2e/conftest.py::test_server``.
+    """
+    monkeypatch.setattr(Settings, "model_config", {**Settings.model_config, "env_file": None})
+
+
 # Override settings for testing
 @pytest.fixture(scope="session")
 def test_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
