@@ -104,3 +104,28 @@ class TestGuardFailureErrorContract:
         )
         assert response.status_code == 400
         assert "URL" in response.json()["detail"]
+
+
+class TestGroomedModalPrefill:
+    async def test_groomed_modal_prefills_gating_fields(self, client: httpx.AsyncClient):
+        """The Groomed transition modal pre-fills the gating fields with
+        the ticket's existing values."""
+        ticket = await _create_ticket(client)
+        # Patch the ticket to have values for the gating fields
+        patch_payload = {
+            "approach": "Existing approach",
+            "files_to_change": "Existing files",
+            "test_plan": "Existing test plan",
+            "validation_steps": "Existing validation steps",
+        }
+        response = await client.patch(f"/api/v1/tickets/{ticket['id']}", json=patch_payload)
+        assert response.status_code == 200, response.text
+
+        # Fetch the modal
+        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        assert response.status_code == 200
+        html = response.text
+        assert "Existing approach" in html
+        assert "Existing files" in html
+        assert "Existing test plan" in html
+        assert "Existing validation steps" in html
