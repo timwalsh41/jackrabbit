@@ -35,7 +35,7 @@
                                       rows="3"
                                       required
                                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border"
-                                      placeholder="Describe the implementation approach..."></textarea>
+                                      placeholder="Describe the implementation approach...">{{ ticket.approach }}</textarea>
                         </div>
                         
                         <div>
@@ -47,7 +47,7 @@
                                       rows="3"
                                       required
                                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border"
-                                      placeholder="List files that will be modified (one per line)..."></textarea>
+                                      placeholder="List files that will be modified (one per line)...">{{ ticket.files_to_change }}</textarea>
                         </div>
                         
                         <div>
@@ -59,7 +59,7 @@
                                       rows="3"
                                       required
                                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border"
-                                      placeholder="Describe how this will be tested..."></textarea>
+                                      placeholder="Describe how this will be tested...">{{ ticket.test_plan }}</textarea>
                         </div>
                         
                         <div>
@@ -71,7 +71,7 @@
                                       rows="3"
                                       required
                                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border"
-                                      placeholder="Step-by-step validation instructions..."></textarea>
+                                      placeholder="Step-by-step validation instructions...">{{ ticket.validation_steps }}</textarea>
                         </div>
                         
                         <div>
