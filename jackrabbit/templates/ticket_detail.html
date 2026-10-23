@@ -263,6 +263,8 @@
                 buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/in-progress/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
             } else if (t.forward && t.status === 'Ready for Review') {
                 buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/ready-for-review/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+            } else if (t.forward && t.status === 'Complete') {
+                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/complete/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
             } else {
                 // Direct (non-modal) transitions still POST JSON to the API —
                 // json-enc encodes the hx-vals object, the header keeps FastAPI happy.

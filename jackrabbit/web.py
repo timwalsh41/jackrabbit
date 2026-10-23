@@ -1012,6 +1012,26 @@ async def ticket_transition_ready_for_review_modal(
     )
 
 
+@router.get("/tickets/{ticket_id}/transition/complete/modal", response_class=HTMLResponse)
+async def ticket_transition_complete_modal(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> HTMLResponse:
+    """Modal for transitioning to Complete with a reason field."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    return templates.TemplateResponse(
+        request,
+        "ticket_transition_complete_modal.html",
+        {
+            "ticket": ticket,
+        },
+    )
+
+
 @router.get("/tickets/search", response_class=HTMLResponse)
 async def ticket_search(
     request: Request,

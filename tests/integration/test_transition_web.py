@@ -30,7 +30,7 @@ class TestTicketDetailErrorDisplay:
     async def test_transition_modals_have_error_container(self, client: httpx.AsyncClient):
         """Each guarded-transition modal has a #modal-error container."""
         ticket = await _create_ticket(client)
-        for slug in ("groomed", "in-progress", "ready-for-review"):
+        for slug in ("groomed", "in-progress", "ready-for-review", "complete"):
             response = await client.get(f"/tickets/{ticket['id']}/transition/{slug}/modal")
             assert response.status_code == 200, f"modal {slug} failed to render"
             assert 'id="modal-error"' in response.text, f"modal {slug} lacks #modal-error"
@@ -129,3 +129,28 @@ class TestGroomedModalPrefill:
         assert "Existing files" in html
         assert "Existing test plan" in html
         assert "Existing validation steps" in html
+
+
+class TestCompleteModal:
+    async def test_complete_modal_renders_with_reason_field(
+        self, client_with_seeds, client: httpx.AsyncClient
+    ):
+        """The Complete transition modal renders with a Reason field and the
+        error container, mirroring the other transition modals."""
+        ticket = await _create_ticket(client)
+        response = await client.get(f"/tickets/{ticket['id']}/transition/complete/modal")
+        assert response.status_code == 200
+        html = response.text
+        assert 'name="to_status" value="Complete"' in html
+        assert 'id="reason"' in html
+        assert 'id="modal-error"' in html
+
+    async def test_detail_page_uses_modal_for_complete_transition(
+        self, client_with_seeds, client: httpx.AsyncClient
+    ):
+        """The ticket detail page routes the Complete transition through the
+        modal (hx-get) instead of a browser prompt()."""
+        ticket = await _create_ticket(client)
+        response = await client.get(f"/ticket/{ticket['id']}")
+        assert response.status_code == 200
+        assert "/transition/complete/modal" in response.text

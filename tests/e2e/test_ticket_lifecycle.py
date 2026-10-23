@@ -154,10 +154,14 @@ class TestTicketLifecycle:
         page.goto(f"{base_url}/ticket/{tid}")
         page.wait_for_load_state("networkidle")
 
-        # Wait for transition buttons, click Complete button (non-modal transition)
+        # Wait for transition buttons, click Complete button (opens modal)
         page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
-        page.on("dialog", lambda d: d.accept("merged"))
         page.click("button:has-text('Complete')")
+        page.wait_for_selector("#complete-form", state="visible", timeout=10000)
+
+        # Fill the reason (optional) and submit
+        page.fill("#reason", "merged")
+        page.click("#complete-form button[type='submit']")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)
 
@@ -276,9 +280,11 @@ class TestTicketLifecycle:
         ).to_be_visible(timeout=10000)
         expect(page.locator("#transition-history")).to_contain_text("Ready for Review")
 
-        # --- Ready for Review -> Complete (merged confirm) ---
-        page.on("dialog", lambda d: d.accept("merged"))
+        # --- Ready for Review -> Complete (modal) ---
         page.click("button:has-text('Complete')")
+        page.wait_for_selector("#complete-form", state="visible", timeout=10000)
+        page.fill("#reason", "merged")
+        page.click("#complete-form button[type='submit']")
         expect(page.locator("#ticket-content span:has-text('Complete')").first).to_be_visible(
             timeout=10000
         )
