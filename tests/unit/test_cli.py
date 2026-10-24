@@ -1,6 +1,7 @@
 """Tests for the CLI entry point: bare `uv run server.py` must start the
-server (default to the server command), and CLI overrides must propagate to
-the fresh uvicorn process via environment variables."""
+server (default to the server command), CLI overrides must propagate to
+the fresh uvicorn process via environment variables, and command routing
+must use the kebab-case names typer registers."""
 
 import os
 from pathlib import Path
@@ -27,9 +28,40 @@ class TestMainDefaultsToServer:
     def test_nonempty_argv_forwarded(self, monkeypatch):
         calls: list[list[str]] = []
         monkeypatch.setattr(cli_module, "app", lambda args, **kwargs: calls.append(args))
-        monkeypatch.setattr("sys.argv", ["server.py", "init_db"])
+        monkeypatch.setattr("sys.argv", ["server.py", "init-db"])
         main()
-        assert calls == [["init_db"]]
+        assert calls == [["init-db"]]
+
+    def test_hyphenated_commands_not_swallowed_by_default_rule(self, monkeypatch):
+        """`server.py init-db` / `create-project` must reach the real commands."""
+        calls: list[list[str]] = []
+        monkeypatch.setattr(cli_module, "app", lambda args, **kwargs: calls.append(args))
+        main(["init-db"])
+        main(["create-project", "WEB", "Web"])
+        assert calls == [["init-db"], ["create-project", "WEB", "Web"]]
+
+    def test_bare_help_lists_all_commands(self, monkeypatch):
+        """`server.py --help` must show the app help, not `server --help`."""
+        calls: list[list[str]] = []
+        monkeypatch.setattr(cli_module, "app", lambda args, **kwargs: calls.append(args))
+        main(["--help"])
+        assert calls == [["--help"]]
+
+    def test_command_flags_still_default_to_server(self, monkeypatch):
+        """`--port 3000` is not a command name and must still prepend server."""
+        calls: list[list[str]] = []
+        monkeypatch.setattr(cli_module, "app", lambda args, **kwargs: calls.append(args))
+        main(["--port", "3000"])
+        assert calls == [["server", "--port", "3000"]]
+
+    def test_commands_set_matches_registered_command_names(self):
+        """Guard the invariant main() relies on: _COMMANDS names are exactly the
+        kebab-case command names typer registers (regression guard for the
+        init_db -> init-db mismatch where `server.py init-db` crashed)."""
+        import typer.main
+
+        click_cmd = typer.main.get_command(cli_module.app)
+        assert set(click_cmd.commands) == cli_module._COMMANDS
 
     def test_server_py_main_default(self, monkeypatch):
         """server.py's entry point calls main() with no args (bare invocation)."""
@@ -44,8 +76,8 @@ class TestMainDefaultsToServer:
     def test_explicit_args_passed_through(self, monkeypatch):
         calls: list[list[str]] = []
         monkeypatch.setattr(cli_module, "app", lambda args, **kwargs: calls.append(args))
-        main(["init_db"])
-        assert calls == [["init_db"]]
+        main(["init-db"])
+        assert calls == [["init-db"]]
 
 
 class TestEnvOverrides:

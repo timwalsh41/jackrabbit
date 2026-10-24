@@ -4,6 +4,10 @@ Ticket tracking and sprint management system.
 
 ## Quick Start
 
+Prerequisites: Python + [`uv`](https://docs.astral.sh/uv/). Install
+dependencies first with `uv sync` (or `make dev-install`, which also installs
+the Playwright browser and Node for the Tailwind build).
+
 ```bash
 # Copy example env file
 cp .env.example .env
@@ -43,13 +47,26 @@ already holds tickets it did not create (demo rows would consume real ticket
 serial numbers) or when `ENVIRONMENT` is anything other than
 `development`/`test`. `--force` overrides both.
 
+## Database management
+
+The Makefile wraps the database lifecycle:
+
+```bash
+make db-init    # Initialize the database
+make db-seed    # Load demo data
+make db-reset   # Wipe data/jackrabbit.db (plus WAL sidecars) and rebuild
+make migrate    # Run Alembic migrations to head
+```
+
 ## Configuration
 
 Configuration is loaded from `.env` file with CLI overrides:
 
 - `PORT` - Server port (default: 8080)
 - `DATA_DIR` - Data directory (default: ./data)
-- `DATABASE_URL` - Database URL (default: sqlite:///./data/jackrabbit.db)
+- `DATABASE_URL` - Database URL. When unset it is derived from `DATA_DIR`
+  (`sqlite:///<DATA_DIR>/jackrabbit.db`), so the database always lives in the
+  data directory; an explicit value wins.
 - `LOG_LEVEL` - Log level (default: INFO)
 - `ENVIRONMENT` - Environment (default: development)
 - `DEBUG_SQL` - Echo every SQL statement (default: false)

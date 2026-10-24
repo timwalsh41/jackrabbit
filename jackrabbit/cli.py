@@ -37,7 +37,10 @@ def apply_env_overrides(overrides: Mapping[str, str]) -> None:
         os.environ[key] = value
 
 
-_COMMANDS = {"server", "init_db", "create_project", "seed"}
+# Typer registers each command under its kebab-case name (init_db -> init-db,
+# create_project -> create-project), so the default-to-server rule in main()
+# must match the registered names, not the Python function names.
+_COMMANDS = {"server", "init-db", "create-project", "seed"}
 
 
 def main(args: list[str] | None = None) -> None:
@@ -46,10 +49,14 @@ def main(args: list[str] | None = None) -> None:
     Defaults to the ``server`` command when no arguments are given (bare
     ``uv run server.py`` starts the server — spec: Deployment) and also when
     the first argument is not a command name (e.g. ``server.py --port 8177``).
+    A bare ``--help`` is forwarded to the top-level app so it lists all
+    commands instead of falling through to ``server --help``.
     """
     argv = sys.argv[1:] if args is None else args
     if not argv:
         argv = ["server"]
+    elif argv[0] == "--help":
+        pass  # forward: typer's app-level help lists every command
     elif argv[0] not in _COMMANDS:
         argv = ["server", *argv]
     app(args=argv)
