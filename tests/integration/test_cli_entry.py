@@ -7,6 +7,7 @@ must initialize the database rather than crash with "extra argument(s)", and
 """
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -14,12 +15,30 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+# ANSI escape sequences (CSI, e.g. the SGR color/style codes that Typer/Rich
+# emit when `FORCE_COLOR` or `GITHUB_ACTIONS` is set). GitHub Actions always sets
+# `GITHUB_ACTIONS=true`, so `server.py --help` colorizes its output even though
+# stdout is a pipe; that colorization splits option flags like `--port` across
+# escape spans, which breaks `assert "--port" in stdout`. We assert on content,
+# not formatting, so captured output is de-colored before any assertion.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Strip ANSI escape sequences so assertions match on content, not color."""
+    return _ANSI_RE.sub("", text)
+
+
 def _run(
     *args: str, cwd: Path | None = None, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run `server.py <args>` the way a user does: as a real subprocess."""
+    """Run `server.py <args>` the way a user does: as a real subprocess.
+
+    ANSI codes are stripped from the captured stdout/stderr so content
+    assertions are immune to color output (see ``_strip_ansi``).
+    """
     full_env = {**os.environ, **(env or {})}
-    return subprocess.run(
+    result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "server.py"), *args],
         capture_output=True,
         text=True,
@@ -27,6 +46,9 @@ def _run(
         env=full_env,
         timeout=120,
     )
+    result.stdout = _strip_ansi(result.stdout)
+    result.stderr = _strip_ansi(result.stderr)
+    return result
 
 
 class TestHelp:
@@ -39,7 +61,12 @@ class TestHelp:
             assert command in result.stdout, f"missing command '{command}' in --help output"
 
     def test_server_help_is_still_reachable(self) -> None:
-        result = _run("server", "--help")
+        # Reproduce GitHub Actions' colorizing locally: `GITHUB_ACTIONS=true` (set
+        # on every Actions runner) forces Typer/Rich to emit ANSI to the piped
+        # stdout, which splits the `--port` flag across escape spans. `_run` then
+        # de-colors the output, so the content assertion stays stable in both dev
+        # and CI.
+        result = _run("server", "--help", env={"FORCE_COLOR": "1"})
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "--port" in result.stdout
