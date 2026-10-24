@@ -1134,7 +1134,9 @@ async def ticket_detail(
     )
 
 
-def _fields_section_response(request: Request, ticket: Ticket) -> HTMLResponse:
+def _fields_section_response(
+    request: Request, ticket: Ticket, keep_groomed_open: bool = False
+) -> HTMLResponse:
     """Render the Description (markdown) + Groomed Fields section partial."""
     groomed_fields = [
         {"name": name, "label": label, "value": getattr(ticket, name) or ""}
@@ -1149,6 +1151,7 @@ def _fields_section_response(request: Request, ticket: Ticket) -> HTMLResponse:
             "groomed_fields": groomed_fields,
             "editable": editable,
             "show_groomed": editable or any(f["value"] for f in groomed_fields),
+            "keep_groomed_open": keep_groomed_open,
         },
     )
 
@@ -1232,7 +1235,7 @@ async def ticket_field_update(
         raise HTTPException(status_code=400, detail="value is required")
 
     updated = ticket_service.update_ticket(ticket, **{field_name: str(raw_value)})
-    return _fields_section_response(request, updated)
+    return _fields_section_response(request, updated, keep_groomed_open=True)
 
 
 def _sprint_section_response(
