@@ -35,4 +35,35 @@
   }
 
   document.addEventListener("htmx:configRequest", syncForm);
+
+  // "All" buttons on the backlog multi-selects: select every option in the
+  // target <select multiple> so the user can quickly pick the whole list for
+  // that field before clicking Filter. The target is the select's id, matched
+  // by the button's data-target attribute.
+  function selectAllIn(event) {
+    var btn = event.currentTarget;
+    var target = document.getElementById(btn.getAttribute("data-target"));
+    if (!target || !target.options) {
+      return;
+    }
+    for (var i = 0; i < target.options.length; i++) {
+      target.options[i].selected = true;
+    }
+  }
+
+  function bindAllButtons() {
+    document.querySelectorAll(".all-btn[data-target]").forEach(function (btn) {
+      // htmx may swap the table body in place; re-binding is idempotent.
+      btn.removeEventListener("click", selectAllIn);
+      btn.addEventListener("click", selectAllIn);
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindAllButtons);
+  } else {
+    bindAllButtons();
+  }
+  // Re-bind after every htmx swap, in case the form is re-rendered.
+  document.body.addEventListener("htmx:afterOnLoad", bindAllButtons);
 })();

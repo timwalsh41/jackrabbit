@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, time
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 from sqlalchemy import or_
@@ -505,13 +505,49 @@ class TicketService:
         self.session.commit()
         return True
 
+    def _apply_multi_select_filter(
+        self,
+        query,
+        count_query,
+        column,
+        single_value,
+        multi_values: Sequence | None,
+        filter_mode: Literal["include", "exclude"] = "include",
+    ):
+        """Apply a multi-select filter with include/exclude mode.
+
+        Returns (query, count_query) with the filter applied.
+        If single_value is provided, it takes precedence.
+        If multi_values is provided, applies .in_ (include) or .not_in (exclude).
+        """
+        if single_value is not None:
+            query = query.where(column == single_value)
+            count_query = count_query.where(column == single_value)
+        elif multi_values:
+            values_list = [v.value if hasattr(v, "value") else v for v in multi_values]
+            if str(filter_mode).strip().lower() == "exclude":
+                query = query.where(column.not_in(values_list))  # type: ignore[attr-defined]
+                count_query = count_query.where(column.not_in(values_list))  # type: ignore[attr-defined]
+            else:
+                query = query.where(column.in_(values_list))  # type: ignore[attr-defined]
+                count_query = count_query.where(column.in_(values_list))  # type: ignore[attr-defined]
+        return query, count_query
+
     def list_tickets(
         self,
         project_id: int | None = None,
+        project_ids: Sequence[int] | None = None,
+        project_filter_mode: Literal["include", "exclude"] = "include",
         status: TicketStatus | None = None,
+        statuses: Sequence[TicketStatus] | None = None,
+        status_filter_mode: Literal["include", "exclude"] = "include",
         type: TicketType | None = None,
+        types: Sequence[TicketType] | None = None,
+        type_filter_mode: Literal["include", "exclude"] = "include",
         priority: Priority | None = None,
+        priorities: Sequence[Priority] | None = None,
         sprint_id: int | None = None,
+        sprint_ids: Sequence[int] | None = None,
         q: str | None = None,
         created_after: date | str | None = None,
         created_before: date | str | None = None,
@@ -536,29 +572,73 @@ class TicketService:
 
         ``q`` is a case-insensitive substring match over the ticket's title,
         its description and the names of its labels.
+
+        Multi-select filters with include/exclude mode:
+        - ``project_ids`` + ``project_filter_mode`` ("include" or "exclude")
+        - ``statuses`` + ``status_filter_mode`` ("include" or "exclude")
+        - ``types`` + ``type_filter_mode`` ("include" or "exclude")
+        - ``priorities`` (include only, multi-select)
+        - ``sprint_ids`` (include only, multi-select; 0 = "No Sprint")
+
+        Single-value parameters (``project_id``, ``status``, ``type``, ``priority``,
+        ``sprint_id``) are kept for backward compatibility and take precedence
+        if both single and multi variants are provided.
         """
         query = select(Ticket)
         count_query = select(func.count(Ticket.id))  # type: ignore[arg-type]
 
-        if project_id:
-            query = query.where(Ticket.project_id == project_id)
-            count_query = count_query.where(Ticket.project_id == project_id)
-        if status:
-            query = query.where(Ticket.status == status)
-            count_query = count_query.where(Ticket.status == status)
-        if type:
-            query = query.where(Ticket.type == type)
-            count_query = count_query.where(Ticket.type == type)
-        if priority:
-            query = query.where(Ticket.priority == priority)
-            count_query = count_query.where(Ticket.priority == priority)
-        if sprint_id == 0:
-            # "No Sprint" sentinel: only unsprinted tickets
+        # Project filter: single-value takes precedence, then multi-select
+        query, count_query = self._apply_multi_select_filter(
+            query, count_query, Ticket.project_id, project_id, project_ids, project_filter_mode
+        )
+
+        # Status filter: single-value takes precedence, then multi-select
+        query, count_query = self._apply_multi_select_filter(
+            query, count_query, Ticket.status, status, statuses, status_filter_mode
+        )
+
+        # Type filter: single-value takes precedence, then multi-select
+        query, count_query = self._apply_multi_select_filter(
+            query, count_query, Ticket.type, type, types, type_filter_mode
+        )
+
+        # Priority filter: single-value takes precedence, then multi-select (include only)
+        query, count_query = self._apply_multi_select_filter(
+            query, count_query, Ticket.priority, priority, priorities, "include"
+        )
+
+        # Sprint filter: single-value takes precedence, then multi-select (include only)
+        # 0 = "No Sprint" sentinel
+        sprint_filter_values = []
+        has_no_sprint = False
+        if sprint_id is not None:
+            if sprint_id == 0:
+                has_no_sprint = True
+            else:
+                sprint_filter_values = [sprint_id]
+        elif sprint_ids:
+            for sid in sprint_ids:
+                if sid == 0:
+                    has_no_sprint = True
+                else:
+                    sprint_filter_values.append(sid)
+        if has_no_sprint and not sprint_filter_values:
+            # Only "No Sprint" selected
             query = query.where(Ticket.sprint_id.is_(None))  # type: ignore[union-attr]
             count_query = count_query.where(Ticket.sprint_id.is_(None))  # type: ignore[union-attr]
-        elif sprint_id is not None:
-            query = query.where(Ticket.sprint_id == sprint_id)
-            count_query = count_query.where(Ticket.sprint_id == sprint_id)
+        elif has_no_sprint and sprint_filter_values:
+            # "No Sprint" plus specific sprints
+            query = query.where(
+                (Ticket.sprint_id.is_(None)) | (Ticket.sprint_id.in_(sprint_filter_values))  # type: ignore[union-attr]
+            )
+            count_query = count_query.where(
+                (Ticket.sprint_id.is_(None)) | (Ticket.sprint_id.in_(sprint_filter_values))  # type: ignore[union-attr]
+            )
+        elif sprint_filter_values:
+            # Only specific sprints
+            query, count_query = self._apply_multi_select_filter(
+                query, count_query, Ticket.sprint_id, None, sprint_filter_values, "include"
+            )
         if q:
             # The free-text search covers the title, the description and the
             # names of the ticket's labels (ADR-0024).

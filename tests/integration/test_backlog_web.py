@@ -120,13 +120,22 @@ class TestBacklogPage:
         assert "<html" in r.text.lower()
         assert 'id="tickets-table-body"' in r.text
         assert 'hx-get="/tickets/new"' in r.text
-        # filter controls present
-        assert 'name="project_id"' in r.text
-        assert 'name="type"' in r.text
-        assert 'name="status"' in r.text
-        assert 'name="priority"' in r.text
-        assert 'name="sprint_id"' in r.text
+        # multi-select filter controls present (plural names on /backlog)
+        assert 'name="project_ids"' in r.text
+        assert 'name="types"' in r.text
+        assert 'name="statuses"' in r.text
+        assert 'name="priorities"' in r.text
+        assert 'name="sprint_ids"' in r.text
         assert 'name="q"' in r.text
+        # include/exclude radios for Project, Type, Status; Priority/Sprint are include-only
+        assert 'name="project_filter_mode"' in r.text
+        assert 'name="type_filter_mode"' in r.text
+        assert 'name="status_filter_mode"' in r.text
+        assert 'name="priority_filter_mode"' not in r.text
+        assert 'name="sprint_filter_mode"' not in r.text
+        # an "All" convenience button per multi-select (5 fields)
+        for target in ("project_ids", "types", "statuses", "priorities", "sprint_ids"):
+            assert f'data-target="{target}"' in r.text
         # all seeded tickets rendered as rows
         assert "Critical outage" in r.text
         assert "Add tooltip" in r.text
@@ -418,11 +427,14 @@ class TestBacklogFilterFormCarriesTheFilters:
 
     FILTER_FORM_ID = "backlog-filter-form"
     FILTER_NAMES = (
-        "project_id",
-        "type",
-        "status",
-        "priority",
-        "sprint_id",
+        "project_ids",
+        "project_filter_mode",
+        "types",
+        "type_filter_mode",
+        "statuses",
+        "status_filter_mode",
+        "priorities",
+        "sprint_ids",
         "q",
         "created_after",
         "created_before",
@@ -515,15 +527,227 @@ class TestBacklogFilterFormCarriesTheFilters:
         assert 'name="order" value="asc"' in r.text
         assert 'name="page" value="2"' in r.text
 
-    async def test_project_ticket_view_shares_the_filter_form(
+    async def test_project_scoped_backlog_shares_the_filter_form(
         self, client_with_seeds, seeded_projects, backlog_tickets
     ):
-        """The project-scoped view uses the same filter form and headers."""
+        """The project scope now lives on /backlog?project_id={id} (not a
+        separate route); it uses the same filter form and headers, and the
+        project's tickets are the only ones shown."""
         _, web, _ = seeded_projects
-        r = await _get(client_with_seeds, f"/projects/{web.id}/tickets")
+        r = await _get(client_with_seeds, f"/backlog?project_id={web.id}")
         assert r.status_code == 200
+        # the project is scoped and titled like the old project-tickets view
+        assert f"Tickets - {web.name} - Jackrabbit" in r.text
         assert f'id="{self.FILTER_FORM_ID}"' in r.text
         headers = self._sortable_headers(r.text)
         assert headers
         for th in headers:
             assert f'hx-include="#{self.FILTER_FORM_ID}"' in th, th
+        # only the scoped project's tickets are listed
+        assert "Critical outage" in r.text
+        assert "Investigate flaky test" not in r.text
+
+
+class TestMultiSelectFilters:
+    """Multi-select backlog filters: include/exclude mode, backward-compat
+    single-value precedence, and the "No Sprint" sentinel."""
+
+    @pytest.fixture
+    async def ms_tickets(self, test_db, client_with_seeds):
+        """WEB bug/High (in a sprint), API story/Medium (Groomed->In Progress),
+        UNS spike/Low (Open, unsprinted)."""
+        from jackrabbit.services import SprintService
+        from sqlmodel import select
+
+        by_prefix = {p.prefix: p for p in test_db.exec(select(Project)).all()}
+        uns, web, api = by_prefix["UNS"], by_prefix["WEB"], by_prefix["API"]
+        ts = TicketService(test_db)
+        sprint = SprintService(test_db).create_sprint(number=2601, name="Sprint 2601")
+        a = ts.create_ticket(
+            project_id=web.id, title="WEB Bug High", type=TicketType.BUG, priority=Priority.HIGH
+        )
+        b = ts.create_ticket(
+            project_id=api.id,
+            title="API Story Medium",
+            type=TicketType.STORY,
+            priority=Priority.MEDIUM,
+            approach="a",
+            files_to_change="b",
+            test_plan="c",
+            validation_steps="d",
+        )
+        c = ts.create_ticket(
+            project_id=uns.id, title="UNS Spike Low", type=TicketType.SPIKE, priority=Priority.LOW
+        )
+        ts.transition(b, TicketStatus.GROOMED, "groomed")
+        ts.transition(b, TicketStatus.IN_PROGRESS, "started")
+        ts.update_ticket(a, sprint_id=sprint.id)
+        return {"bug": a, "story": b, "spike": c, "sprint": sprint, "projects": (uns, web, api)}
+
+    async def test_multi_select_project_include(self, client_with_seeds, ms_tickets):
+        uns, web, api = ms_tickets["projects"]
+        r = await _get(
+            client_with_seeds, "/backlog", params={"project_ids": [str(web.id), str(api.id)]}
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" in r.text
+        assert "UNS Spike Low" not in r.text
+
+    async def test_multi_select_project_exclude(self, client_with_seeds, ms_tickets):
+        uns, web, api = ms_tickets["projects"]
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"project_ids": str(web.id), "project_filter_mode": "exclude"},
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" not in r.text
+        assert "API Story Medium" in r.text
+        assert "UNS Spike Low" in r.text
+
+    async def test_multi_select_status_include(self, client_with_seeds, ms_tickets):
+        r = await _get(client_with_seeds, "/backlog", params={"statuses": "In Progress"})
+        assert r.status_code == 200
+        assert "API Story Medium" in r.text
+        assert "WEB Bug High" not in r.text
+        assert "UNS Spike Low" not in r.text
+
+    async def test_multi_select_status_exclude(self, client_with_seeds, ms_tickets):
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"statuses": "Open", "status_filter_mode": "exclude"},
+        )
+        assert r.status_code == 200
+        assert "API Story Medium" in r.text
+        assert "WEB Bug High" not in r.text
+        assert "UNS Spike Low" not in r.text
+
+    async def test_multi_select_type_include(self, client_with_seeds, ms_tickets):
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"types": [str(TicketType.STORY.value), str(TicketType.SPIKE.value)]},
+        )
+        assert r.status_code == 200
+        assert "API Story Medium" in r.text
+        assert "UNS Spike Low" in r.text
+        assert "WEB Bug High" not in r.text
+
+    async def test_multi_select_type_exclude(self, client_with_seeds, ms_tickets):
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"types": str(TicketType.STORY.value), "type_filter_mode": "exclude"},
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "UNS Spike Low" in r.text
+        assert "API Story Medium" not in r.text
+
+    async def test_multi_select_priority_include_only(self, client_with_seeds, ms_tickets):
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"priorities": [str(Priority.HIGH.value), str(Priority.MEDIUM.value)]},
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" in r.text
+        assert "UNS Spike Low" not in r.text
+
+    async def test_multi_select_sprint_include(self, client_with_seeds, ms_tickets):
+        r = await _get(
+            client_with_seeds, "/backlog", params={"sprint_ids": str(ms_tickets["sprint"].id)}
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" not in r.text
+        assert "UNS Spike Low" not in r.text
+
+    async def test_multi_select_sprint_no_sprint(self, client_with_seeds, ms_tickets):
+        """sprint_ids=0 is the "No Sprint" sentinel (multi-select form)."""
+        r = await _get(client_with_seeds, "/backlog", params={"sprint_ids": "0"})
+        assert r.status_code == 200
+        assert "API Story Medium" in r.text
+        assert "UNS Spike Low" in r.text
+        assert "WEB Bug High" not in r.text
+
+    async def test_multi_select_sprint_no_sprint_plus_real(self, client_with_seeds, ms_tickets):
+        """Selecting "No Sprint" AND a real sprint returns both."""
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"sprint_ids": ["0", str(ms_tickets["sprint"].id)]},
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" in r.text
+        assert "UNS Spike Low" in r.text
+
+    async def test_backward_compat_single_value_params(self, client_with_seeds, ms_tickets):
+        """Single-value params (project_id, status, type, priority, sprint_id)
+        still scope the backlog, taking precedence over the multi-selects."""
+        uns, web, api = ms_tickets["projects"]
+        r = await _get(client_with_seeds, "/backlog", params={"project_id": web.id})
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" not in r.text
+
+    async def test_single_value_takes_precedence_over_multi(self, client_with_seeds, ms_tickets):
+        """Both project_id and project_ids present -> single-value wins."""
+        uns, web, api = ms_tickets["projects"]
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"project_id": web.id, "project_ids": [str(api.id)]},
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" not in r.text
+
+    async def test_default_filter_mode_is_include(self, client_with_seeds, ms_tickets):
+        """No mode param defaults to include (only the selected project)."""
+        uns, web, api = ms_tickets["projects"]
+        r = await _get(client_with_seeds, "/backlog", params={"project_ids": str(web.id)})
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" not in r.text
+        # include mode, not exclude
+        assert 'name="project_filter_mode" value="include" checked' in r.text
+
+    async def test_invalid_project_ids_param_returns_422(self, client_with_seeds, ms_tickets):
+        r = await _get(client_with_seeds, "/backlog", params={"project_ids": "abc"})
+        assert r.status_code == 422
+
+    async def test_invalid_statuses_param_returns_422(self, client_with_seeds, ms_tickets):
+        r = await _get(client_with_seeds, "/backlog", params={"statuses": "Bogus"})
+        assert r.status_code == 422
+
+    async def test_multi_select_composes_with_search(self, client_with_seeds, ms_tickets):
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"types": str(TicketType.BUG.value), "q": "WEB"},
+        )
+        assert r.status_code == 200
+        assert "WEB Bug High" in r.text
+        assert "API Story Medium" not in r.text
+
+    async def test_selected_multi_select_values_are_marked(self, client_with_seeds, ms_tickets):
+        uns, web, api = ms_tickets["projects"]
+        r = await _get(
+            client_with_seeds, "/backlog", params={"project_ids": [str(web.id), str(api.id)]}
+        )
+        assert r.status_code == 200
+        for pid in (web.id, api.id):
+            assert f'<option value="{pid}" selected' in r.text
+        assert f'<option value="{uns.id}" selected' not in r.text
+
+    async def test_all_button_present_for_each_multi_select(self, client_with_seeds, ms_tickets):
+        r = await _get(client_with_seeds, "/backlog")
+        assert r.status_code == 200
+        # One "All" button per multi-select field (5), each targeting a select.
+        for target in ("project_ids", "types", "statuses", "priorities", "sprint_ids"):
+            assert f'data-target="{target}"' in r.text

@@ -33,7 +33,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='project_id']", str(web["id"]))
+        page.select_option("select[name='project_ids']", str(web["id"]))
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
@@ -46,7 +46,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='type']", "Story")
+        page.select_option("select[name='types']", "Story")
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{story['id']}")).to_be_visible(timeout=10000)
@@ -59,7 +59,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='status']", "Open")
+        page.select_option("select[name='statuses']", "Open")
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{open_ticket['id']}")).to_be_visible(timeout=10000)
@@ -80,7 +80,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='sprint_id']", str(sprint["id"]))
+        page.select_option("select[name='sprint_ids']", str(sprint["id"]))
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{member['id']}")).to_be_visible(timeout=10000)
@@ -114,9 +114,9 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='project_id']", str(web["id"]))
-        page.select_option("select[name='type']", "Story")
-        page.select_option("select[name='status']", "Open")
+        page.select_option("select[name='project_ids']", str(web["id"]))
+        page.select_option("select[name='types']", "Story")
+        page.select_option("select[name='statuses']", "Open")
         page.fill("input[name='q']", needle)
         self._apply(page)
 
@@ -166,8 +166,8 @@ class TestBacklogFilters:
         page.wait_for_load_state("networkidle")
 
         # Apply some filters
-        page.select_option("select[name='project_id']", "2")
-        page.select_option("select[name='type']", "Story")
+        page.select_option("select[name='project_ids']", "2")
+        page.select_option("select[name='types']", "Story")
         page.wait_for_load_state("networkidle")
 
         # Click Clear filters
@@ -175,8 +175,11 @@ class TestBacklogFilters:
         page.wait_for_load_state("networkidle")
 
         # Verify filters reset
-        project_dropdown = page.locator("select[name='project_id']")
-        expect(project_dropdown).to_have_value("")
+        # A multi-select with nothing chosen has no selected options.
+        assert (
+            page.eval_on_selector("select[name='project_ids']", "el => el.selectedOptions.length")
+            == 0
+        )
 
 
 if __name__ == "__main__":
@@ -287,11 +290,11 @@ class TestBacklogFiltersSurviveSortingAndPaging:
 
         cases = [
             # (filter, value, the ticket the filter must keep out of the list)
-            ("project_id", str(scenario["uns"]["id"]), matchable_outsider),
-            ("type", "Story", matchable_outsider),
-            ("status", "Open", matchable_outsider),
-            ("priority", "Medium", matchable_outsider),
-            ("sprint_id", str(scenario["sprint"]["id"]), matchable_outsider),
+            ("project_ids", str(scenario["uns"]["id"]), matchable_outsider),
+            ("types", "Story", matchable_outsider),
+            ("statuses", "Open", matchable_outsider),
+            ("priorities", "Medium", matchable_outsider),
+            ("sprint_ids", str(scenario["sprint"]["id"]), matchable_outsider),
             ("q", marker, other_outsider),
             ("created_after", today, other_outsider),
             ("created_before", today, other_outsider),
@@ -370,7 +373,7 @@ class TestBacklogFiltersSurviveSortingAndPaging:
         mine = make_ticket(project_id=web["id"], title=f"Scoped {uuid.uuid4().hex[:8]}")
         elsewhere = make_ticket(project_id=uns["id"], title=f"Elsewhere {uuid.uuid4().hex[:8]}")
 
-        page.goto(f"{base_url}/projects/{web['id']}/tickets")
+        page.goto(f"{base_url}/backlog?project_id={web['id']}")
         page.wait_for_load_state("networkidle")
         expect(page.locator("#backlog-filter-form")).to_be_visible()
         expect(page.locator(f"#ticket-row-{mine['id']}")).to_be_visible()
@@ -418,3 +421,60 @@ class TestBacklogFiltersSurviveSortingAndPaging:
         page.wait_for_timeout(200)
         # Paging did not change the sort: the second page of a title-desc list.
         assert self._row_ids(page) == [tickets["B"]["id"], tickets["A"]["id"]]
+
+
+class TestMultiSelectBacklogFilters:
+    """E2E coverage for the multi-select backlog filter UI (include/exclude
+    radios, the "All" convenience button, and selecting several values)."""
+
+    @staticmethod
+    def _apply(page: Page) -> None:
+        page.click("button:has-text('Filter')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
+
+    def test_all_button_selects_every_option(self, page: Page, base_url: str, seeded_projects):
+        """The "All" button selects every option in its multi-select dropdown."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        select = "select[name='project_ids']"
+        n_options = page.eval_on_selector(select, "el => el.options.length")
+        assert n_options > 1, "need more than one project to test 'All'"
+        page.click("button[data-target='project_ids']")
+        n_selected = page.eval_on_selector(select, "el => el.selectedOptions.length")
+        assert n_selected == n_options, f"{n_selected} of {n_options} options selected"
+
+    def test_exclude_radio_hides_the_selected_project(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Switching a filter to Exclude hides the selected project's tickets."""
+        uns, web, _ = seeded_projects
+        in_web = make_ticket(project_id=web["id"], title="Exclude Member")
+        in_uns = make_ticket(project_id=uns["id"], title="Exclude Outsider")
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        page.select_option("select[name='project_ids']", str(web["id"]))
+        page.check("input[name='project_filter_mode'][value='exclude']")
+        self._apply(page)
+
+        assert page.locator(f"#ticket-row-{in_web['id']}").count() == 0
+        expect(page.locator(f"#ticket-row-{in_uns['id']}")).to_be_visible()
+
+    def test_selecting_multiple_projects_keeps_only_those(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Selecting several projects in include mode shows only their tickets."""
+        uns, web, api = seeded_projects
+        in_web = make_ticket(project_id=web["id"], title="Multi Web")
+        in_api = make_ticket(project_id=api["id"], title="Multi API")
+        in_uns = make_ticket(project_id=uns["id"], title="Multi Uns")
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        page.select_option("select[name='project_ids']", [str(web["id"]), str(api["id"])])
+        self._apply(page)
+
+        expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible()
+        expect(page.locator(f"#ticket-row-{in_api['id']}")).to_be_visible()
+        assert page.locator(f"#ticket-row-{in_uns['id']}").count() == 0

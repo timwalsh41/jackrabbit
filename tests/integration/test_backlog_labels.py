@@ -404,13 +404,15 @@ class TestWidenedSearch:
 
 
 class TestProjectScopedView:
-    """The project-scoped ticket view offers the same label filter and column."""
+    """The project scope now rides on /backlog?project_id={id} (the
+    /projects/{id}/tickets route was removed); it offers the same label
+    filter and column."""
 
     async def test_the_view_offers_the_label_panel(
         self, client_with_seeds, seeded_projects, labelled_tickets
     ):
         _, web, _ = seeded_projects
-        r = await _get(client_with_seeds, f"/projects/{web.id}/tickets")
+        r = await _get(client_with_seeds, f"/backlog?project_id={web.id}")
         assert r.status_code == 200
         assert 'id="labels-filter-panel"' in r.text
         assert 'name="label_match"' in r.text
@@ -420,7 +422,7 @@ class TestProjectScopedView:
         self, client_with_seeds, seeded_projects, labelled_tickets
     ):
         _, web, _ = seeded_projects
-        r = await _get(client_with_seeds, f"/projects/{web.id}/tickets")
+        r = await _get(client_with_seeds, f"/backlog?project_id={web.id}")
         assert r.status_code == 200
         assert re.search(r"<th[^>]*>\s*Labels\s*</th>", r.text)
         assert 'data-label-name="Backend"' in r.text
@@ -432,7 +434,7 @@ class TestProjectScopedView:
         label = labelled_tickets["labels"]["Backend"]
         r = await _get(
             client_with_seeds,
-            f"/projects/{web.id}/tickets",
+            f"/backlog?project_id={web.id}",
             params={"label_ids": str(label.id)},
         )
         assert r.status_code == 200

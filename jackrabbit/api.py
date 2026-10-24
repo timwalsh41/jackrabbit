@@ -1,6 +1,6 @@
 """FastAPI API routes for Jackrabbit."""
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
@@ -10,6 +10,7 @@ from sqlmodel import Session
 from jackrabbit.database import get_session
 from jackrabbit.labels import parse_label_ids, parse_label_match
 from jackrabbit.models import (
+    Priority,
     Project,
     Sprint,
     Ticket,
@@ -443,10 +444,29 @@ def create_ticket(
 
 @router.get("/tickets", response_model=PaginatedResponse)
 def list_tickets(
-    project_id: int | None = Query(None),
-    status: TicketStatus | None = Query(None),
-    type: TicketType | None = Query(None),
-    sprint_id: int | None = Query(None),
+    # Backward-compatible single-value filters: take precedence over the
+    # multi-select variants when both are present (req: backward compat).
+    project_id: int | None = Query(default=None, description="Single project id (backward compat)"),
+    project_ids: list[int] = Query(default=[], description="Project ids to filter by"),
+    project_filter_mode: Literal["include", "exclude"] = Query(
+        "include", description="Project filter mode: include or exclude"
+    ),
+    status: TicketStatus | None = Query(default=None),
+    statuses: list[TicketStatus] = Query(default=[], description="Status values to filter by"),
+    status_filter_mode: Literal["include", "exclude"] = Query(
+        "include", description="Status filter mode: include or exclude"
+    ),
+    type: TicketType | None = Query(default=None),
+    types: list[TicketType] = Query(default=[], description="Ticket types to filter by"),
+    type_filter_mode: Literal["include", "exclude"] = Query(
+        "include", description="Type filter mode: include or exclude"
+    ),
+    priority: Priority | None = Query(default=None),
+    priorities: list[Priority] = Query(
+        default=[], description="Priorities to filter by (include only)"
+    ),
+    sprint_id: int | None = Query(default=None, description="Single sprint id; 0 = No Sprint"),
+    sprint_ids: list[int] = Query(default=[], description="Sprint ids to filter by; 0 = No Sprint"),
     q: str | None = Query(None, description="Search in title, description and label names"),
     label_ids: list[str] = Query(default=[], description="Label ids to filter by"),
     label_match: str = Query("all", description="Label match mode: all or any"),
@@ -468,9 +488,18 @@ def list_tickets(
 
     tickets, total = service.list_tickets(
         project_id=project_id,
+        project_ids=project_ids,
+        project_filter_mode=project_filter_mode,
         status=status,
+        statuses=statuses,
+        status_filter_mode=status_filter_mode,
         type=type,
+        types=types,
+        type_filter_mode=type_filter_mode,
+        priority=priority,
+        priorities=priorities,
         sprint_id=sprint_id,
+        sprint_ids=sprint_ids,
         q=q,
         label_ids=parsed_label_ids,
         label_match=match_mode,

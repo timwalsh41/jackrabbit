@@ -651,3 +651,155 @@ class TestTicketsProjectMove:
             f"/api/v1/tickets/{ticket['id']}/move-project", json={"project_id": 999}
         )
         assert response.status_code == 400
+
+
+class TestTicketsMultiSelectFilters:
+    """GET /api/v1/tickets accepts the same multi-select filters (and their
+    include/exclude modes) as the /backlog web route, with backward-compatible
+    single-value params taking precedence (req: API parity)."""
+
+    async def _seed(self, client: AsyncClient) -> dict:
+        """WEB BUG-Critical-Open (in a sprint), API STORY-Medium-Open,
+        API BUG-High-InProgress, UNS SPIKE-Low-Open (unsprinted)."""
+        web, api = 2, 3
+        bug = await _create_ticket(client, web, "WEB Bug", type="Bug", priority="Critical")
+        await client.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 2601"})
+        sprint_id = (await client.get("/api/v1/sprints")).json()[0]["id"]
+        resp = await client.post(f"/api/v1/sprints/{sprint_id}/tickets/{bug['id']}")
+        assert resp.status_code == 200
+        story = await _create_ticket(client, api, "API Story", type="Story", priority="Medium")
+        inprog = await _create_ticket(
+            client,
+            api,
+            "API Bug IP",
+            type="Bug",
+            priority="High",
+            approach="a",
+            files_to_change="b",
+            test_plan="c",
+            validation_steps="d",
+        )
+        await _transition(client, inprog["id"], "Groomed", reason="g")
+        await _transition(client, inprog["id"], "In Progress", reason="w")
+        spike = await _create_ticket(client, 1, "UNS Spike", type="Spike", priority="Low")
+        return {
+            "bug": bug,
+            "story": story,
+            "inprog": inprog,
+            "spike": spike,
+            "sprint_id": sprint_id,
+        }
+
+    @staticmethod
+    def _titles(response_json: dict) -> set[str]:
+        return {item["title"] for item in response_json["items"]}
+
+    async def test_project_ids_include(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"project_ids": [2, 3]})
+        assert r.status_code == 200
+        titles = self._titles(r.json())
+        assert titles == {"WEB Bug", "API Story", "API Bug IP"}
+
+    async def test_project_ids_exclude(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get(
+            "/api/v1/tickets",
+            params={"project_ids": 1, "project_filter_mode": "exclude"},
+        )
+        assert r.status_code == 200
+        titles = self._titles(r.json())
+        assert titles == {"WEB Bug", "API Story", "API Bug IP"}
+
+    async def test_statuses_include(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"statuses": "In Progress"})
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"API Bug IP"}
+
+    async def test_statuses_exclude(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get(
+            "/api/v1/tickets",
+            params={"statuses": "Open", "status_filter_mode": "exclude"},
+        )
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"API Bug IP"}
+
+    async def test_types_include(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"types": ["Story", "Spike"]})
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"API Story", "UNS Spike"}
+
+    async def test_types_exclude(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get(
+            "/api/v1/tickets", params={"types": "Story", "type_filter_mode": "exclude"}
+        )
+        assert r.status_code == 200
+        titles = self._titles(r.json())
+        assert titles == {"WEB Bug", "API Bug IP", "UNS Spike"}
+
+    async def test_priorities_include_only(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get(
+            "/api/v1/tickets", params={"priorities": ["Critical", "High"]}
+        )
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"WEB Bug", "API Bug IP"}
+
+    async def test_single_priority_param(self, client_with_seeds: AsyncClient):
+        """Backward-compat single `priority` param (parity with /backlog)."""
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"priority": "Low"})
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"UNS Spike"}
+
+    async def test_sprint_ids_include(self, client_with_seeds: AsyncClient):
+        seeded = await self._seed(client_with_seeds)
+        r = await client_with_seeds.get(
+            "/api/v1/tickets", params={"sprint_ids": seeded["sprint_id"]}
+        )
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"WEB Bug"}
+
+    async def test_sprint_ids_no_sprint_sentinel(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"sprint_ids": 0})
+        assert r.status_code == 200
+        titles = self._titles(r.json())
+        assert titles == {"API Story", "API Bug IP", "UNS Spike"}
+        assert all(item["sprint_id"] is None for item in r.json()["items"])
+
+    async def test_sprint_ids_no_sprint_plus_real(self, client_with_seeds: AsyncClient):
+        seeded = await self._seed(client_with_seeds)
+        r = await client_with_seeds.get(
+            "/api/v1/tickets", params={"sprint_ids": [0, seeded["sprint_id"]]}
+        )
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"WEB Bug", "API Story", "API Bug IP", "UNS Spike"}
+
+    async def test_single_project_id_takes_precedence(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get(
+            "/api/v1/tickets", params={"project_id": 2, "project_ids": [3]}
+        )
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"WEB Bug"}
+
+    async def test_default_mode_is_include(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"project_ids": [1]})
+        assert r.status_code == 200
+        assert self._titles(r.json()) == {"UNS Spike"}
+
+    async def test_invalid_project_ids_returns_422(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"project_ids": "abc"})
+        assert r.status_code == 422
+
+    async def test_invalid_statuses_returns_422(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        r = await client_with_seeds.get("/api/v1/tickets", params={"statuses": "Bogus"})
+        assert r.status_code == 422

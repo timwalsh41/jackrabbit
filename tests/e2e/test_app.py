@@ -41,15 +41,16 @@ class TestTicketsPage:
     """Tests for the tickets page."""
 
     def test_tickets_page_loads(self, page: Page, base_url: str, seeded_projects):
-        """Test that the tickets page loads for a project."""
+        """Test that the tickets page loads for a project (now via the backlog
+        with ?project_id=, since the project-scoped route was removed)."""
         project = seeded_projects[0]
-        page.goto(f"{base_url}/projects/{project['id']}/tickets")
+        page.goto(f"{base_url}/backlog?project_id={project['id']}")
         expect(page).to_have_title(f"Tickets - {project['name']} - Jackrabbit")
 
     def test_tickets_page_shows_create_button(self, page: Page, base_url: str, seeded_projects):
         """Test that the tickets page has a create ticket button."""
         project = seeded_projects[0]
-        page.goto(f"{base_url}/projects/{project['id']}/tickets")
+        page.goto(f"{base_url}/backlog?project_id={project['id']}")
         expect(
             page.locator("button:has-text('New Ticket'), a:has-text('New Ticket')")
         ).to_be_visible()
@@ -65,11 +66,12 @@ class TestNavigation:
         expect(page).to_have_url(f"{base_url}/projects")
 
     def test_navigate_projects_to_tickets(self, page: Page, base_url: str, seeded_projects):
-        """Test navigation from projects to tickets."""
+        """Test navigation from projects to tickets (now via the project's
+        "Tickets" link -> /backlog?project_id=)."""
         project = seeded_projects[0]
         page.goto(f"{base_url}/projects")
-        page.click(f"a[href='/projects/{project['id']}/tickets']")
-        expect(page).to_have_url(f"{base_url}/projects/{project['id']}/tickets")
+        page.click(f"a[href='/backlog?project_id={project['id']}']")
+        expect(page).to_have_url(f"{base_url}/backlog?project_id={project['id']}")
 
 
 class TestResponsiveDesign:

@@ -305,10 +305,14 @@ class TestDetailPageActions:
         response = await get_page(client, f"/tickets/{ticket['id']}")
         assert f"/tickets/{ticket['id']}/move-project/modal" in response.text
 
-    async def test_project_metadata_links_to_project_tickets(self, client: httpx.AsyncClient):
+    async def test_project_metadata_links_to_project_scoped_backlog(
+        self, client: httpx.AsyncClient
+    ):
+        """The project link on the ticket detail now scopes the backlog via
+        ?project_id= (the /projects/{id}/tickets route was removed)."""
         ticket = await create_ticket(client)
         response = await get_page(client, f"/tickets/{ticket['id']}")
-        assert f"/projects/{ticket['project_id']}/tickets" in response.text
+        assert f"/backlog?project_id={ticket['project_id']}" in response.text
 
     async def test_transition_history_via_api_data(
         self, client: httpx.AsyncClient, seeded_projects

@@ -264,7 +264,7 @@ class TestProjectScopedLabelFilter:
         elsewhere = make_ticket(project_id=uns["id"], title=_unique("Scoped outsider"))
         _attach(base_url, member["id"], label)
 
-        page.goto(f"{base_url}/projects/{web['id']}/tickets")
+        page.goto(f"{base_url}/backlog?project_id={web['id']}")
         page.wait_for_load_state("networkidle")
         _check_label(page, _label_id(base_url, label))
         _apply(page)

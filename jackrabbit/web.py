@@ -475,35 +475,92 @@ def _parse_label_match(value: str) -> str:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
 
+def _parse_multi_ints(values: list[str], field: str = "value") -> list[int]:
+    """Parse a repeated query param (``a=1&a=2``) into a list of ints.
+
+    Absent/empty entries are skipped: a ``<select multiple>`` submits nothing
+    when nothing is selected, so an empty result simply means "no filter".
+    """
+    result: list[int] = []
+    for value in values:
+        if value is None or value == "":
+            continue
+        try:
+            result.append(int(value))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"{field} must be an integer") from e
+    return result
+
+
+def _parse_multi_enums[E: StrEnum](
+    enum_cls: type[E], values: list[str], field: str = "value"
+) -> list[E]:
+    """Parse a repeated query param into enum members; absent/empty = []."""
+    result: list[E] = []
+    valid = ", ".join(m.value for m in enum_cls)
+    for value in values:
+        if value is None or value == "":
+            continue
+        try:
+            result.append(enum_cls(value))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"{field} must be one of: {valid}") from e
+    return result
+
+
+def _filter_mode(value: str) -> str:
+    """Normalise an include/exclude filter mode to "include" or "exclude".
+
+    Any unrecognised value defaults to "include" (the safe, default mode).
+    """
+    return "exclude" if value.strip().lower() == "exclude" else "include"
+
+
 def _build_backlog_context(
     ticket_service: TicketService,
     project_service: ProjectService,
     sprint_service: SprintService,
-    project_id: int | None,
-    status: TicketStatus | None,
-    type: TicketType | None,
-    priority: Priority | None,
-    sprint_id: int | None,
-    q: str | None,
-    created_after: date | None,
-    created_before: date | None,
-    sort: str,
-    order: str,
-    page: int,
-    page_size: int,
+    project_id: int | None = None,
+    project_ids: list[int] | None = None,
+    project_filter_mode: str = "include",
+    status: TicketStatus | None = None,
+    statuses: list[TicketStatus] | None = None,
+    status_filter_mode: str = "include",
+    type: TicketType | None = None,
+    types: list[TicketType] | None = None,
+    type_filter_mode: str = "include",
+    priority: Priority | None = None,
+    priorities: list[Priority] | None = None,
+    sprint_id: int | None = None,
+    sprint_ids: list[int] | None = None,
+    q: str | None = None,
+    created_after: date | None = None,
+    created_before: date | None = None,
+    sort: str = "number",
+    order: str = "desc",
+    page: int = 1,
+    page_size: int = 50,
     label_ids: list[int] | None = None,
     label_match: str = "all",
     project: Project | None = None,
 ) -> dict:
-    """Shared context builder for /backlog and /projects/{id}/tickets."""
+    """Shared context builder for /backlog."""
     # Cap page_size like the JSON API (page_size is user-supplied here too).
     page_size = max(1, min(page_size, 100))
     tickets, total = ticket_service.list_tickets(
         project_id=project_id,
+        project_ids=project_ids,
+        project_filter_mode=project_filter_mode,
         status=status,
+        statuses=statuses,
+        status_filter_mode=status_filter_mode,
         type=type,
+        types=types,
+        type_filter_mode=type_filter_mode,
         priority=priority,
+        priorities=priorities,
         sprint_id=sprint_id,
+        sprint_ids=sprint_ids,
         q=q,
         created_after=created_after,
         created_before=created_before,
@@ -519,6 +576,12 @@ def _build_backlog_context(
     projects = project_service.list_projects()
     sprints = sprint_service.list_sprints()
 
+    # A single project_id in the URL (the project-scoped "Tickets" link,
+    # /backlog?project_id={id}) scopes the view and titles the page, replacing
+    # the removed /projects/{id}/tickets route.
+    if project is None and project_id is not None:
+        project = project_service.get_project(project_id)
+
     # The labels in use are offered in the filter panel, and every listed
     # ticket shows the labels it carries.
     label_service = LabelService(ticket_service.session)
@@ -529,6 +592,15 @@ def _build_backlog_context(
 
     # Find UNS project for default selection
     uns_project = project_service.get_project_by_prefix("UNS")
+
+    # Effective selected values for the template: a single-value param
+    # (backward compat) is shown as a one-item selection so the multi-selects
+    # reflect the URL when the user arrives via the project "Tickets" link.
+    effective_project_ids = [project_id] if project_id is not None else list(project_ids or [])
+    effective_statuses = [status] if status is not None else list(statuses or [])
+    effective_types = [type] if type is not None else list(types or [])
+    effective_priorities = [priority] if priority is not None else list(priorities or [])
+    effective_sprint_ids = [sprint_id] if sprint_id is not None else list(sprint_ids or [])
 
     return {
         "tickets": tickets,
@@ -543,10 +615,18 @@ def _build_backlog_context(
         "uns_project_id": uns_project.id if uns_project else None,
         "current_filters": {
             "project_id": project_id,
+            "project_ids": effective_project_ids,
+            "project_filter_mode": project_filter_mode,
             "status": status,
+            "statuses": effective_statuses,
+            "status_filter_mode": status_filter_mode,
             "type": type,
+            "types": effective_types,
+            "type_filter_mode": type_filter_mode,
             "priority": priority,
+            "priorities": effective_priorities,
             "sprint_id": sprint_id,
+            "sprint_ids": effective_sprint_ids,
             "q": q,
             "created_after": created_after,
             "created_before": created_before,
@@ -559,9 +639,9 @@ def _build_backlog_context(
         "TicketType": TicketType,
         "Priority": Priority,
         "project": project,
-        # The backlog's own requests (filter, sort, page) stay in the view
-        # they were started from: the project-scoped view keeps its scope.
-        "backlog_url": f"/projects/{project.id}/tickets" if project else "/backlog",
+        # All backlog requests (filter, sort, page) now target /backlog;
+        # the project scope travels as a filter value, not a separate route.
+        "backlog_url": "/backlog",
     }
 
 
@@ -569,10 +649,18 @@ def _build_backlog_context(
 async def backlog(
     request: Request,
     project_id: str = Query(""),
+    project_ids: list[str] = Query(default=[]),
+    project_filter_mode: str = Query("include"),
     status: str = Query(""),
+    statuses: list[str] = Query(default=[]),
+    status_filter_mode: str = Query("include"),
     type: str = Query(""),
+    types: list[str] = Query(default=[]),
+    type_filter_mode: str = Query("include"),
     priority: str = Query(""),
+    priorities: list[str] = Query(default=[]),
     sprint_id: str = Query(""),
+    sprint_ids: list[str] = Query(default=[]),
     q: str = Query(""),
     created_after: str = Query(""),
     created_before: str = Query(""),
@@ -591,11 +679,19 @@ async def backlog(
         project_service,
         sprint_service,
         project_id=_parse_optional_int(project_id, "project_id"),
+        project_ids=_parse_multi_ints(project_ids, "project_ids"),
+        project_filter_mode=_filter_mode(project_filter_mode),
         status=_parse_optional_enum(TicketStatus, status, "status"),
+        statuses=_parse_multi_enums(TicketStatus, statuses, "statuses"),
+        status_filter_mode=_filter_mode(status_filter_mode),
         type=_parse_optional_enum(TicketType, type, "type"),
+        types=_parse_multi_enums(TicketType, types, "types"),
+        type_filter_mode=_filter_mode(type_filter_mode),
         priority=_parse_optional_enum(Priority, priority, "priority"),
+        priorities=_parse_multi_enums(Priority, priorities, "priorities"),
         # sprint_id=0 is the "No Sprint" sentinel; ""/absent means no filter
         sprint_id=_parse_optional_int(sprint_id, "sprint_id"),
+        sprint_ids=_parse_multi_ints(sprint_ids, "sprint_ids"),
         q=q or None,
         created_after=_parse_optional_date(created_after, "created_after"),
         created_before=_parse_optional_date(created_before, "created_before"),
@@ -706,59 +802,6 @@ async def project_row_partial(
             "ticket_count": service.get_project_ticket_count(project_id),
         },
     )
-
-
-@router.get("/projects/{project_id}/tickets", response_class=HTMLResponse)
-async def project_tickets(
-    request: Request,
-    project_id: int,
-    status: str = Query(""),
-    type: str = Query(""),
-    priority: str = Query(""),
-    sprint_id: str = Query(""),
-    q: str = Query(""),
-    created_after: str = Query(""),
-    created_before: str = Query(""),
-    label_ids: list[str] = Query(default=[]),
-    label_match: str = Query("all"),
-    sort: str = Query("number"),
-    order: str = Query("desc"),
-    page: int = Query(1),
-    page_size: int = Query(50),
-    ticket_service: TicketService = Depends(get_ticket_service),
-    project_service: ProjectService = Depends(get_project_service),
-    sprint_service: SprintService = Depends(get_sprint_service),
-) -> HTMLResponse:
-    project = project_service.get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    context = _build_backlog_context(
-        ticket_service,
-        project_service,
-        sprint_service,
-        project_id=project_id,
-        status=_parse_optional_enum(TicketStatus, status, "status"),
-        type=_parse_optional_enum(TicketType, type, "type"),
-        priority=_parse_optional_enum(Priority, priority, "priority"),
-        sprint_id=_parse_optional_int(sprint_id, "sprint_id"),
-        q=q or None,
-        created_after=_parse_optional_date(created_after, "created_after"),
-        created_before=_parse_optional_date(created_before, "created_before"),
-        label_ids=_parse_label_ids(label_ids),
-        label_match=_parse_label_match(label_match),
-        sort=sort,
-        order=order,
-        page=page,
-        page_size=page_size,
-        project=project,
-    )
-
-    # HTMX filter/sort/pagination requests swap only the table body rows
-    if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(request, "backlog_rows.html", context)
-
-    return templates.TemplateResponse(request, "backlog.html", context)
 
 
 @router.get("/projects/{project_id}/edit", response_class=HTMLResponse)
