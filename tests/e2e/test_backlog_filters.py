@@ -4,6 +4,11 @@ The Backlog filter form applies filters only when submitted (via the Filter
 button, an hx-get that swaps a fresh tbody into #tickets-table-body), so every
 test selects its filters and clicks Filter before asserting.
 
+The Project/Type/Status/Priority/Sprint filters are multi-select dropdowns:
+each filter is a trigger button that opens a popover of checkboxes (the
+visible checkboxes are the form controls; there is no <select>). Tests that
+set a multi-select value open its popover first, then check the box.
+
 Titles asserted against are run-unique: the `q` filter is a substring match over
 titles, so a fixed title would also match the same test's leftovers in a
 database that has been used before.
@@ -13,6 +18,31 @@ import uuid
 
 import pytest
 from playwright.sync_api import Page, expect
+
+# Fields whose filter is a multi-select dropdown (checkbox popover).
+MULTI_FIELDS = ("project_ids", "types", "statuses", "priorities", "sprint_ids")
+
+
+def _open_multiselect(page: Page, field: str) -> None:
+    """Open the dropdown popover for a multi-select filter field.
+
+    Popovers toggle on the trigger and close on an outside click, so Playwright
+    must open one before interacting with its checkboxes/radios. Idempotent: if
+    the popover is already open it is left open.
+    """
+    trigger = page.locator(f"[data-ms-field='{field}'] [data-ms-trigger]")
+    if trigger.get_attribute("aria-expanded") != "true":
+        trigger.click()
+    page.wait_for_selector(
+        f"[data-ms-field='{field}'] [data-ms-option]", state="visible", timeout=1000
+    )
+
+
+def _select_in_multiselect(page: Page, field: str, *values: str) -> None:
+    """Open `field`'s dropdown and check each given option `value`."""
+    _open_multiselect(page, field)
+    for value in values:
+        page.check(f"[data-ms-field='{field}'] [data-ms-option][value='{value}']")
 
 
 class TestBacklogFilters:
@@ -33,7 +63,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='project_ids']", str(web["id"]))
+        _select_in_multiselect(page, "project_ids", str(web["id"]))
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
@@ -46,7 +76,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='types']", "Story")
+        _select_in_multiselect(page, "types", "Story")
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{story['id']}")).to_be_visible(timeout=10000)
@@ -59,7 +89,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='statuses']", "Open")
+        _select_in_multiselect(page, "statuses", "Open")
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{open_ticket['id']}")).to_be_visible(timeout=10000)
@@ -80,7 +110,7 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='sprint_ids']", str(sprint["id"]))
+        _select_in_multiselect(page, "sprint_ids", str(sprint["id"]))
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{member['id']}")).to_be_visible(timeout=10000)
@@ -114,9 +144,9 @@ class TestBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='project_ids']", str(web["id"]))
-        page.select_option("select[name='types']", "Story")
-        page.select_option("select[name='statuses']", "Open")
+        _select_in_multiselect(page, "project_ids", str(web["id"]))
+        _select_in_multiselect(page, "types", "Story")
+        _select_in_multiselect(page, "statuses", "Open")
         page.fill("input[name='q']", needle)
         self._apply(page)
 
@@ -166,20 +196,17 @@ class TestBacklogFilters:
         page.wait_for_load_state("networkidle")
 
         # Apply some filters
-        page.select_option("select[name='project_ids']", "2")
-        page.select_option("select[name='types']", "Story")
+        _select_in_multiselect(page, "project_ids", "2")
+        _select_in_multiselect(page, "types", "Story")
         page.wait_for_load_state("networkidle")
 
         # Click Clear filters
         page.click("button:has-text('Clear'), a:has-text('Clear')")
         page.wait_for_load_state("networkidle")
 
-        # Verify filters reset
-        # A multi-select with nothing chosen has no selected options.
-        assert (
-            page.eval_on_selector("select[name='project_ids']", "el => el.selectedOptions.length")
-            == 0
-        )
+        # Verify filters reset: no multi-select option checkboxes remain checked.
+        assert page.locator("[data-ms-field='project_ids'] [data-ms-option]:checked").count() == 0
+        assert page.locator("[data-ms-field='types'] [data-ms-option]:checked").count() == 0
 
 
 if __name__ == "__main__":
@@ -272,9 +299,10 @@ class TestBacklogFiltersSurviveSortingAndPaging:
         assert backlog, f"no backlog request was issued: {urls}"
         return backlog[-1]
 
-    def _set_filter(self, page: Page, name: str, value: str) -> None:
-        if page.locator(f"select[name='{name}']").count():
-            page.select_option(f"select[name='{name}']", value)
+    @staticmethod
+    def _set_filter(page: Page, name: str, value: str) -> None:
+        if name in MULTI_FIELDS:
+            _select_in_multiselect(page, name, value)
         else:
             page.fill(f"input[name='{name}']", value)
 
@@ -425,7 +453,8 @@ class TestBacklogFiltersSurviveSortingAndPaging:
 
 class TestMultiSelectBacklogFilters:
     """E2E coverage for the multi-select backlog filter UI (include/exclude
-    radios, the "All" convenience button, and selecting several values)."""
+    radios, selecting several values). The trigger/label/popover mechanics
+    themselves are covered in TestMultiSelectDropdownUI."""
 
     @staticmethod
     def _apply(page: Page) -> None:
@@ -433,16 +462,23 @@ class TestMultiSelectBacklogFilters:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(300)
 
-    def test_all_button_selects_every_option(self, page: Page, base_url: str, seeded_projects):
-        """The "All" button selects every option in its multi-select dropdown."""
+    def test_select_all_checkbox_checks_every_option(
+        self, page: Page, base_url: str, seeded_projects
+    ):
+        """The "Select all" checkbox in a dropdown selects every option."""
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        select = "select[name='project_ids']"
-        n_options = page.eval_on_selector(select, "el => el.options.length")
-        assert n_options > 1, "need more than one project to test 'All'"
-        page.click("button[data-target='project_ids']")
-        n_selected = page.eval_on_selector(select, "el => el.selectedOptions.length")
+        _open_multiselect(page, "project_ids")
+        page.click("[data-ms-field='project_ids'] [data-ms-select-all]")
+        n_options = page.locator("[data-ms-field='project_ids'] [data-ms-option]").count()
+        assert n_options > 1, "need more than one project to test 'Select all'"
+        n_selected = page.locator("[data-ms-field='project_ids'] [data-ms-option]:checked").count()
         assert n_selected == n_options, f"{n_selected} of {n_options} options selected"
+        # Trigger label updates to the total.
+        assert (
+            page.locator("[data-ms-field='project_ids'] .ms-trigger-text").text_content()
+            == f"{n_options} selected"
+        )
 
     def test_exclude_radio_hides_the_selected_project(
         self, page: Page, base_url: str, seeded_projects, make_ticket
@@ -454,7 +490,8 @@ class TestMultiSelectBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='project_ids']", str(web["id"]))
+        _select_in_multiselect(page, "project_ids", str(web["id"]))
+        # The Include/Exclude radio lives inside the (still open) project popover.
         page.check("input[name='project_filter_mode'][value='exclude']")
         self._apply(page)
 
@@ -472,9 +509,84 @@ class TestMultiSelectBacklogFilters:
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
-        page.select_option("select[name='project_ids']", [str(web["id"]), str(api["id"])])
+        _select_in_multiselect(page, "project_ids", str(web["id"]), str(api["id"]))
         self._apply(page)
 
         expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible()
         expect(page.locator(f"#ticket-row-{in_api['id']}")).to_be_visible()
+        assert page.locator(f"#ticket-row-{in_uns['id']}").count() == 0
+
+
+class TestMultiSelectDropdownUI:
+    """Component-level coverage for the multi-select dropdown itself: the
+    trigger label tracks the count, only one dropdown is open at a time, and a
+    click outside closes the open dropdown."""
+
+    @staticmethod
+    def _count_selected(page: Page, field: str) -> int:
+        return page.locator(f"[data-ms-field='{field}'] [data-ms-option]:checked").count()
+
+    def test_trigger_label_starts_at_all_and_tracks_selection(
+        self, page: Page, base_url: str, seeded_projects
+    ):
+        """The trigger reads 'All' initially, 'N selected' as options are checked,
+        and back to 'All' when all are unchecked."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        field = "project_ids"
+        label = page.locator(f"[data-ms-field='{field}'] .ms-trigger-text")
+        assert label.text_content() == "All"
+
+        web_id = str(seeded_projects[1]["id"])
+        _select_in_multiselect(page, field, web_id)
+        assert label.text_content() == "1 selected"
+
+        # Unchecking returns it to "All".
+        page.uncheck(f"[data-ms-field='{field}'] [data-ms-option][value='{web_id}']")
+        assert label.text_content() == "All"
+
+    def test_only_one_dropdown_open_at_a_time(self, page: Page, base_url: str):
+        """Opening one dropdown closes any other that was open."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        _open_multiselect(page, "project_ids")
+        assert self._count_selected(page, "project_ids") >= 0  # popover open
+        assert page.locator(".ms-popover.ms-open").count() == 1
+        # Opening a second dropdown closes the first.
+        _open_multiselect(page, "types")
+        assert page.locator(".ms-popover.ms-open").count() == 1
+        # The project popover is no longer open.
+        assert page.locator("[data-ms-field='project_ids'] .ms-popover.ms-open").count() == 0
+
+    def test_popover_closes_on_outside_click(self, page: Page, base_url: str):
+        """Clicking outside an open dropdown closes it."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        _open_multiselect(page, "project_ids")
+        assert page.locator(".ms-popover.ms-open").count() == 1
+        # Click on an unrelated control (the Search field, which is outside).
+        page.click("input[name='q']")
+        expect(page.locator(".ms-popover.ms-open")).to_have_count(0)
+
+    def test_closed_popover_still_submits_its_checked_options(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """A checkbox checked inside a (then closed) popover is still serialized
+        by HTMX when the form is submitted - this is what replaces the old
+        <select multiple> list-box for form submission."""
+        uns, web, _ = seeded_projects
+        in_web = make_ticket(project_id=web["id"], title="Submit While Closed")
+        in_uns = make_ticket(project_id=uns["id"], title="Hidden From Closed")
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        _select_in_multiselect(page, "project_ids", str(web["id"]))
+        # Close the popover by clicking outside, then submit.
+        page.click("input[name='q']")
+        assert page.locator(".ms-popover.ms-open").count() == 0
+        page.click("button:has-text('Filter')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
+
+        expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
         assert page.locator(f"#ticket-row-{in_uns['id']}").count() == 0

@@ -25,3 +25,61 @@
 #label-modal-container:empty {
   display: none;
 }
+
+/*
+ * Backlog multi-select dropdown component (jackrabbit/templates/backlog.html).
+ *
+ * Each filter is a .ms-field wrapping a trigger button (.ms-trigger) and a
+ * popover (.ms-popover). The popover toggles with visibility+pointer-events
+ * (NOT display:none) so its checked checkboxes and selected radios always
+ * participate in form submission, even while the popover is closed. This is
+ * what lets HTMX's hx-include serialize the checkboxes directly - there is no
+ * hidden <select> in the markup.
+ */
+.ms-filters-row {
+  align-items: flex-end;
+}
+.ms-field {
+  position: relative;
+  min-width: 140px;
+}
+.ms-field--wide {
+  min-width: 220px;
+}
+.ms-trigger {
+  min-width: 170px;
+}
+.ms-trigger-text {
+  display: inline-block;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.ms-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  /* Capped at runtime (see backlog-filter-form.js) so a tall dropdown never
+     overlaps the Filter/Labels controls that sit below the filter row; the whole
+     panel scrolls within that cap. */
+  overflow-y: auto;
+  max-height: 240px;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  width: 256px;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  transition: opacity 0.1s ease;
+}
+.ms-popover.ms-open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}

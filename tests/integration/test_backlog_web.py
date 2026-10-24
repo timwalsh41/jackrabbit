@@ -133,9 +133,13 @@ class TestBacklogPage:
         assert 'name="status_filter_mode"' in r.text
         assert 'name="priority_filter_mode"' not in r.text
         assert 'name="sprint_filter_mode"' not in r.text
-        # an "All" convenience button per multi-select (5 fields)
-        for target in ("project_ids", "types", "statuses", "priorities", "sprint_ids"):
-            assert f'data-target="{target}"' in r.text
+        # a dropdown trigger + "select all" checkbox + option checkboxes for
+        # each multi-select field (5 fields)
+        for field in ("project_ids", "types", "statuses", "priorities", "sprint_ids"):
+            assert f'data-ms-field="{field}"' in r.text
+        assert "data-ms-trigger" in r.text
+        assert "data-ms-select-all" in r.text
+        assert "data-ms-option" in r.text
         # all seeded tickets rendered as rows
         assert "Critical outage" in r.text
         assert "Add tooltip" in r.text
@@ -742,12 +746,15 @@ class TestMultiSelectFilters:
         )
         assert r.status_code == 200
         for pid in (web.id, api.id):
-            assert f'<option value="{pid}" selected' in r.text
-        assert f'<option value="{uns.id}" selected' not in r.text
+            assert f'name="project_ids" value="{pid}" checked' in r.text
+        assert f'name="project_ids" value="{uns.id}" checked' not in r.text
 
     async def test_all_button_present_for_each_multi_select(self, client_with_seeds, ms_tickets):
         r = await _get(client_with_seeds, "/backlog")
         assert r.status_code == 200
-        # One "All" button per multi-select field (5), each targeting a select.
-        for target in ("project_ids", "types", "statuses", "priorities", "sprint_ids"):
-            assert f'data-target="{target}"' in r.text
+        # each field has a dropdown trigger; a "select all" checkbox + option
+        # checkboxes live inside its popover
+        for field in ("project_ids", "types", "statuses", "priorities", "sprint_ids"):
+            assert f'data-ms-field="{field}"' in r.text
+        assert "data-ms-select-all" in r.text
+        assert "data-ms-option" in r.text
