@@ -30,14 +30,14 @@
  * Backlog multi-select dropdown component (jackrabbit/templates/backlog.html).
  *
  * Each filter is a .ms-field wrapping a trigger button (.ms-trigger) and a
- * popover (.ms-popover). The popover toggles with visibility+pointer-events
- * (NOT display:none) so its checked checkboxes and selected radios always
- * participate in form submission, even while the popover is closed. This is
- * what lets HTMX's hx-include serialize the checkboxes directly - there is no
- * hidden <select> in the markup.
+ * popover (.ms-popover). The popover uses the native hidden attribute for
+ * its closed state, while visibility+pointer-events provide the open-state
+ * presentation. Checked checkboxes and selected radios remain ordinary form
+ * controls and participate in HTMX serialization when the popover is closed -
+ * there is no hidden <select> in the markup.
  */
 .ms-filters-row {
-  align-items: flex-end;
+  align-items: flex-start;
 }
 .ms-field {
   position: relative;
@@ -58,19 +58,18 @@
   vertical-align: bottom;
 }
 .ms-popover {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 30;
-  /* Capped at runtime (see backlog-filter-form.js) so a tall dropdown never
-     overlaps the Filter/Labels controls that sit below the filter row; the whole
-     panel scrolls within that cap. */
-  overflow-y: auto;
-  max-height: 240px;
+  /* An open popover participates in the filter row's normal flow. This lets
+     the frame grow around all of its options instead of overlaying controls
+     below the filter row. */
+  position: static;
+  margin-top: 0.25rem;
+  overflow: visible;
+  max-height: none;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  width: 256px;
+  width: 280px;
+  max-width: min(420px, calc(100vw - 24px));
   background-color: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 0.375rem;

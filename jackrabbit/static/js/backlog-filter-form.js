@@ -25,6 +25,9 @@
   "use strict";
 
   var SORT_FIELDS = ["sort", "order"];
+  var MIN_POPOVER_WIDTH = 280;
+  var MAX_POPOVER_WIDTH = 420;
+  var VIEWPORT_PADDING = 12;
 
   function syncForm(event) {
     var detail = event.detail || {};
@@ -65,6 +68,8 @@
   function closePopover(popover) {
     if (!popover) return;
     popover.classList.remove("ms-open");
+    popover.hidden = true;
+    popover.setAttribute("aria-hidden", "true");
     var trigger = document.querySelector(
       '[data-ms-trigger][data-ms-field="' +
         popover.getAttribute("data-ms-field") +
@@ -81,8 +86,10 @@
     if (open && open !== popover) {
       closePopover(open);
     }
+    popover.hidden = false;
+    popover.setAttribute("aria-hidden", "false");
     popover.classList.add("ms-open");
-    sizePopover(popover);
+    sizePopoverWidth(popover);
     var trigger = document.querySelector(
       '[data-ms-trigger][data-ms-field="' +
         popover.getAttribute("data-ms-field") +
@@ -93,20 +100,30 @@
     }
   }
 
-  // Keep a dropdown from growing past the controls below it (the "All"
-  // checkbox + options + mode block could otherwise overlap the Labels panel
-  // and the Filter/Submit row, making them unclickable). The panel scrolls
-  // within the cap; Playwright's check()/click() scroll it to reveal any
-  // option, and the Submit button stays outside the popover's box entirely.
-  function sizePopover(popover) {
-    var anchor = document.getElementById("backlog-submit-row");
-    if (!anchor) return;
-    var field = popover.closest("[data-ms-field]");
+  // The popover starts at a useful minimum width, then grows to the widest
+  // unwrapped option text. It is capped so a long project or sprint name does
+  // not consume the whole page, and constrained by the viewport on narrow
+  // screens. Once the final width is applied, normal wrapping remains a safe
+  // fallback for text longer than the cap.
+  function sizePopoverWidth(popover) {
+    var field = popover.closest(".ms-field");
     if (!field) return;
-    var fieldBottom = field.getBoundingClientRect().bottom;
-    var anchorTop = anchor.getBoundingClientRect().top;
-    var max = Math.max(120, Math.round(anchorTop - fieldBottom - 8));
-    popover.style.maxHeight = max + "px";
+
+    var viewportWidth = Math.max(0, window.innerWidth - VIEWPORT_PADDING * 2);
+    var trigger = field.querySelector("[data-ms-trigger]");
+    var triggerWidth = trigger ? trigger.getBoundingClientRect().width : 0;
+    var maxWidth = Math.min(MAX_POPOVER_WIDTH, viewportWidth);
+
+    // Measure the natural width before the final cap is applied. max-content
+    // prevents wrapped labels from making the measurement artificially small.
+    popover.style.width = "max-content";
+    popover.style.maxWidth = "none";
+    var naturalWidth = popover.getBoundingClientRect().width;
+    var width = Math.max(MIN_POPOVER_WIDTH, triggerWidth, naturalWidth);
+    width = Math.min(width, maxWidth);
+
+    popover.style.width = Math.floor(width) + "px";
+    popover.style.maxWidth = maxWidth + "px";
   }
 
   function countSelected(popover) {
@@ -216,6 +233,13 @@
       var popover = findPopover(trigger);
       if (!popover) continue;
 
+      // The hidden attribute is the authoritative closed state. CSS adds the
+      // presentation and transition, but the dropdown stays closed even if
+      // the enhancement stylesheet is unavailable.
+      popover.hidden = true;
+      popover.setAttribute("aria-hidden", "true");
+      trigger.setAttribute("aria-expanded", "false");
+
       trigger.addEventListener("click", onTriggerClick);
 
       // Wire every option checkbox in this field's popover.
@@ -235,7 +259,7 @@
       document.addEventListener("keydown", onDocumentKeydown);
       window.addEventListener("resize", function () {
         var open = document.querySelector(".ms-popover.ms-open");
-        if (open) sizePopover(open);
+        if (open) sizePopoverWidth(open);
       });
     }
   }

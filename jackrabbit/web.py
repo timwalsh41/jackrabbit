@@ -25,6 +25,7 @@ from jackrabbit.models import (
 )
 from jackrabbit.schemas import ProjectCreate, ProjectUpdate
 from jackrabbit.services import (
+    FilterMode,
     LabelService,
     LinkService,
     ProjectService,
@@ -508,7 +509,7 @@ def _parse_multi_enums[E: StrEnum](
     return result
 
 
-def _filter_mode(value: str) -> str:
+def _filter_mode(value: str) -> FilterMode:
     """Normalise an include/exclude filter mode to "include" or "exclude".
 
     Any unrecognised value defaults to "include" (the safe, default mode).
@@ -522,13 +523,13 @@ def _build_backlog_context(
     sprint_service: SprintService,
     project_id: int | None = None,
     project_ids: list[int] | None = None,
-    project_filter_mode: str = "include",
+    project_filter_mode: FilterMode = "include",
     status: TicketStatus | None = None,
     statuses: list[TicketStatus] | None = None,
-    status_filter_mode: str = "include",
+    status_filter_mode: FilterMode = "include",
     type: TicketType | None = None,
     types: list[TicketType] | None = None,
-    type_filter_mode: str = "include",
+    type_filter_mode: FilterMode = "include",
     priority: Priority | None = None,
     priorities: list[Priority] | None = None,
     sprint_id: int | None = None,

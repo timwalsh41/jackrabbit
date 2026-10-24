@@ -568,6 +568,61 @@ class TestMultiSelectDropdownUI:
         page.click("input[name='q']")
         expect(page.locator(".ms-popover.ms-open")).to_have_count(0)
 
+    def test_popovers_are_hidden_on_initial_load(self, page: Page, base_url: str):
+        """Filter options remain hidden until their trigger is selected."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+
+        for field in MULTI_FIELDS:
+            expect(page.locator(f"[data-ms-field='{field}'] [data-ms-popover]")).to_be_hidden()
+
+    def test_popovers_remain_hidden_if_custom_stylesheet_is_unavailable(
+        self, page: Page, base_url: str
+    ):
+        """A missing enhancement stylesheet must not expose every dropdown."""
+        page.route("**/static/css/app.css", lambda route: route.abort())
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+
+        for field in MULTI_FIELDS:
+            expect(page.locator(f"[data-ms-field='{field}'] [data-ms-popover]")).to_be_hidden()
+
+    def test_open_popover_frame_contains_all_options(self, page: Page, base_url: str):
+        """The popover frame must enclose its options instead of clipping them."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        _open_multiselect(page, "statuses")
+
+        popover = page.locator("[data-ms-field='statuses'] [data-ms-popover]")
+        last_option = popover.locator("[data-ms-option]").last
+        popover_box = popover.bounding_box()
+        last_option_box = last_option.bounding_box()
+        assert popover_box is not None
+        assert last_option_box is not None
+        assert last_option_box["y"] + last_option_box["height"] <= (
+            popover_box["y"] + popover_box["height"]
+        )
+
+    def test_popover_widens_options_to_avoid_unnecessary_wrapping(self, page: Page, base_url: str):
+        """The open panel is wider than the trigger when option text needs room."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        _open_multiselect(page, "project_ids")
+
+        trigger = page.locator("[data-ms-field='project_ids'] [data-ms-trigger]")
+        popover = page.locator("[data-ms-field='project_ids'] [data-ms-popover]")
+        trigger_box = trigger.bounding_box()
+        popover_box = popover.bounding_box()
+        assert trigger_box is not None
+        assert popover_box is not None
+        assert popover_box["width"] >= 280
+        assert popover_box["width"] > trigger_box["width"]
+
+        label_heights = popover.locator(".ms-options > label").evaluate_all(
+            "els => els.map(el => el.getBoundingClientRect().height)"
+        )
+        assert max(label_heights) <= 32
+
     def test_closed_popover_still_submits_its_checked_options(
         self, page: Page, base_url: str, seeded_projects, make_ticket
     ):

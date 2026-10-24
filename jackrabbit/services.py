@@ -41,6 +41,9 @@ class ConflictError(ValueError):
     """Raised when an operation conflicts with existing state (maps to HTTP 409)."""
 
 
+FilterMode = Literal["include", "exclude"]
+
+
 # Whitelist of Ticket columns usable as a ``list_tickets`` sort field. Any other
 # value falls back to "number" instead of raising (sort is user-supplied).
 ALLOWED_TICKET_SORT_FIELDS = frozenset(
@@ -507,13 +510,13 @@ class TicketService:
 
     def _apply_multi_select_filter(
         self,
-        query,
-        count_query,
-        column,
-        single_value,
-        multi_values: Sequence | None,
-        filter_mode: Literal["include", "exclude"] = "include",
-    ):
+        query: Any,
+        count_query: Any,
+        column: Any,
+        single_value: Any,
+        multi_values: Sequence[Any] | None,
+        filter_mode: FilterMode = "include",
+    ) -> tuple[Any, Any]:
         """Apply a multi-select filter with include/exclude mode.
 
         Returns (query, count_query) with the filter applied.
@@ -537,13 +540,13 @@ class TicketService:
         self,
         project_id: int | None = None,
         project_ids: Sequence[int] | None = None,
-        project_filter_mode: Literal["include", "exclude"] = "include",
+        project_filter_mode: FilterMode = "include",
         status: TicketStatus | None = None,
         statuses: Sequence[TicketStatus] | None = None,
-        status_filter_mode: Literal["include", "exclude"] = "include",
+        status_filter_mode: FilterMode = "include",
         type: TicketType | None = None,
         types: Sequence[TicketType] | None = None,
-        type_filter_mode: Literal["include", "exclude"] = "include",
+        type_filter_mode: FilterMode = "include",
         priority: Priority | None = None,
         priorities: Sequence[Priority] | None = None,
         sprint_id: int | None = None,
