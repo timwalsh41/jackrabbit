@@ -568,6 +568,25 @@ class TestMultiSelectDropdownUI:
         page.click("input[name='q']")
         expect(page.locator(".ms-popover.ms-open")).to_have_count(0)
 
+    def test_opening_popover_does_not_move_neighboring_triggers(self, page: Page, base_url: str):
+        """Opening one popover leaves every filter trigger in place."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        fields = MULTI_FIELDS
+        before = {
+            field: page.locator(f"[data-ms-field='{field}'] [data-ms-trigger]").bounding_box()
+            for field in fields
+        }
+        assert all(before.values()), "every filter trigger needs a layout box"
+
+        _open_multiselect(page, "project_ids")
+
+        for field in fields:
+            after = page.locator(f"[data-ms-field='{field}'] [data-ms-trigger]").bounding_box()
+            assert after is not None
+            assert after["x"] == pytest.approx(before[field]["x"])
+            assert after["y"] == pytest.approx(before[field]["y"])
+
     def test_popovers_are_hidden_on_initial_load(self, page: Page, base_url: str):
         """Filter options remain hidden until their trigger is selected."""
         page.goto(f"{base_url}/backlog")
@@ -580,7 +599,7 @@ class TestMultiSelectDropdownUI:
         self, page: Page, base_url: str
     ):
         """A missing enhancement stylesheet must not expose every dropdown."""
-        page.route("**/static/css/app.css", lambda route: route.abort())
+        page.route("**/static/css/app.css*", lambda route: route.abort())
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
 

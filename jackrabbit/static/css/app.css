@@ -43,6 +43,12 @@
   position: relative;
   min-width: 140px;
 }
+.ms-field[data-ms-field] {
+  /* Keep the flex item at the trigger width. The wider open popover may
+     overflow this box, but it must not become part of flex sizing. */
+  width: 170px;
+  flex: 0 0 170px;
+}
 .ms-field--wide {
   min-width: 220px;
 }
@@ -58,9 +64,8 @@
   vertical-align: bottom;
 }
 .ms-popover {
-  /* An open popover participates in the filter row's normal flow. This lets
-     the frame grow around all of its options instead of overlaying controls
-     below the filter row. */
+  /* Stay in normal flow so the form reserves vertical space for all options,
+     while the fixed-width .ms-field above prevents horizontal reflow. */
   position: static;
   margin-top: 0.25rem;
   overflow: visible;

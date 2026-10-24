@@ -9,6 +9,8 @@ Covers ticket 03 web criteria:
 - Glossary vocabulary (Project / Ticket / Sprint)
 """
 
+import re
+
 from httpx import AsyncClient
 
 
@@ -48,6 +50,27 @@ async def test_base_template_nav_and_htmx(
         ("Projects", "/projects"),
     ]:
         assert f'href="{href}"' in html, f"nav missing {label} link"
+
+
+async def test_base_template_version_busts_static_assets(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Changed static assets receive a new URL instead of stale browser cache."""
+    response = await client_with_seeds.get("/backlog")
+    html = response.text
+    for asset in (
+        "/static/css/tailwind.css",
+        "/static/css/app.css",
+        "/static/vendor/htmx.min.js",
+        "/static/vendor/htmx-json-enc.js",
+        "/static/js/sprint-dropdown.js",
+        "/static/js/label-chips.js",
+        "/static/js/backlog-filter-form.js",
+        "/static/img/favicon.svg",
+    ):
+        assert re.search(rf"{re.escape(asset)}\?v=[0-9a-f]{{12}}", html), (
+            f"static asset is not content-versioned: {asset}"
+        )
 
 
 async def test_glossary_vocabulary(

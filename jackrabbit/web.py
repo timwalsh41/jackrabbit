@@ -1,7 +1,9 @@
 """Web/UI routes for Jackrabbit (HTMX + Jinja2)."""
 
+import hashlib
 from datetime import date
 from enum import StrEnum
+from functools import cache
 from pathlib import Path
 from typing import cast
 
@@ -37,7 +39,32 @@ router = APIRouter()
 
 # Use default Jinja2Templates with directory - simpler and more reliable
 template_dir = Path(__file__).parent / "templates"
+static_dir = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(template_dir))
+
+
+@cache
+def _static_asset_digest(path: str) -> str:
+    """Return a short content digest for a local static asset."""
+    relative_path = path.removeprefix("/static/")
+    asset_path = (static_dir / relative_path).resolve()
+    try:
+        asset_path.relative_to(static_dir.resolve())
+    except ValueError as exc:
+        raise ValueError(f"static asset path escapes the static directory: {path}") from exc
+    return hashlib.sha256(asset_path.read_bytes()).hexdigest()[:12]
+
+
+def static_url(path: str) -> str:
+    """Build a cache-busted URL for a local static asset."""
+    if not path.startswith("/static/"):
+        raise ValueError(f"static asset URL must start with /static/: {path}")
+    return f"{path}?v={_static_asset_digest(path)}"
+
+
+# Shared templates use content-versioned URLs so browsers cannot combine new
+# markup with stale JavaScript or CSS after a deployment.
+templates.env.globals["static_url"] = static_url
 
 # Server-side, HTML-escaping markdown renderer (HTMX-safe descriptions)
 templates.env.filters["markdown"] = render_markdown
