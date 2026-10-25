@@ -154,3 +154,58 @@ class TestCompleteModal:
         response = await client.get(f"/ticket/{ticket['id']}")
         assert response.status_code == 200
         assert "/transition/complete/modal" in response.text
+
+
+async def _create_epic_ticket(client: httpx.AsyncClient, project_id: int = 1) -> dict:
+    """Create an Epic via the API (mirrors the e2e make_ticket factory)."""
+    response = await client.post(
+        "/api/v1/tickets",
+        json={
+            "project_id": project_id,
+            "title": "Transition web epic test",
+            "type": "Epic",
+        },
+    )
+    assert response.status_code in (200, 201)
+    return response.json()
+
+
+class TestEpicTransitionModals:
+    """An Epic is a planning container, so its Groomed modal must not mark the
+    structured fields as HTML-required (the browser would otherwise block a
+    real user grooming an Epic without them), and its In Progress modal must
+    not mark the branch name as required — the backend is exempt for Epic
+    (ADR-0008 / ADR-0010).
+    """
+
+    async def test_epic_groomed_modal_has_no_required_fields(self, client: httpx.AsyncClient):
+        epic = await _create_epic_ticket(client)
+        response = await client.get(f"/tickets/{epic['id']}/transition/groomed/modal")
+        assert response.status_code == 200
+        html = response.text
+        # The four gating fields must not be required for an Epic.
+        assert "required" not in html
+        # The fields are still rendered (just optional) so the user can fill them.
+        for name in ("approach", "files_to_change", "test_plan", "validation_steps"):
+            assert f'name="{name}"' in html
+        # The Epic-specific hint is shown instead of the red asterisks.
+        assert "Epics are planning containers" in html
+        assert 'text-red-500">*</span>' not in html
+
+    async def test_story_groomed_modal_still_requires_fields(self, client: httpx.AsyncClient):
+        ticket = await _create_ticket(client)
+        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        assert response.status_code == 200
+        html = response.text
+        assert "required" in html
+        assert 'text-red-500">*</span>' in html
+
+    async def test_epic_in_progress_modal_branch_not_required(self, client: httpx.AsyncClient):
+        epic = await _create_epic_ticket(client)
+        response = await client.get(f"/tickets/{epic['id']}/transition/in-progress/modal")
+        assert response.status_code == 200
+        html = response.text
+        # The branch input must not be HTML-required for an Epic.
+        assert 'name="branch_name"' in html
+        assert "required" not in html
+        assert "Optional for Epics" in html

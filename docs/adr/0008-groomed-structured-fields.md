@@ -34,6 +34,15 @@ Spec defines "Groomed = approach has been assessed, code and test updates identi
 - UI shows fields inline on ticket detail; "Mark Groomed" button validates all four present
 - For trivial tickets (typo fix), fields can be "N/A" or one-liners
 
+### Epic Exemption
+An `Epic` is a planning container, not a unit of code, so it is **exempt** from
+this four-field gate: an Epic may transition `Open -> Groomed` with the four
+fields left blank. `Story`, `Bug` and `Spike` are still required to supply all
+four fields to enter `Groomed`. The Groomed transition modal renders the fields
+without HTML `required` for an Epic (and omits the red asterisks) so a user can
+groom an Epic through the UI without them; the backend enforces the same
+exemption. This is implemented in `TicketService._validate_guard`.
+
 ## Alternatives Considered
 - **Free-text**: Rejected — "Groomed" becomes meaningless checkbox; no enforcement of thinking.
 - **Hybrid**: Rejected — optional fields don't create the gate; required fields do.

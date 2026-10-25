@@ -323,6 +323,74 @@ class TestTicketLifecycle:
             page.locator("#tickets-table-body tr:has-text('Edited via UI form')").first
         ).to_be_visible(timeout=10000)
 
+    def test_groom_epic_without_structured_fields(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """An Epic is a planning container, so it can be groomed through the UI
+        with none of the four structured fields filled (ADR-0008).
+
+        The Groomed modal does not mark those fields HTML-required for an Epic,
+        so the user can open the modal and click Groom with them blank; the
+        backend is exempt and records an Open -> Groomed audit row.
+        """
+        epic = make_ticket(ticket_type="Epic", status="Open", title="Epic to Groom via UI")
+        tid = epic["id"]
+
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
+
+        # Open the Groomed modal
+        page.click("button:has-text('Groomed')")
+        page.wait_for_selector("#groom-form", state="visible", timeout=10000)
+
+        # For an Epic the structured fields are optional: no required asterisks
+        # and the informational hint is shown.
+        assert page.locator("#groom-form .text-red-500").count() == 0
+        expect(page.locator("#groom-form").locator("text=planning containers")).to_be_visible(
+            timeout=5000
+        )
+
+        # Submit the modal with all four fields left blank
+        page.click("#groom-form button[type='submit']")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(1500)
+
+        # Status badge should now show Groomed
+        expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
+            timeout=10000
+        )
+        # Transition audit row (Open -> Groomed) recorded
+        expect(page.locator("#transition-history")).to_contain_text("Groomed")
+
+
+def test_groom_epic_without_structured_fields_via_api(
+    page: Page, base_url: str, seeded_projects, make_ticket
+):
+    """The acceptance-flow check from the ticket: POST the Groomed transition
+    with no structured fields on an Epic and expect 200 + status Groomed."""
+    import httpx
+
+    epic = make_ticket(ticket_type="Epic", status="Open", title="Epic API groom no-fields")
+    tid = epic["id"]
+
+    with httpx.Client(base_url=base_url, timeout=30.0) as api:
+        response = api.post(
+            f"/api/v1/tickets/{tid}/transition",
+            json={"to_status": "Groomed"},
+        )
+        assert response.status_code == 200
+        assert response.json()["to_status"] == "Groomed"
+
+        # A Story without the four fields is still rejected (regression).
+        story = make_ticket(ticket_type="Story", status="Open", title="Story API groom no-fields")
+        response = api.post(
+            f"/api/v1/tickets/{story['id']}/transition",
+            json={"to_status": "Groomed"},
+        )
+        assert response.status_code == 400
+        assert "Approach is required" in response.json()["detail"]
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

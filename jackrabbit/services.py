@@ -344,26 +344,38 @@ class TicketService:
         """Validate guard conditions for forward transitions.
 
         Returns error message or None if valid.
+
+        An Epic is a planning container rather than a unit of code, so it is
+        exempt from the Open -> Groomed structured-field gate (ADR-0008) and
+        from the Groomed -> In Progress branch-name format check (ADR-0010);
+        its branch name is auto-generated instead. Story, Bug and Spike are
+        still gated exactly as before.
         """
         if to_status == TicketStatus.GROOMED and from_status == TicketStatus.OPEN:
-            if not ticket.approach or not ticket.approach.strip():
-                return "Approach is required to transition to Groomed"
-            if not ticket.files_to_change or not ticket.files_to_change.strip():
-                return "Files to change is required to transition to Groomed"
-            if not ticket.test_plan or not ticket.test_plan.strip():
-                return "Test plan is required to transition to Groomed"
-            if not ticket.validation_steps or not ticket.validation_steps.strip():
-                return "Validation steps is required to transition to Groomed"
+            # An Epic may be groomed without the four structured fields: it is
+            # a planning container, not a unit of code (ADR-0008).
+            if ticket.type != TicketType.EPIC:
+                if not ticket.approach or not ticket.approach.strip():
+                    return "Approach is required to transition to Groomed"
+                if not ticket.files_to_change or not ticket.files_to_change.strip():
+                    return "Files to change is required to transition to Groomed"
+                if not ticket.test_plan or not ticket.test_plan.strip():
+                    return "Test plan is required to transition to Groomed"
+                if not ticket.validation_steps or not ticket.validation_steps.strip():
+                    return "Validation steps is required to transition to Groomed"
         elif to_status == TicketStatus.IN_PROGRESS and from_status == TicketStatus.GROOMED:
-            # Branch name is auto-generated if empty, but validate if provided
-            if ticket.branch_name and ticket.branch_name.strip():
-                import re
+            # Branch name is auto-generated if empty, but validate the format
+            # when a value is supplied. An Epic is exempt from the format check
+            # (ADR-0010): its branch is optional and auto-generated.
+            if ticket.type != TicketType.EPIC:
+                if ticket.branch_name and ticket.branch_name.strip():
+                    import re
 
-                if not re.match(r"^[a-zA-Z0-9/_-]+$", ticket.branch_name.strip()):
-                    return (
-                        "Branch name must contain only alphanumeric characters, "
-                        "hyphens, underscores, and slashes"
-                    )
+                    if not re.match(r"^[a-zA-Z0-9/_-]+$", ticket.branch_name.strip()):
+                        return (
+                            "Branch name must contain only alphanumeric characters, "
+                            "hyphens, underscores, and slashes"
+                        )
         elif to_status == TicketStatus.READY_FOR_REVIEW and from_status == TicketStatus.IN_PROGRESS:
             # PR URL is optional: an empty/missing URL must not gate the
             # transition. Validate the format only when a URL is supplied.
