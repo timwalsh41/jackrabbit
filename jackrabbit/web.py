@@ -138,7 +138,9 @@ async def ticket_new(
             "projects": projects,
             "sprints": sprints,
             "default_project_id": default_project_id,
+            "default_type": TicketType.STORY,
             "action": "/api/v1/tickets",
+            "modal_title": "New Ticket",
             "TicketType": TicketType,
             "Priority": Priority,
             "current_labels": [],
@@ -1201,6 +1203,52 @@ async def ticket_detail(
             "branch_name": ticket.branch_name,
             "pr_url": ticket.pr_url,
             "original_id": ticket.original_id,
+        },
+    )
+
+
+# Child-creation web routes (JRB-010): Epic-only "Create Child" affordance on the
+# ticket detail page. Registered after the literal /tickets/new and /tickets/search
+# paths above so those static routes keep precedence over /tickets/{ticket_id}.
+@router.get("/tickets/{parent_id}/children/new", response_class=HTMLResponse)
+async def ticket_create_child_modal(
+    request: Request,
+    parent_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    project_service: ProjectService = Depends(get_project_service),
+    sprint_service: SprintService = Depends(get_sprint_service),
+    label_service: LabelService = Depends(get_label_service),
+) -> HTMLResponse:
+    """Render the New Ticket modal partial in child mode.
+
+    Returns the ``ticket_form_partial.html`` modal pre-filled for child
+    creation: parent_id in the form action, title "New Child Ticket", default
+    type Story, and the parent Epic's project pre-selected. 404 if the parent
+    is absent or not an Epic (children are Epic-only).
+    """
+    parent = ticket_service.get_ticket(parent_id)
+    if not parent or parent.type != TicketType.EPIC:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    projects = project_service.list_projects()
+    sprints = sprint_service.list_sprints()
+
+    return templates.TemplateResponse(
+        request,
+        "ticket_form_partial.html",
+        {
+            "ticket": parent,
+            "projects": projects,
+            "sprints": sprints,
+            "default_project_id": parent.project_id,
+            "default_type": TicketType.STORY,
+            "parent_id": parent.id,
+            "action": f"/api/v1/tickets/{parent.id}/children",
+            "modal_title": "New Child Ticket",
+            "TicketType": TicketType,
+            "Priority": Priority,
+            "current_labels": [],
+            "label_suggestions": label_service.list_labels_in_use(),
         },
     )
 

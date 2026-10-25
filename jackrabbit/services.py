@@ -239,6 +239,28 @@ class TicketService:
         self.session.refresh(ticket)
         return ticket
 
+    def create_child_ticket(self, parent_id: int, **fields: Any) -> Ticket:
+        """Atomically create a child ticket and link it to its Epic parent.
+
+        Composes ``create_ticket`` + ``LinkService.create_link`` so a child is
+        created and its parent-child link (plus the inverse PARENT link) are
+        written together. Raises ValueError if the parent is absent or not an
+        Epic, so no child ticket is left orphaned by a failed link.
+        """
+        parent = self.get_ticket(parent_id)
+        if parent is None:
+            raise ValueError(f"Parent ticket {parent_id} not found")
+        if parent.type != TicketType.EPIC:
+            raise ValueError("Parent ticket must be an Epic to create a child ticket")
+
+        child = self.create_ticket(**fields)
+        LinkService(self.session).create_link(
+            source_id=cast(int, child.id),
+            target_id=parent_id,
+            link_type=LinkType.CHILD,
+        )
+        return child
+
     def get_ticket(self, ticket_id: int) -> Ticket | None:
         return self.session.get(Ticket, ticket_id)
 
