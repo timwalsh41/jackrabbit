@@ -49,6 +49,15 @@ Ticket status: `Open` → `Groomed` → `In Progress` → `Ready for Review` →
 - `transition_history` table: `ticket_id`, `from_status`, `to_status`, `at`, `reason`
 - API: `POST /api/v1/tickets/{id}/transition` with `to_status` and optional `reason`
 
+### Epic Exemption
+An `Epic` (a planning container, not a unit of code) is exempt from two of the
+forward guards: the `Open -> Groomed` structured-field requirement and the
+`Groomed -> In Progress` branch-name format check. An Epic may therefore be
+groomed with the four fields blank, and its branch name is optional and
+auto-generated on transition to `In Progress`. The branch-name format check is
+skipped entirely for Epics; `Story`/`Bug`/`Spike` keep the check. The exemption
+is applied in `TicketService._validate_guard`, gated on `ticket.type`.
+
 ## Alternatives Considered
 - **Strict linear**: Rejected — no backward, no restore from Rejected.
 - **Free any→any**: Rejected — allows invalid states (In Progress without branch).

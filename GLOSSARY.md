@@ -24,7 +24,7 @@
 : A typed relationship between two tickets. Types: `parent`/`child` (epic→story), `blocks`/`blocked_by` (dependencies), `relates_to` (bidirectional association).
 
 **Groomed**
-: A ticket status meaning the approach has been assessed and four structured fields are populated: `approach`, `files_to_change`, `test_plan`, `validation_steps`.
+: A ticket status meaning the approach has been assessed and four structured fields are populated: `approach`, `files_to_change`, `test_plan`, `validation_steps`. `Epic` is exempt from this gate (a planning container, not a unit of code) and may be groomed with the fields blank — see ADR-0008.
 
 **In Progress**
 : A ticket status meaning a git branch has been created (naming convention: `{project}-{number}-{slug}`) and work is underway.

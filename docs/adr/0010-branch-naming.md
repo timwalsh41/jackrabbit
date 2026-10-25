@@ -49,3 +49,10 @@ prefix, so it is codified rather than changed.
   **Amended**: see Amendment above — implemented with the type prefix (`feature/`, `fix/`, `epic/`, `spike/`) and kept, since the implementation and its tests (ticket 10 onward) codified it.
 - **User-defined**: Rejected — inconsistency, typos, no grep pattern.
 - **UUID**: Rejected — opaque, not grep-friendly, no context.
+
+### Epic Exemption
+An `Epic` is a planning container, so its branch name is **optional** and
+auto-generated on transition to `In Progress` (it may also be left blank, in
+which case `transition()` generates one). The branch-name *format* guard in
+`_validate_guard` is skipped for Epics; `Story`/`Bug`/`Spike` keep it. The
+`epic/` type prefix (see Amendment) is still produced by `generate_branch_name`.
