@@ -18,5 +18,10 @@ module.exports = {
   theme: {
     extend: {},
   },
-  plugins: [],
+  plugins: [
+    // @tailwindcss/typography powers the `prose` class used by the markdown-rendered
+    // ticket description (ticket_fields_section.html). Without it, Tailwind preflight
+    // hides headings (font-size:inherit) and list bullets (list-style:none).
+    require('@tailwindcss/typography'),
+  ],
 };
