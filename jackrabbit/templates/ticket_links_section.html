@@ -2,17 +2,33 @@
 <div class="space-y-6" id="links-section">
     <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold text-gray-900">Links</h2>
-        <button 
-            class="btn btn-primary btn-sm"
-            hx-get="/tickets/{{ ticket.id }}/links/modal"
-            hx-target="#link-modal-container"
-            hx-swap="innerHTML"
-        >
-            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-            </svg>
-            Add Link
-        </button>
+        <div class="flex items-center gap-2">
+            {% if ticket.type == 'Epic' %}
+            <button 
+                class="btn btn-primary btn-sm"
+                hx-get="/tickets/{{ ticket.id }}/children/new"
+                hx-target="#ticket-modal"
+                hx-swap="innerHTML"
+                title="Create a child ticket under this Epic"
+            >
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Create Child
+            </button>
+            {% endif %}
+            <button 
+                class="btn btn-primary btn-sm"
+                hx-get="/tickets/{{ ticket.id }}/links/modal"
+                hx-target="#link-modal-container"
+                hx-swap="innerHTML"
+            >
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Add Link
+            </button>
+        </div>
     </div>
 
     {% if not links %}

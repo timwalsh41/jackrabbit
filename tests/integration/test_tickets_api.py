@@ -803,3 +803,114 @@ class TestTicketsMultiSelectFilters:
         await self._seed(client_with_seeds)
         r = await client_with_seeds.get("/api/v1/tickets", params={"statuses": "Bogus"})
         assert r.status_code == 422
+
+
+class TestCreateChildEndpoint:
+    """POST /api/v1/tickets/{parent_id}/children: Epic-only child creation."""
+
+    async def test_create_child_returns_201_and_child(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        epic = await _create_ticket(
+            client_with_seeds, two_projects["web"], "Epic Parent", type="Epic"
+        )
+        payload = {
+            "project_id": two_projects["web"],
+            "title": "Child story",
+            "type": "Story",
+        }
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{epic['id']}/children", json=payload
+        )
+        assert response.status_code == 201, response.text
+        child = response.json()
+        assert child["title"] == "Child story"
+        assert child["type"] == "Story"
+        assert child["id"] != epic["id"]
+        # Child inherits the Epic's project
+        assert child["project_id"] == two_projects["web"]
+
+    async def test_create_child_creates_child_and_inverse_parent_links(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        epic = await _create_ticket(
+            client_with_seeds, two_projects["web"], "Epic Parent", type="Epic"
+        )
+        payload = {
+            "project_id": two_projects["web"],
+            "title": "Child of Epic",
+            "type": "Story",
+        }
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{epic['id']}/children", json=payload
+        )
+        assert response.status_code == 201, response.text
+        child = response.json()
+
+        links = (await client_with_seeds.get(f"/api/v1/tickets/{epic['id']}/links")).json()
+        # PARENT link: epic -> child
+        parent_links = [
+            link
+            for link in links
+            if link["link_type"] == "parent" and link["target_id"] == child["id"]
+        ]
+        assert len(parent_links) == 1
+        # CHILD link: child -> epic
+        child_links = [
+            link
+            for link in links
+            if link["link_type"] == "child" and link["source_id"] == child["id"]
+        ]
+        assert len(child_links) == 1
+
+    async def test_create_child_non_epic_returns_400(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        story = await _create_ticket(
+            client_with_seeds, two_projects["web"], "Story Parent", type="Story"
+        )
+        payload = {
+            "project_id": two_projects["web"],
+            "title": "Should fail",
+            "type": "Story",
+        }
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{story['id']}/children", json=payload
+        )
+        assert response.status_code == 400
+        assert "Epic" in response.json()["detail"]
+
+    async def test_create_child_nonexistent_parent_returns_404(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        payload = {
+            "project_id": two_projects["web"],
+            "title": "Orphan",
+            "type": "Story",
+        }
+        response = await client_with_seeds.post("/api/v1/tickets/99999/children", json=payload)
+        assert response.status_code == 404
+
+    async def test_create_child_htmx_returns_links_section(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        """HTMX POST swaps the refreshed links-section partial in place."""
+        epic = await _create_ticket(
+            client_with_seeds, two_projects["web"], "Epic Parent", type="Epic"
+        )
+        payload = {
+            "project_id": two_projects["web"],
+            "title": "Child of Epic",
+            "type": "Story",
+        }
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{epic['id']}/children",
+            json=payload,
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert 'id="links-section"' in response.text
+        assert "Children (Stories/Bugs/Spikes)" in response.text
+        # The new child is referenced in the refreshed Links section
+        assert "Child of Epic" in response.text

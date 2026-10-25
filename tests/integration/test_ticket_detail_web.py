@@ -333,3 +333,49 @@ class TestDetailPageActions:
         response = await client.delete(f"/api/v1/tickets/{ticket['id']}")
         assert response.status_code == 204
         assert (await client.get(f"/api/v1/tickets/{ticket['id']}")).status_code == 404
+
+
+class TestCreateChildWeb:
+    """Epic-only 'Create Child' affordance on the ticket detail page (JRB-010)."""
+
+    async def test_create_child_button_present_on_epic_detail(self, client: httpx.AsyncClient):
+        """The Create Child button lives in the links-section partial that the
+        Epic detail page loads (GET /tickets/{id}/links)."""
+        epic = await create_ticket(client, title="Epic for child button", type="Epic")
+        response = await client.get(f"/tickets/{epic['id']}/links", headers={"accept": "text/html"})
+        assert response.status_code == 200
+        assert "Create Child" in response.text
+        assert f'hx-get="/tickets/{epic["id"]}/children/new"' in response.text
+        assert 'hx-target="#ticket-modal"' in response.text
+
+    async def test_create_child_button_absent_on_story_detail(self, client: httpx.AsyncClient):
+        story = await create_ticket(client, title="Story without child button")
+        response = await client.get(
+            f"/tickets/{story['id']}/links", headers={"accept": "text/html"}
+        )
+        assert response.status_code == 200
+        assert "Create Child" not in response.text
+
+    async def test_children_new_modal_partial_for_epic(self, client: httpx.AsyncClient):
+        epic = await create_ticket(client, title="Epic for child modal", type="Epic")
+        response = await client.get(
+            f"/tickets/{epic['id']}/children/new",
+            headers={"HX-Request": "true", "accept": "text/html"},
+        )
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "New Child Ticket" in response.text
+        assert f'hx-post="/api/v1/tickets/{epic["id"]}/children"' in response.text
+        # The form posts the Epic's project by default
+        assert f'<option value="{epic["project_id"]}" selected' in response.text
+
+    async def test_children_new_returns_404_for_story(self, client: httpx.AsyncClient):
+        story = await create_ticket(client, title="Story non-epic parent")
+        response = await client.get(
+            f"/tickets/{story['id']}/children/new", headers={"HX-Request": "true"}
+        )
+        assert response.status_code == 404
+
+    async def test_children_new_returns_404_for_missing_ticket(self, client: httpx.AsyncClient):
+        response = await client.get("/tickets/99999/children/new", headers={"HX-Request": "true"})
+        assert response.status_code == 404

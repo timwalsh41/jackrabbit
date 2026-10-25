@@ -7,13 +7,13 @@
                 <div class="sm:flex sm:items-start">
                     <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
                         <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                            New Ticket
+                            {{ modal_title }}
                         </h3>
                     </div>
                 </div>
                 
                 <form hx-post="{{ action }}"
-                      hx-swap="none"
+                      {% if parent_id %}hx-target="#links-section" hx-swap="outerHTML"{% else %}hx-swap="none"{% endif %}
                       id="ticket-form"
                       class="mt-4 space-y-4"
                       hx-headers='{"Content-Type": "application/json"}'
@@ -38,7 +38,7 @@
                         <select name="type" id="type" required
                             class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                             {% for t in TicketType %}
-                            <option value="{{ t.value }}" {% if t == TicketType.STORY %}selected{% endif %}>
+                            <option value="{{ t.value }}" {% if t == default_type|default(TicketType.STORY) %}selected{% endif %}>
                                 {{ t.value }}
                             </option>
                             {% endfor %}

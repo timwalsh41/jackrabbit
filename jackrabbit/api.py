@@ -442,6 +442,75 @@ def create_ticket(
     return _ticket_read(ticket, label_service.labels_for_ticket(cast(int, ticket.id)))
 
 
+@router.post(
+    "/tickets/{parent_id}/children",
+    response_model=None,
+    status_code=201,
+)
+def create_child_ticket(
+    request: Request,
+    parent_id: int,
+    child_in: TicketCreate,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    link_service: LinkService = Depends(get_link_service),
+    label_service: LabelService = Depends(get_label_service),
+) -> TicketRead | HTMLResponse:
+    """Create a child ticket under an Epic and auto-link it as a child.
+
+    - 404 if the parent ticket is absent.
+    - 400 if the parent is not an Epic (parent-child links are Epic-only).
+    - HTMX (HX-Request) -> refreshed links-section partial that swaps
+      #links-section in place; otherwise the created child as a TicketRead (201).
+    """
+    parent = ticket_service.get_ticket(parent_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent ticket not found")
+    if parent.type != TicketType.EPIC:
+        raise HTTPException(
+            status_code=400, detail="Parent ticket must be an Epic to create a child"
+        )
+
+    # Validate label names BEFORE creating the child (no half-created ticket).
+    try:
+        for name in child_in.labels:
+            label_service.normalize_name(name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    try:
+        child = ticket_service.create_child_ticket(
+            parent_id,
+            project_id=child_in.project_id,
+            title=child_in.title,
+            type=child_in.type,
+            description=child_in.description,
+            priority=child_in.priority,
+            story_points=child_in.story_points,
+            approach=child_in.approach,
+            files_to_change=child_in.files_to_change,
+            test_plan=child_in.test_plan,
+            validation_steps=child_in.validation_steps,
+            sprint_id=child_in.sprint_id,
+            status=child_in.status,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if child_in.labels:
+        try:
+            label_service.replace(cast(int, child.id), child_in.labels)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    # HTMX-aware: the Create Child modal form swaps the refreshed links section
+    # in place (same pattern as the HTMX-aware POST /tickets/{id}/links).
+    if request.headers.get("HX-Request"):
+        from jackrabbit.web import _links_section_response
+
+        return _links_section_response(request, parent_id, ticket_service, link_service)
+    return _ticket_read(child, label_service.labels_for_ticket(cast(int, child.id)))
+
+
 @router.get("/tickets", response_model=PaginatedResponse)
 def list_tickets(
     # Backward-compatible single-value filters: take precedence over the

@@ -811,5 +811,89 @@ class TestGetEpicsWithChildren:
         assert link_service.get_epics_with_children() == []
 
 
+class TestCreateChildTicket:
+    """Tests for TicketService.create_child_ticket (atomic create + parent-child link).
+
+    Reuses the session fixtures (session, ticket_service, link_service) and the
+    link fixtures (epic_ticket, story_ticket, test_project) defined in this
+    module.
+    """
+
+    def test_create_child_creates_ticket_and_links(self, ticket_service, link_service, epic_ticket):
+        """Atomic create+link: the child is created and BOTH the CHILD link
+        (child -> epic) and its inverse PARENT link (epic -> child) exist."""
+        child = ticket_service.create_child_ticket(
+            epic_ticket.id,
+            project_id=epic_ticket.project_id,
+            title="A child story",
+            type=TicketType.STORY,
+        )
+        assert child.id is not None
+        assert child.title == "A child story"
+        assert child.type == TicketType.STORY
+
+        # CHILD link: child -> epic
+        child_links = link_service.session.exec(
+            select(TicketLink).where(
+                TicketLink.source_id == child.id,
+                TicketLink.target_id == epic_ticket.id,
+                TicketLink.link_type == LinkType.CHILD,
+            )
+        ).all()
+        assert len(child_links) == 1
+
+        # Inverse PARENT link: epic -> child
+        parent_links = link_service.session.exec(
+            select(TicketLink).where(
+                TicketLink.source_id == epic_ticket.id,
+                TicketLink.target_id == child.id,
+                TicketLink.link_type == LinkType.PARENT,
+            )
+        ).all()
+        assert len(parent_links) == 1
+
+    def test_create_child_defaults_to_story(self, ticket_service, link_service, epic_ticket):
+        """A child created without an explicit type defaults to Story."""
+        child = ticket_service.create_child_ticket(
+            epic_ticket.id,
+            project_id=epic_ticket.project_id,
+            title="Default type child",
+        )
+        assert child.type == TicketType.STORY
+        # The epic sees the child via its PARENT link
+        links = link_service.get_links_for_ticket(epic_ticket.id)
+        parent_links = [link for link in links if link.link_type == LinkType.PARENT]
+        assert any(link.target_id == child.id for link in parent_links)
+
+    def test_create_child_guard_non_epic_raises(self, ticket_service, link_service, story_ticket):
+        """Epic guard: a non-Epic parent raises ValueError and creates nothing."""
+        with pytest.raises(ValueError) as exc_info:
+            ticket_service.create_child_ticket(
+                story_ticket.id,
+                project_id=story_ticket.project_id,
+                title="Should fail",
+            )
+        assert "Epic" in str(exc_info.value)
+
+        # No child ticket created for the story's project beyond existing ones
+        links = link_service.session.exec(
+            select(TicketLink).where(
+                (TicketLink.source_id == story_ticket.id)
+                | (TicketLink.target_id == story_ticket.id)
+            )
+        ).all()
+        assert len(links) == 0
+
+    def test_create_child_guard_absent_parent_raises(self, ticket_service):
+        """Absent parent raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            ticket_service.create_child_ticket(
+                999999,
+                project_id=1,
+                title="Should fail",
+            )
+        assert "not found" in str(exc_info.value).lower()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
