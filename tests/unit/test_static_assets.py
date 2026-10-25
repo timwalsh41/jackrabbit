@@ -141,3 +141,35 @@ class TestTailwindBuildIsCurrent:
         assert missing == [], (
             f"classes in templates missing from CSS (rebuild `make build-css`): {missing}"
         )
+
+    def test_stylesheet_ships_typography_for_markdown_description(self) -> None:
+        """JRB-009 regression guard for the markdown description field.
+
+        The description is rendered inside a ``prose prose-sm`` container
+        (``ticket_fields_section.html``). With only Tailwind preflight in the
+        committed stylesheet, ``h1..h6`` are reset to ``font-size:inherit`` and
+        ``ul/ol`` to ``list-style:none`` — so headings and lists go visually
+        invisible while ``<code>``/``<strong>`` keep their browser defaults,
+        which is the exact symptom this ticket fixes. Pinning the
+        ``@tailwindcss/typography`` (``.prose``) output here keeps that
+        regression from slipping through unnoticed.
+        """
+        css = self.CSS.read_text()
+        # 1. The `.prose` Typography scope must be present (grep -c prose > 0).
+        assert ".prose" in css, (
+            "tailwind.css has no `prose` rules — @tailwindcss/typography is not "
+            "enabled in frontend/tailwind.config.js or the stylesheet was not "
+            "rebuilt. Run `make build-css`."
+        )
+        # 2. Lists must keep bullets (preflight strips them via list-style:none).
+        assert re.search(r"list-style-type:\s*disc", css), (
+            "no bullet styling under `.prose` — rebuild tailwind.css with "
+            "@tailwindcss/typography enabled."
+        )
+        # 3. Headings must get a concrete size/weight (preflight leaves
+        #    font-size:inherit, which is why they looked like plain text).
+        #    @tailwindcss/typography v0.5 scopes headings via :where().
+        assert re.search(r"\.prose\s+:where\(h[1-6]\)[^}]*font-size:", css), (
+            "no sized heading rules under `.prose` — rebuild tailwind.css with "
+            "@tailwindcss/typography enabled."
+        )
