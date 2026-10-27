@@ -249,6 +249,29 @@ class TestBlockerQueries:
         assert response.json() == []
 
 
+async def test_link_modal_and_search_results_expose_target_type(
+    client_with_seeds: AsyncClient, tickets: dict
+) -> None:
+    """The rendered modal can stash type data from ticket search results."""
+    modal = await client_with_seeds.get(f"/tickets/{tickets['epic']['id']}/links/modal")
+    assert modal.status_code == 200
+    assert 'id="target_id" data-ticket-type="" required' in modal.text
+
+    for ticket_key, ticket_type in (("story", "Story"), ("epic", "Epic")):
+        ticket = tickets[ticket_key]
+        results = await client_with_seeds.get(
+            "/tickets/search",
+            params={
+                "q": ticket["title"],
+                "link_type": "relates_to",
+                "source_id": tickets["bug"]["id"],
+            },
+        )
+        assert results.status_code == 200
+        assert f'data-ticket-id="{ticket["id"]}"' in results.text
+        assert f'data-ticket-type="{ticket_type}"' in results.text
+
+
 async def test_create_link_htmx_returns_links_section(
     client_with_seeds: AsyncClient,
 ) -> None:
