@@ -133,6 +133,88 @@ class TestEpicStoryLinking:
             # Each child is listed with its title
             expect(page.locator("#links-section")).to_contain_text(story["title"])
 
+    def test_changing_link_type_preserves_selected_target(
+        self, page: Page, base_url: str, seeded_projects, epic_with_stories
+    ):
+        """Changing to another valid link type keeps the selected target usable."""
+        epic, stories = epic_with_stories
+        story = stories[0]
+
+        page.goto(f"{base_url}/ticket/{epic['id']}")
+        page.wait_for_load_state("networkidle")
+        page.click("button:has-text('Add Link')")
+        page.wait_for_selector("#link-modal form", state="visible", timeout=10000)
+        _wait_modal_settled(page)
+
+        page.select_option("#link-modal select[name='link_type']", "parent")
+        story_ref = f"UNS-{story['number']:03d}"
+        page.fill("#link-modal #target_search", story_ref)
+        page.dispatch_event("#link-modal #target_search", "keyup")
+        page.wait_for_selector(".ticket-search-result", timeout=10000)
+        page.click(".ticket-search-result >> nth=0")
+
+        selected_search_text = f"{story_ref} - {story['title']}"
+        page.select_option("#link-modal select[name='link_type']", "relates_to")
+
+        expect(page.locator("#link-modal #target_id")).to_have_value(str(story["id"]))
+        expect(page.locator("#link-modal #target_search")).to_have_value(selected_search_text)
+        expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
+
+        page.click("#link-modal button[type='submit']")
+        page.wait_for_selector("#link-modal", state="detached", timeout=10000)
+        expect(page.locator("#links-section")).to_contain_text(story["title"])
+
+    def test_child_link_clears_non_epic_target(
+        self, page: Page, base_url: str, seeded_projects, epic_with_stories
+    ):
+        """A selected non-Epic target is cleared when the type changes to child."""
+        epic, stories = epic_with_stories
+        source = stories[0]
+        non_epic_target = stories[1]
+
+        page.goto(f"{base_url}/ticket/{source['id']}")
+        page.wait_for_load_state("networkidle")
+        page.click("button:has-text('Add Link')")
+        page.wait_for_selector("#link-modal form", state="visible", timeout=10000)
+        _wait_modal_settled(page)
+
+        page.select_option("#link-modal select[name='link_type']", "relates_to")
+        target_ref = f"UNS-{non_epic_target['number']:03d}"
+        page.fill("#link-modal #target_search", target_ref)
+        page.dispatch_event("#link-modal #target_search", "keyup")
+        page.wait_for_selector(".ticket-search-result", timeout=10000)
+        page.click(".ticket-search-result >> nth=0")
+
+        page.select_option("#link-modal select[name='link_type']", "child")
+        expect(page.locator("#link-modal #target_id")).to_have_value("")
+        expect(page.locator("#link-modal #target_search")).to_have_value("")
+        expect(page.locator("#link-modal #submit-btn")).to_be_disabled()
+
+        # The same child link remains usable when its selected target is an Epic.
+        epic_ref = f"UNS-{epic['number']:03d}"
+        page.fill("#link-modal #target_search", epic_ref)
+        page.dispatch_event("#link-modal #target_search", "keyup")
+        page.wait_for_selector(".ticket-search-result", timeout=10000)
+        page.click(".ticket-search-result >> nth=0")
+        epic_search_text = f"{epic_ref} - {epic['title']}"
+        expect(page.locator("#link-modal #target_id")).to_have_value(str(epic["id"]))
+        expect(page.locator("#link-modal #target_search")).to_have_value(epic_search_text)
+        expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
+
+        # A valid Epic target survives changing away from and back to child.
+        page.select_option("#link-modal select[name='link_type']", "relates_to")
+        expect(page.locator("#link-modal #target_id")).to_have_value(str(epic["id"]))
+        expect(page.locator("#link-modal #target_search")).to_have_value(epic_search_text)
+        expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
+
+        page.select_option("#link-modal select[name='link_type']", "child")
+        expect(page.locator("#link-modal #target_id")).to_have_value(str(epic["id"]))
+        expect(page.locator("#link-modal #target_search")).to_have_value(epic_search_text)
+        expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
+        page.click("#link-modal button[type='submit']")
+        page.wait_for_selector("#link-modal", state="detached", timeout=10000)
+        expect(page.locator("#links-section")).to_contain_text(epic["title"])
+
     def test_epic_detail_shows_children(
         self, page: Page, base_url: str, seeded_projects, epic_with_stories
     ):
