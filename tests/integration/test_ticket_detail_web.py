@@ -208,6 +208,27 @@ class TestInlineFieldEditing:
         assert detail["status"] == TicketStatus.GROOMED
 
 
+class TestLinkModalPartial:
+    async def test_modal_partial_wires_dismiss_controls_to_close_container(
+        self, client: httpx.AsyncClient
+    ):
+        ticket = await create_ticket(client, type=TicketType.EPIC)
+
+        response = await client.get(
+            f"/tickets/{ticket['id']}/links/modal",
+            headers={"HX-Request": "true"},
+        )
+
+        assert response.status_code == 200
+        assert 'id="link-modal"' in response.text
+        assert "function closeModal()" in response.text
+        assert "document.getElementById('link-modal-container')" in response.text
+        assert response.text.count('onclick="closeModal()"') == 3
+        assert "document.addEventListener('keydown'" in response.text
+        assert "event.key === 'Escape'" in response.text
+        assert f'hx-get="/tickets/{ticket["id"]}/links"' not in response.text
+
+
 class TestSprintAssignmentPartial:
     @pytest.fixture
     async def sprint(self, test_db) -> dict:
