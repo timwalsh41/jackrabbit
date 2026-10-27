@@ -12,13 +12,20 @@
                     </div>
                 </div>
                 
+                {# The success handler below refreshes the backlog table. That is
+                   only valid when the modal is opened from the backlog page
+                   (where #tickets-table-body exists). The Create Child modal is
+                   opened from the ticket detail page, which has no
+                   #tickets-table-body: an unconditional GET /backlog would let
+                   htmx fall back to swapping the rows partial into <body>,
+                   clobbering the whole detail page (JRB-010). Guard it. #}
                 <form hx-post="{{ action }}"
                       {% if parent_id %}hx-target="#links-section" hx-swap="outerHTML"{% else %}hx-swap="none"{% endif %}
                       id="ticket-form"
                       class="mt-4 space-y-4"
                       hx-headers='{"Content-Type": "application/json"}'
                       hx-ext="json-enc"
-                      hx-on::after-request="console.log('ticket form after-request', event.detail.xhr.status, event.detail.successful); if(event.detail.xhr.status === 201 || event.detail.xhr.status === 200) { console.log('Closing modal and refreshing table'); closeModal(); htmx.ajax('GET', '/backlog', {target: '#tickets-table-body', swap: 'innerHTML', headers: {'HX-Request': 'true'}}); }"
+                      hx-on::after-request="console.log('ticket form after-request', event.detail.xhr.status, event.detail.successful); if(event.detail.xhr.status === 201 || event.detail.xhr.status === 200) { console.log('Closing modal and refreshing table'); closeModal(); if (document.getElementById('tickets-table-body')) { htmx.ajax('GET', '/backlog', {target: '#tickets-table-body', swap: 'innerHTML', headers: {'HX-Request': 'true'}}); } }"
                       hx-on::submit="console.log('Form submitting...');"
                       hx-on::after-settle="console.log('Form settled');">
                     <div>

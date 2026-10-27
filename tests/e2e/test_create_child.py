@@ -59,6 +59,52 @@ class TestCreateChild:
         expect(page.locator("#plan-epics")).to_contain_text(epic["title"])
         expect(page.locator("#plan-epics")).to_contain_text("Child story from E2E")
 
+    def test_create_child_does_not_clobber_detail_page(
+        self, page, base_url, seeded_projects, make_ticket
+    ):
+        """Regression for the JRB-010 e2e flake.
+
+        The Create Child modal reuses the New Ticket form, whose success handler
+        refreshes the backlog table at ``#tickets-table-body``. That target does
+        not exist on the ticket *detail* page, so without a guard htmx swaps the
+        ``GET /backlog`` rows partial into ``document.body``, replacing the whole
+        detail page (and the freshly swapped ``#links-section``). This test
+        asserts the detail scaffold survives and no backlog rows leak in.
+        """
+        epic = make_ticket(title="Epic: no-clobber regression", ticket_type="Epic")
+
+        page.goto(f"{base_url}/tickets/{epic['id']}")
+        page.wait_for_load_state("networkidle")
+        _load_links_section(page)
+
+        page.click("#links-section button:has-text('Create Child')")
+        page.wait_for_selector("#ticket-modal form", state="visible", timeout=10000)
+        page.fill("input[name='title']", "Child story no-clobber")
+        page.select_option("select[name='type']", "Story")
+        page.click("#ticket-modal button:has-text('Create Ticket')")
+
+        # No full-page navigation away from the Epic detail.
+        expect(page).to_have_url(f"{base_url}/tickets/{epic['id']}")
+
+        # The modal closed.
+        expect(page.locator("#ticket-modal form")).to_have_count(0, timeout=10000)
+
+        # Let any post-response handler settle. On the buggy code the form's
+        # after-request handler issues GET /backlog, whose rows partial then
+        # clobbers <body> (landing in well under 1s). Waiting here makes the
+        # body-integrity assertions below deterministic instead of racy.
+        page.wait_for_timeout(1000)
+
+        # The detail-page scaffold is still intact (a body-clobber would have
+        # replaced <body> with backlog rows).
+        expect(page.locator("#ticket-content")).to_be_visible()
+        # No backlog rows should ever be injected into the detail page.
+        assert page.locator("tr[id^='ticket-row']").count() == 0
+
+        # And the links section was correctly refreshed in place with the child.
+        expect(page.locator("#links-section")).to_contain_text("Children")
+        expect(page.locator("#links-section")).to_contain_text("Child story no-clobber")
+
     def test_create_child_button_on_epic_detail(self, page, base_url, seeded_projects, make_ticket):
         """The Create Child button is visible on an Epic detail page."""
         epic = make_ticket(title="Epic button check", ticket_type="Epic")
