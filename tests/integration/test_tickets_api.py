@@ -1,6 +1,8 @@
 """Integration tests for the Tickets API: CRUD, filtering, pagination,
 transitions (guarded/unguarded), links, project move, and branch/PR handling."""
 
+import json
+
 import pytest
 from httpx import AsyncClient
 from jackrabbit.models import Ticket, Transition
@@ -51,6 +53,55 @@ class TestTicketsCRUD:
         assert ticket["priority"] == "Medium"
         assert ticket["original_id"] is None
         assert ticket["branch_name"] is None
+
+    async def test_create_ticket_with_links_and_json_encoded_form_links(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        epic = await _create_ticket(
+            client_with_seeds, two_projects["web"], "Epic for create form", type="Epic"
+        )
+
+        response = await client_with_seeds.post(
+            "/api/v1/tickets",
+            json={
+                "project_id": two_projects["web"],
+                "title": "Child created with link",
+                "links": json.dumps([{"link_type": "child", "target_id": epic["id"]}]),
+            },
+        )
+        assert response.status_code == 201, response.text
+        child = response.json()
+        links_response = await client_with_seeds.get(f"/api/v1/tickets/{child['id']}/links")
+        assert links_response.status_code == 200
+        links = links_response.json()
+        assert {(link["source_id"], link["target_id"], link["link_type"]) for link in links} == {
+            (child["id"], epic["id"], "child"),
+            (epic["id"], child["id"], "parent"),
+        }
+
+    async def test_create_ticket_with_invalid_link_returns_400_without_ticket(
+        self, client_with_seeds: AsyncClient, two_projects
+    ):
+        epic = await _create_ticket(
+            client_with_seeds, two_projects["web"], "Valid Epic", type="Epic"
+        )
+        not_epic = await _create_ticket(client_with_seeds, two_projects["web"], "Not Epic")
+        response = await client_with_seeds.post(
+            "/api/v1/tickets",
+            json={
+                "project_id": two_projects["web"],
+                "title": "Must not persist",
+                "links": [
+                    {"link_type": "child", "target_id": epic["id"]},
+                    {"link_type": "child", "target_id": not_epic["id"]},
+                ],
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "Child link target must be an Epic"
+        tickets = (await client_with_seeds.get("/api/v1/tickets")).json()
+        assert all(ticket["title"] != "Must not persist" for ticket in tickets["items"])
+        assert (await client_with_seeds.get(f"/api/v1/tickets/{epic['id']}/links")).json() == []
 
     async def test_numbers_are_per_project(self, client_with_seeds: AsyncClient, two_projects):
         t1 = await _create_ticket(client_with_seeds, two_projects["web"], "First")

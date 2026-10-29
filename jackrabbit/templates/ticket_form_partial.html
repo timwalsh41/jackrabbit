@@ -25,7 +25,7 @@
                       class="mt-4 space-y-4"
                       hx-headers='{"Content-Type": "application/json"}'
                       hx-ext="json-enc"
-                      hx-on::after-request="console.log('ticket form after-request', event.detail.xhr.status, event.detail.successful); if(event.detail.xhr.status === 201 || event.detail.xhr.status === 200) { console.log('Closing modal and refreshing table'); closeModal(); if (document.getElementById('tickets-table-body')) { htmx.ajax('GET', '/backlog', {target: '#tickets-table-body', swap: 'innerHTML', headers: {'HX-Request': 'true'}}); } }"
+                      hx-on::after-request="console.log('ticket form after-request', event.detail.xhr.status, event.detail.successful); if(event.detail.elt === this && (event.detail.xhr.status === 201 || event.detail.xhr.status === 200)) { console.log('Closing modal and refreshing table'); closeModal(); if (document.getElementById('tickets-table-body')) { htmx.ajax('GET', '/backlog', {target: '#tickets-table-body', swap: 'innerHTML', headers: {'HX-Request': 'true'}}); } }"
                       hx-on::submit="console.log('Form submitting...');"
                       hx-on::after-settle="console.log('Form settled');">
                     <div>
@@ -74,6 +74,54 @@
                     </div>
 
                     {% include "label_field.html" %}
+
+                    <details id="ticket-links" class="border border-gray-200 rounded-md">
+                        <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700">Links</summary>
+                        <div class="px-3 pb-4 space-y-3">
+                            <div id="ticket-link-rows" class="space-y-3"></div>
+                            <input type="hidden" name="links" value="[]" id="ticket-links-json">
+                            <button type="button" id="add-ticket-link"
+                                    class="px-3 py-1.5 text-sm text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-100">
+                                Add Link
+                            </button>
+                        </div>
+                    </details>
+
+                    <template id="ticket-link-row-template">
+                        <div class="ticket-link-row grid grid-cols-1 sm:grid-cols-2 gap-3 items-center border-t border-gray-100 pt-2">
+                            <div>
+                                <label for="ticket-link-type-__INDEX__" class="block text-sm font-medium text-gray-700 mb-1">Link Type</label>
+                                <select id="ticket-link-type-__INDEX__" name="link_type" data-link-type
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+                                    <option value="">Select type...</option>
+                                    <option value="parent">Parent</option>
+                                    <option value="child">Child</option>
+                                    <option value="blocks">Blocks</option>
+                                    <option value="blocked_by">Blocked By</option>
+                                    <option value="relates_to">Relates To</option>
+                                </select>
+                            </div>
+                            <div class="relative">
+                                <label for="ticket-link-search-__INDEX__" class="block text-sm font-medium text-gray-700 mb-1">Target Ticket</label>
+                                <input type="text" id="ticket-link-search-__INDEX__" name="q" data-link-search
+                                       placeholder="Search by ID or title..."
+                                       autocomplete="off"
+                                       hx-get="/tickets/search"
+                                       hx-target="#ticket-link-results-__INDEX__"
+                                       hx-swap="innerHTML"
+                                       hx-trigger="keyup changed delay:300ms, search"
+                                       hx-include="closest .ticket-link-row"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+                                <input type="hidden" data-link-target-id>
+                                <div id="ticket-link-results-__INDEX__" data-link-results
+                                     class="hidden absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto"></div>
+                            </div>
+                            <button type="button" data-remove-ticket-link
+                                    class="px-3 py-2 text-sm text-red-700 border border-red-200 rounded-md hover:bg-red-50">
+                                Remove
+                            </button>
+                        </div>
+                    </template>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
@@ -137,6 +185,83 @@
         }
     })();
     
+    (function configureTicketLinkRows() {
+        const form = document.getElementById('ticket-form');
+        const rows = document.getElementById('ticket-link-rows');
+        const rowTemplate = document.getElementById('ticket-link-row-template');
+        const addButton = document.getElementById('add-ticket-link');
+        const linksInput = document.getElementById('ticket-links-json');
+        if (!form || !rows || !rowTemplate || !addButton || !linksInput) return;
+
+        let nextRowId = 0;
+        addButton.addEventListener('click', function() {
+            const markup = rowTemplate.innerHTML.replaceAll('__INDEX__', String(nextRowId++));
+            const holder = document.createElement('div');
+            holder.innerHTML = markup.trim();
+            const row = holder.firstElementChild;
+            if (!row) return;
+            rows.appendChild(row);
+            if (typeof htmx !== 'undefined') htmx.process(row);
+        });
+
+        rows.addEventListener('change', function(event) {
+            if (event.target.matches('[data-link-type]')) {
+                const row = event.target.closest('.ticket-link-row');
+                row.querySelector('[data-link-target-id]').value = '';
+                row.querySelector('[data-link-search]').value = '';
+            }
+        });
+
+        rows.addEventListener('click', function(event) {
+            const removeButton = event.target.closest('[data-remove-ticket-link]');
+            if (removeButton) {
+                removeButton.closest('.ticket-link-row').remove();
+                return;
+            }
+
+            const result = event.target.closest('.ticket-search-result');
+            if (!result) return;
+            const row = result.closest('.ticket-link-row');
+            row.querySelector('[data-link-target-id]').value = result.dataset.ticketId;
+            row.querySelector('[data-link-search]').value =
+                result.dataset.ticketRef + ' - ' + result.dataset.ticketTitle;
+            row.querySelector('[data-link-results]').classList.add('hidden');
+        });
+
+        rows.addEventListener('htmx:afterSwap', function(event) {
+            const results = event.detail.target;
+            if (results.matches('[data-link-results]')) {
+                results.classList.toggle('hidden', !results.innerHTML.trim());
+            }
+        });
+
+        function serializeTicketLinks() {
+            return Array.from(rows.querySelectorAll('.ticket-link-row'))
+                .map(function(row) {
+                    return {
+                        link_type: row.querySelector('[data-link-type]').value,
+                        target_id: row.querySelector('[data-link-target-id]').value
+                    };
+                })
+                .filter(function(link) { return link.link_type && link.target_id; })
+                .map(function(link) {
+                    return {link_type: link.link_type, target_id: Number(link.target_id)};
+                });
+        }
+
+        // HTMX gathers parameters before its submit handler finishes bubbling,
+        // so submit-time hidden-input updates can miss that request. Override
+        // the request parameter at configRequest, before json-enc sends it.
+        form.addEventListener('htmx:configRequest', function(event) {
+            if (event.detail.elt === form) {
+                event.detail.parameters.links = JSON.stringify(serializeTicketLinks());
+            }
+        });
+        form.addEventListener('submit', function() {
+            linksInput.value = JSON.stringify(serializeTicketLinks());
+        });
+    })();
+
     function closeModal() {
         const modal = document.getElementById('ticket-modal');
         if (modal) {

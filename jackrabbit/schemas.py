@@ -3,6 +3,7 @@
 Separate from SQLModel table classes to maintain API-First design.
 """
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -14,6 +15,16 @@ from jackrabbit.models import (
     TicketStatus,
     TicketType,
 )
+
+
+def _links_from_form(value: Any) -> Any:
+    """Accept ticket links as a JSON list or a JSON-encoded form value."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
 
 
 def _label_names_from_form(value: Any) -> Any:
@@ -225,6 +236,13 @@ class LabelWithUsage(LabelRead):
     usage_count: int = 0
 
 
+class LinkSpec(BaseModel):
+    """A requested ticket link; the new ticket is always the source."""
+
+    link_type: LinkType
+    target_id: int
+
+
 class TicketCreate(TicketBase):
     approach: str = ""
     files_to_change: str = ""
@@ -234,6 +252,13 @@ class TicketCreate(TicketBase):
     status: TicketStatus = TicketStatus.OPEN
     # Label names to attach; a name that does not exist yet is created.
     labels: list[str] = []
+    # Links are created with this ticket as their source.
+    links: list[LinkSpec] = []
+
+    @field_validator("links", mode="before")
+    @classmethod
+    def _parse_links(cls, v: Any) -> Any:
+        return _links_from_form(v)
 
     @field_validator("labels", mode="before")
     @classmethod

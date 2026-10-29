@@ -7,6 +7,8 @@ from jackrabbit.models import (
     LinkType,
     Priority,
     Project,
+    Ticket,
+    TicketLink,
     TicketStatus,
     TicketType,
     Transition,
@@ -107,6 +109,48 @@ class TestCreateTicket:
         assert ticket.type == TicketType.STORY
         assert ticket.priority == Priority.MEDIUM
         assert ticket.id is not None
+
+    def test_create_ticket_with_links_creates_inverse_link(self, ticket_service, setup_projects):
+        epic = ticket_service.create_ticket(
+            project_id=setup_projects["web"].id, title="Epic", type=TicketType.EPIC
+        )
+
+        child = ticket_service.create_ticket(
+            project_id=setup_projects["web"].id,
+            title="Child",
+            links=[(LinkType.CHILD, epic.id)],
+        )
+
+        links = ticket_service.session.exec(
+            select(TicketLink).where(
+                (TicketLink.source_id == child.id) | (TicketLink.target_id == child.id)
+            )
+        ).all()
+        assert {(link.source_id, link.target_id, link.link_type) for link in links} == {
+            (child.id, epic.id, LinkType.CHILD),
+            (epic.id, child.id, LinkType.PARENT),
+        }
+
+    def test_create_ticket_with_invalid_link_rolls_back_ticket_and_prior_links(
+        self, ticket_service, setup_projects
+    ):
+        epic = ticket_service.create_ticket(
+            project_id=setup_projects["web"].id, title="Epic", type=TicketType.EPIC
+        )
+        story = ticket_service.create_ticket(
+            project_id=setup_projects["web"].id, title="Not an Epic"
+        )
+        count_before = len(ticket_service.session.exec(select(Ticket)).all())
+
+        with pytest.raises(ValueError, match="Child link target must be an Epic"):
+            ticket_service.create_ticket(
+                project_id=setup_projects["web"].id,
+                title="Should roll back",
+                links=[(LinkType.CHILD, epic.id), (LinkType.CHILD, story.id)],
+            )
+
+        assert len(ticket_service.session.exec(select(Ticket)).all()) == count_before
+        assert ticket_service.session.exec(select(TicketLink)).all() == []
 
     def test_numbering_is_sequential_within_project(self, ticket_service, setup_projects):
         web_id = setup_projects["web"].id
