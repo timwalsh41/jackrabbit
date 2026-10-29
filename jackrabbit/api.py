@@ -418,20 +418,24 @@ def create_ticket(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    ticket = service.create_ticket(
-        project_id=ticket_in.project_id,
-        title=ticket_in.title,
-        type=ticket_in.type,
-        description=ticket_in.description,
-        priority=ticket_in.priority,
-        story_points=ticket_in.story_points,
-        approach=ticket_in.approach,
-        files_to_change=ticket_in.files_to_change,
-        test_plan=ticket_in.test_plan,
-        validation_steps=ticket_in.validation_steps,
-        sprint_id=ticket_in.sprint_id,
-        status=ticket_in.status,
-    )
+    try:
+        ticket = service.create_ticket(
+            project_id=ticket_in.project_id,
+            title=ticket_in.title,
+            type=ticket_in.type,
+            description=ticket_in.description,
+            priority=ticket_in.priority,
+            story_points=ticket_in.story_points,
+            approach=ticket_in.approach,
+            files_to_change=ticket_in.files_to_change,
+            test_plan=ticket_in.test_plan,
+            validation_steps=ticket_in.validation_steps,
+            sprint_id=ticket_in.sprint_id,
+            status=ticket_in.status,
+            links=[(link.link_type, link.target_id) for link in ticket_in.links],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     if ticket_in.labels:
         try:

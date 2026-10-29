@@ -208,6 +208,33 @@ class TestInlineFieldEditing:
         assert detail["status"] == TicketStatus.GROOMED
 
 
+class TestNewTicketLinksPartial:
+    async def test_new_ticket_modal_renders_repeatable_link_picker(self, client: httpx.AsyncClient):
+        response = await client.get("/tickets/new", headers={"HX-Request": "true"})
+
+        assert response.status_code == 200
+        assert 'id="ticket-links"' in response.text
+        assert 'name="links"' in response.text
+        assert 'value="[]"' in response.text
+        assert 'id="add-ticket-link"' in response.text
+        assert 'hx-get="/tickets/search"' in response.text
+
+    async def test_ticket_search_filters_child_targets_to_epics(self, client: httpx.AsyncClient):
+        epic = await create_ticket(client, title="Searchable Epic", type=TicketType.EPIC)
+        await create_ticket(client, title="Searchable Story")
+
+        response = await client.get(
+            "/tickets/search",
+            params={"q": "Searchable", "link_type": "child"},
+            headers={"HX-Request": "true"},
+        )
+
+        assert response.status_code == 200
+        assert f'data-ticket-id="{epic["id"]}"' in response.text
+        assert 'data-ticket-type="Epic"' in response.text
+        assert "Searchable Story" not in response.text
+
+
 class TestLinkModalPartial:
     async def test_modal_partial_wires_dismiss_controls_to_close_container(
         self, client: httpx.AsyncClient

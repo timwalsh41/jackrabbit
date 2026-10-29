@@ -212,6 +212,7 @@ class TicketService:
         validation_steps: str = "",
         sprint_id: int | None = None,
         status: TicketStatus = TicketStatus.OPEN,
+        links: Sequence[tuple[LinkType, int]] = (),
     ) -> Ticket:
         # Get next ticket number for project
         max_num = self.session.exec(
@@ -235,7 +236,20 @@ class TicketService:
             status=status,
         )
         self.session.add(ticket)
-        self.session.commit()
+        try:
+            self.session.flush()
+            link_service = LinkService(self.session)
+            for link_type, target_id in links:
+                link_service.create_link(
+                    source_id=cast(int, ticket.id),
+                    target_id=target_id,
+                    link_type=link_type,
+                    commit=False,
+                )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
         self.session.refresh(ticket)
         return ticket
 
@@ -1240,7 +1254,9 @@ class LinkService:
 
         return None
 
-    def create_link(self, source_id: int, target_id: int, link_type: LinkType) -> TicketLink:
+    def create_link(
+        self, source_id: int, target_id: int, link_type: LinkType, *, commit: bool = True
+    ) -> TicketLink:
         # Validate
         error = self._validate_link(source_id, target_id, link_type)
         if error:
@@ -1312,7 +1328,10 @@ class LinkService:
                     )
                     self.session.add(inverse_link)
 
-            self.session.commit()
+            if commit:
+                self.session.commit()
+            else:
+                self.session.flush()
         except IntegrityError:
             self.session.rollback()
             existing = self.session.exec(
