@@ -414,6 +414,10 @@ class TestCreateChildWeb:
         assert "text/html" in response.headers["content-type"]
         assert "New Child Ticket" in response.text
         assert f'hx-post="/api/v1/tickets/{epic["id"]}/children"' in response.text
+        # Child creation posts to a separate endpoint that does not accept links;
+        # do not expose the regular New Ticket links picker here.
+        assert 'id="ticket-links"' not in response.text
+        assert 'name="links"' not in response.text
         # The form posts the Epic's project by default
         assert f'<option value="{epic["project_id"]}" selected' in response.text
 
