@@ -35,6 +35,9 @@ class TestCreateChild:
         # Open the child modal
         page.click("#links-section button:has-text('Create Child')")
         page.wait_for_selector("#ticket-modal form", state="visible", timeout=10000)
+        # This dedicated child endpoint does not accept the regular New Ticket
+        # form's links field, so the modal must not offer a dropped-links UI.
+        expect(page.locator("#ticket-modal #ticket-links")).to_have_count(0)
 
         # Fill the new child (type defaults to Story, project defaults to Epic's)
         page.fill("input[name='title']", "Child story from E2E")

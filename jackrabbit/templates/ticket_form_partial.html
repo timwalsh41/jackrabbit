@@ -75,6 +75,7 @@
 
                     {% include "label_field.html" %}
 
+                    {% if not parent_id %}
                     <details id="ticket-links" class="border border-gray-200 rounded-md">
                         <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700">Links</summary>
                         <div class="px-3 pb-4 space-y-3">
@@ -122,6 +123,7 @@
                             </button>
                         </div>
                     </template>
+                    {% endif %}
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
