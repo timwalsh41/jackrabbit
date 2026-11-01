@@ -176,7 +176,7 @@
                     <span class="htmx-indicator" id="filter-indicator">Applying...</span>
                     <span class="htmx-request:hidden">Filter</span>
                 </button>
-                <a href="/backlog" class="text-gray-500 hover:text-gray-700 text-sm">Clear filters</a>
+                <a href="/backlog" data-clear-filters class="text-gray-500 hover:text-gray-700 text-sm">Clear filters</a>
             </div>
             <!-- Hidden fields for sort/order/page -->
             <input type="hidden" name="sort" value="{{ current_filters.sort }}">
