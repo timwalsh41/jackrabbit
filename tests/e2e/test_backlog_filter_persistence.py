@@ -131,6 +131,75 @@ class TestBacklogFilterPersistence:
         expect(page.locator(f"#ticket-row-{first['id']}")).to_be_visible(timeout=10000)
         expect(page.locator(f"#ticket-row-{second['id']}")).to_be_visible(timeout=10000)
 
+        # The restored thead must match the restored sort too: the active
+        # column shows its arrow, and clicking it toggles FROM the restored
+        # state (desc -> asc). A stale header (rendered for the default sort)
+        # would re-send order=desc because hx-vals override the form's hidden
+        # sort/order fields.
+        expect(page.locator("th:has-text('Priority')")).to_contain_text("↓", timeout=10000)
+        page.click("th:has-text('Priority')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
+        expect(page).to_have_url(re.compile(r"order=asc"), timeout=10000)
+
+    def test_page_two_leave_and_return_resets_to_page_one(
+        self, page: Page, base_url: str, make_ticket
+    ):
+        """Return with a stashed page=2: rows AND controls must agree on page 1.
+
+        The restore re-submit swaps only #tickets-table-body, so it must ask
+        for page 1 - the page the server-rendered pagination controls (and
+        sort headers) already describe. Restoring a stashed page=2 would show
+        page-two rows under controls that omit Previous and still read
+        "Page 1 of N", and Next would re-request page 2. Filters and sort
+        are preserved; only the page resets.
+        """
+        suffix = uuid.uuid4().hex[:8]
+        # Default page_size is 50. The canary is created before the fillers,
+        # so with sort=number desc it lands on page 2 while the fillers fill
+        # page 1.
+        canary = make_ticket(title=f"Page Reset Canary {suffix}")
+        fillers = [make_ticket(title=f"Page Reset Filler {suffix} {i}") for i in range(55)]
+        try:
+            self._run(page, base_url, canary)
+        finally:
+            # Remove the volume tickets again: the e2e server database is
+            # shared across the whole session, and 50+ leftover tickets would
+            # push later tests' tickets off the default page 1 (sort "number"
+            # is per-project, so volume in one project re-orders everyone).
+            self._delete_tickets(base_url, [canary, *fillers])
+
+    @staticmethod
+    def _delete_tickets(base_url: str, tickets: list[dict]) -> None:
+        import httpx
+
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            for ticket in tickets:
+                client.delete(f"/api/v1/tickets/{ticket['id']}")
+
+    def _run(self, page: Page, base_url: str, canary: dict) -> None:
+        """The page-two leave/return scenario (volume tickets already exist)."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        assert page.locator(f"#ticket-row-{canary['id']}").count() == 0
+
+        # Go to page 2 through the rendered Next control.
+        page.click("a:has-text('Next')")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
+        expect(page).to_have_url(re.compile(r"page=2(&|$)"), timeout=10000)
+        expect(page.locator(f"#ticket-row-{canary['id']}")).to_be_visible(timeout=10000)
+
+        # Leave and come back through the plain nav link.
+        _open_ticket_detail(page, canary["id"])
+        _back_via_nav(page)
+
+        # Restored state: page reset to 1, controls consistent with the rows
+        # (they describe page 1 - the request must agree with them).
+        expect(page).to_have_url(re.compile(r"page=1(&|$)"), timeout=10000)
+        expect(page.get_by_text(re.compile(r"Page 1 of "))).to_be_visible(timeout=10000)
+        assert page.locator(f"#ticket-row-{canary['id']}").count() == 0
+
     def test_explicit_scoped_url_becomes_state_restored_on_return(
         self, page: Page, base_url: str, seeded_projects, make_ticket
     ):
