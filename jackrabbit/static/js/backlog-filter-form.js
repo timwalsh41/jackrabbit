@@ -56,6 +56,15 @@
    */
   var FILTER_STASH_KEY = "backlog-filter-query";
   var HIDDEN_FIELDS = ["sort", "order", "page", "page_size"];
+  // Params the restore must NOT apply: the pagination controls and the
+  // sort-header toggles in thead were rendered by the server for this
+  // param-less load (page 1, default page size), and the restore's
+  // re-submit swaps only #tickets-table-body. Applying a stashed page=2
+  // would show page-two rows under controls that omit Previous and still
+  // read "Page 1 of N" (and Next would re-request page 2), so page and
+  // page_size reset to the rendered defaults - "page reset to 1" per the
+  // ticket's test plan, while filters, sort and order are preserved.
+  var PAGE_PARAMS = ["page", "page_size"];
   var CHECKBOX_FIELDS = [
     "project_ids",
     "types",
@@ -206,9 +215,64 @@
     if (!Array.from(params.keys()).length) {
       return;
     }
+    PAGE_PARAMS.forEach(function (name) {
+      params.delete(name);
+    });
+    // The thead sort headers were rendered for the default sort. Their
+    // hx-vals override the form's hidden sort/order fields, so a stale
+    // toggle would re-send the wrong order when the header of the restored
+    // sort is clicked; recompute them (and the arrows) from the stash.
+    syncSortHeaders(params);
     applyParamsToForm(form, params);
     if (window.htmx) {
       window.htmx.trigger(form, "submit");
+    }
+  }
+
+  // Sort arrows are plain text at the end of the header: strip any previous
+  // arrow, then mark the active column (null leaves the header unmarked).
+  var SORT_ARROWS = { asc: "\u2191", desc: "\u2193" };
+
+  function setSortHeaderArrow(th, order) {
+    var arrow = order ? SORT_ARROWS[order] : null;
+    var nodes = th.childNodes;
+    for (var i = nodes.length - 1; i >= 0; i--) {
+      if (nodes[i].nodeType === 3) {
+        nodes[i].textContent = nodes[i].textContent.replace(/[\u2191\u2193]/g, "");
+      }
+    }
+    if (arrow) {
+      th.appendChild(document.createTextNode(" " + arrow));
+    }
+  }
+
+  // Recompute the sort-header toggles to match a restored sort/order, using
+  // the same rule the template renders: the active column in desc flips to
+  // asc, every other column sorts desc first. hx-vals win over included form
+  // values in htmx, so without this a click on the header of the restored
+  // sort would re-send the order the default render baked in, not toggle.
+  function syncSortHeaders(params) {
+    var activeSort = params.get("sort");
+    var activeOrder = params.get("order") || "desc";
+    if (!activeSort) {
+      return;
+    }
+    var headers = document.querySelectorAll("th[hx-vals]");
+    for (var i = 0; i < headers.length; i++) {
+      var th = headers[i];
+      var vals;
+      try {
+        vals = JSON.parse((th.getAttribute("hx-vals") || "").replace(/^js:/, ""));
+      } catch (err) {
+        continue;
+      }
+      if (!vals || !vals.sort) {
+        continue;
+      }
+      var isActive = vals.sort === activeSort;
+      vals.order = isActive && activeOrder === "desc" ? "asc" : "desc";
+      th.setAttribute("hx-vals", "js:" + JSON.stringify(vals));
+      setSortHeaderArrow(th, isActive ? activeOrder : null);
     }
   }
 
