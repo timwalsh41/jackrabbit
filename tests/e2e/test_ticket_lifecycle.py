@@ -301,8 +301,9 @@ class TestTicketLifecycle:
     ):
         """Regression for the edit-form 422: editing a ticket with no sprint via
         the full-page edit form posts sprint_id="" (the 'No Sprint' option).
-        Without the empty-string -> None validator this 422'd; it must succeed
-        and land on the backlog with the updated title."""
+        Without the empty-string -> None validator this 422'd; it must succeed.
+        JRB-014: after saving, the browser returns to the ticket detail page
+        (not the backlog) and shows the updated title."""
         ticket = make_ticket(title="Edit me via form", status="Open")
         tid = ticket["id"]
         assert ticket["sprint_id"] is None
@@ -319,9 +320,10 @@ class TestTicketLifecycle:
             page.click("button:has-text('Save Changes')")
         page.wait_for_load_state("networkidle")
 
-        expect(
-            page.locator("#tickets-table-body tr:has-text('Edited via UI form')").first
-        ).to_be_visible(timeout=10000)
+        # JRB-014: save lands on the ticket detail page, not the backlog.
+        page.wait_for_url(f"{base_url}/tickets/{tid}")
+        assert "/backlog" not in page.url
+        expect(page.locator("#ticket-title")).to_contain_text("Edited via UI form")
 
     def test_groom_epic_without_structured_fields(
         self, page: Page, base_url: str, seeded_projects, make_ticket

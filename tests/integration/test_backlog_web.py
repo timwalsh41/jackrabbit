@@ -398,7 +398,11 @@ class TestPatchReturnsRow:
         assert "Renamed via HTMX" in r.text
         assert "<html" not in r.text.lower()
 
-    async def test_patch_htmx_other_target_redirects_to_backlog(self, client, backlog_tickets):
+    async def test_patch_htmx_other_target_redirects_to_ticket_detail(
+        self, client, backlog_tickets
+    ):
+        """JRB-014: a full-page edit PATCH (non-row target) returns to the
+        ticket detail page, not the backlog."""
         t = backlog_tickets["medium"]
         payload = {"title": "Edited full page"}
         r = await client.patch(
@@ -406,7 +410,7 @@ class TestPatchReturnsRow:
             content=json.dumps(payload),
             headers={"Content-Type": "application/json", "HX-Request": "true"},
         )
-        assert r.headers.get("HX-Redirect") == "/backlog"
+        assert r.headers.get("HX-Redirect") == f"/tickets/{t.id}"
 
     async def test_patch_json_still_returns_json(self, client, backlog_tickets):
         t = backlog_tickets["low"]
