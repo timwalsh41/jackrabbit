@@ -37,10 +37,22 @@
    * per-tab and cleared when the tab closes - literal "for a session"
    * semantics. One capture point covers filter submits, sort clicks and
    * pagination (all use hx-push-url=true and include the filter form, so
-   * every one of them pushes a /backlog URL whose query IS the filter state).
+   * every one of them pushes a /backlog URL whose query IS the filter state);
+   * htmx:historyRestore covers Browser Back/Forward between htmx-pushed
+   * filter URLs - the restore path is the state being navigated to, so it
+   * rewrites the stash too (otherwise the newer query would win over the
+   * older one the user just went back to).
+   *
+   * Full-page loads are the other capture point: a load of a /backlog URL
+   * that already carries a query (project-scoped links, shared URLs, browser
+   * back/forward across full pages) is a deliberate state, so that query is
+   * stashed as the newest one. A parameter-less /backlog load stashes
+   * nothing - it is exactly the nav-link return whose stash we want to
+   * restore from.
+   *
    * One global stash per tab, not per project: the last seen backlog query
-   * wins, and URLs that already carry params (project-scoped links, shared
-   * URLs, back/forward) are honored as-is and just update the stash.
+   * wins. URLs that already carry params are honored as-is AND update the
+   * stash.
    */
   var FILTER_STASH_KEY = "backlog-filter-query";
   var HIDDEN_FIELDS = ["sort", "order", "page", "page_size"];
@@ -54,6 +66,17 @@
   ];
   var MODE_RADIOS = ["project_filter_mode", "type_filter_mode", "status_filter_mode"];
   var VALUE_FIELDS = ["q", "created_after", "created_before", "label_match"];
+  // Backward-compat single-value params the server still accepts but the form
+  // has no field for: the URL pre-checks the matching multi-select option
+  // (server-side, via effective_*_ids), so a stashed URL using one must map
+  // to the same checkbox when restored. Values are identical.
+  var SINGLE_TO_MULTI = {
+    project_id: "project_ids",
+    status: "statuses",
+    type: "types",
+    priority: "priorities",
+    sprint_id: "sprint_ids",
+  };
 
   function stashQuery(query) {
     try {
@@ -91,6 +114,23 @@
     stashQuery(path.slice(querySplit + 1));
   }
 
+  // Capture the other direction: a full-page load of a /backlog URL that
+  // already carries a query is the newest state (project-scoped link, shared
+  // URL, browser back/forward). Stash it so leaving through the nav link and
+  // coming back restores THIS query, not an older one. A parameter-less
+  // backlog load is skipped - it must not wipe the stash it is about to
+  // restore from.
+  function stashExplicitUrl() {
+    if (window.location.pathname !== "/backlog") {
+      return;
+    }
+    var query = window.location.search.replace(/^\?/, "");
+    if (query === "") {
+      return;
+    }
+    stashQuery(query);
+  }
+
   // Populate #backlog-filter-form from the stashed query params. Checkboxes
   // are first all unchecked, then the requested values are checked, so the
   // form ends up exactly matching the stored selection.
@@ -104,6 +144,18 @@
     });
     CHECKBOX_FIELDS.forEach(function (name) {
       var wanted = params.getAll(name);
+      // A single-value compat param in the URL pre-checks its multi-select
+      // option too (that is how the server renders such a URL), so the form
+      // can express the stashed query on the restore re-submit.
+      Object.keys(SINGLE_TO_MULTI).forEach(function (single) {
+        if (SINGLE_TO_MULTI[single] !== name) {
+          return;
+        }
+        var value = params.get(single);
+        if (value !== null && value !== "" && wanted.indexOf(value) === -1) {
+          wanted = wanted.concat([value]);
+        }
+      });
       var boxes = form.querySelectorAll('input[type="checkbox"][name="' + name + '"]');
       for (var i = 0; i < boxes.length; i++) {
         boxes[i].checked = wanted.indexOf(boxes[i].value) !== -1;
@@ -197,7 +249,11 @@
   }
 
   document.addEventListener("htmx:configRequest", syncForm);
+  // Browser Back/Forward between htmx-pushed filter URLs fires
+  // htmx:historyRestore, not htmx:pushedIntoHistory - the restored path is
+  // the state being navigated to, so it rewrites the stash as well.
   document.body.addEventListener("htmx:pushedIntoHistory", onPushedIntoHistory);
+  document.body.addEventListener("htmx:historyRestore", onPushedIntoHistory);
   document.addEventListener("click", onClearFiltersClick);
 
   /* ---- multi-select dropdown component ---- */
@@ -418,6 +474,7 @@
     initMultiSelect();
     // htmx processes the body on its own (earlier-registered) DOMContentLoaded
     // handler, so the form is already wired when the restore re-triggers it.
+    stashExplicitUrl();
     restoreBacklogFilters();
   }
 

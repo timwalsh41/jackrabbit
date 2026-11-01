@@ -15,6 +15,7 @@ Patterns (multi-select helpers, run-unique titles) follow
 tests/e2e/test_backlog_filters.py.
 """
 
+import re
 import uuid
 
 from playwright.sync_api import Page, expect
@@ -129,6 +130,93 @@ class TestBacklogFilterPersistence:
         # Both tickets are still listed (sort does not filter anything away).
         expect(page.locator(f"#ticket-row-{first['id']}")).to_be_visible(timeout=10000)
         expect(page.locator(f"#ticket-row-{second['id']}")).to_be_visible(timeout=10000)
+
+    def test_explicit_scoped_url_becomes_state_restored_on_return(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """A full-page visit to a scoped URL is the state a later return restores.
+
+        The URL says what it means while it is open (never overridden by the
+        stash), AND it becomes the newest stashed state: a project-scoped
+        backlog visited by URL, then left, must come back scoped - not
+        unfiltered and not carrying some older query.
+        """
+        suffix = uuid.uuid4().hex[:8]
+        web = seeded_projects[1]
+        in_web = make_ticket(project_id=web["id"], title=f"Scoped State Member {suffix}")
+        in_uns = make_ticket(project_id=1, title=f"Scoped State Outsider {suffix}")
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        _select_in_multiselect(page, "project_ids", str(web["id"]))
+        _apply(page)
+        expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
+
+        # Project-scoped URL: honored as-is, never replaced by the stashed
+        # query - and captured into the stash as the newest state.
+        page.goto(f"{base_url}/backlog?project_id=1")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
+        expect(page).to_have_url(f"{base_url}/backlog?project_id=1", timeout=10000)
+        expect(page.locator(f"#ticket-row-{in_uns['id']}")).to_be_visible(timeout=10000)
+        assert page.locator(f"#ticket-row-{in_web['id']}").count() == 0
+
+        # Leave and come back through the plain nav link: the scoped query is
+        # what must be restored (the form has no project_id field, so the
+        # restore pre-checks the matching project_ids option instead).
+        _open_ticket_detail(page, in_uns["id"])
+        _back_via_nav(page)
+        expect(page).to_have_url(re.compile(r"project_ids=1(&|$)"), timeout=10000)
+        expect(page.locator(f"#ticket-row-{in_uns['id']}")).to_be_visible(timeout=10000)
+        assert page.locator(f"#ticket-row-{in_web['id']}").count() == 0
+
+    def test_back_to_older_filter_becomes_state_restored_on_return(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Browser Back to an older filter URL, then leave+return -> older state.
+
+        Back between htmx-pushed filter URLs fires htmx:historyRestore (not
+        htmx:pushedIntoHistory). The restore path is the state being navigated
+        to, so the stash must be rewritten with it - otherwise leaving after a
+        Back would resurrect the newer filters.
+        """
+        suffix = uuid.uuid4().hex[:8]
+        web = seeded_projects[1]
+        in_web = make_ticket(project_id=web["id"], title=f"Back State Member {suffix}")
+        in_uns = make_ticket(project_id=1, title=f"Back State Outsider {suffix}")
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+
+        # Filter 1: WEB only. This is the state we will navigate back to.
+        _select_in_multiselect(page, "project_ids", str(web["id"]))
+        _apply(page)
+        expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
+        assert page.locator(f"#ticket-row-{in_uns['id']}").count() == 0
+
+        # Filter 2 (newer history entry): WEB + UNS, so both rows show.
+        _open_multiselect(page, "project_ids")
+        page.check("[data-ms-field='project_ids'] [data-ms-option][value='1']")
+        page.locator("[data-ms-field='project_ids'] [data-ms-trigger]").click()
+        _apply(page)
+        expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
+        expect(page.locator(f"#ticket-row-{in_uns['id']}")).to_be_visible(timeout=10000)
+
+        # Browser Back to the older filter URL: htmx restores it via
+        # htmx:historyRestore and the stash follows the restored query.
+        page.go_back()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
+        expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
+        assert page.locator(f"#ticket-row-{in_uns['id']}").count() == 0
+
+        # Leave and come back through the plain nav link: the OLDER filter
+        # (WEB only) is what must be restored, not the newer two-project one.
+        _open_ticket_detail(page, in_web["id"])
+        _back_via_nav(page)
+        expect(page).to_have_url(re.compile(rf"project_ids={web['id']}(&|$)"), timeout=10000)
+        expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
+        assert page.locator(f"#ticket-row-{in_uns['id']}").count() == 0
 
     def test_clear_filters_wipes_stashed_state(
         self, page: Page, base_url: str, seeded_projects, make_ticket
