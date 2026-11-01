@@ -762,3 +762,28 @@ class TestMultiSelectFilters:
             assert f'data-ms-field="{field}"' in r.text
         assert "data-ms-select-all" in r.text
         assert "data-ms-option" in r.text
+
+
+class TestBacklogLayoutWidth:
+    """JRB-015: the backlog table must fit its wide 10-column layout.
+
+    The shared main/nav/footer containers use max-w-screen-2xl (1536px) instead
+    of max-w-7xl (1280px), and the table card scrolls horizontally (overflow-x
+    auto) instead of clipping its rightmost column.
+    """
+
+    async def test_base_containers_use_wide_max_width(self, client):
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        assert "max-w-screen-2xl" in r.text
+        assert "max-w-7xl" not in r.text
+
+    async def test_move_to_sprint_button_present_in_backlog_rows(self, client, backlog_tickets):
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        assert "Move to Sprint" in r.text
+
+    async def test_table_card_scrolls_horizontally(self, client, backlog_tickets):
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        assert "overflow-x-auto" in r.text

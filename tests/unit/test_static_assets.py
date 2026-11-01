@@ -113,7 +113,7 @@ class TestTailwindBuildIsCurrent:
         for selector in (
             ".bg-indigo-600",
             ".hover\\:bg-indigo-700",
-            ".max-w-7xl",
+            ".max-w-screen-2xl",
             ".rounded-full",
             ".btn{",
             ".btn-primary{",
