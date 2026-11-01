@@ -729,9 +729,9 @@ def update_ticket(
                     },
                 },
             )
-        # Full-page edit form: send the user back to the backlog.
+        # Full-page edit form: send the user back to the ticket detail page.
         response = HTMLResponse("")
-        response.headers["HX-Redirect"] = "/backlog"
+        response.headers["HX-Redirect"] = f"/tickets/{ticket_id}"
         return response
 
     return _ticket_read(ticket, label_service.labels_for_ticket(ticket_id))
