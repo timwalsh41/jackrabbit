@@ -39,10 +39,19 @@ def _open_multiselect(page: Page, field: str) -> None:
 
 
 def _select_in_multiselect(page: Page, field: str, *values: str) -> None:
-    """Open `field`'s dropdown and check each given option `value`."""
+    """Open `field`'s dropdown, check each given option `value`, then close it.
+
+    The popover closes via a second trigger click (the trigger toggles; checked
+    options stay serialized because they are ordinary form controls). Closing
+    matters because the open popover overlays the row beneath it, including the
+    Filter button - tests that need the popover afterwards reopen it with
+    `_open_multiselect`.
+    """
     _open_multiselect(page, field)
     for value in values:
         page.check(f"[data-ms-field='{field}'] [data-ms-option][value='{value}']")
+    page.locator(f"[data-ms-field='{field}'] [data-ms-trigger]").click()
+    expect(page.locator(f"[data-ms-field='{field}'] .ms-popover.ms-open")).to_have_count(0)
 
 
 class TestBacklogFilters:
@@ -491,8 +500,12 @@ class TestMultiSelectBacklogFilters:
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
         _select_in_multiselect(page, "project_ids", str(web["id"]))
-        # The Include/Exclude radio lives inside the (still open) project popover.
+        # The Include/Exclude radio lives inside the project popover; the
+        # selection closed it, so reopen it before touching the radio.
+        _open_multiselect(page, "project_ids")
         page.check("input[name='project_filter_mode'][value='exclude']")
+        # Close the popover before submitting: it overlays the Filter button.
+        page.locator("[data-ms-field='project_ids'] [data-ms-trigger]").click()
         self._apply(page)
 
         assert page.locator(f"#ticket-row-{in_web['id']}").count() == 0
@@ -541,7 +554,9 @@ class TestMultiSelectDropdownUI:
         _select_in_multiselect(page, field, web_id)
         assert label.text_content() == "1 selected"
 
-        # Unchecking returns it to "All".
+        # Unchecking returns it to "All". The selection closed the popover, so
+        # reopen it first.
+        _open_multiselect(page, field)
         page.uncheck(f"[data-ms-field='{field}'] [data-ms-option][value='{web_id}']")
         assert label.text_content() == "All"
 
@@ -564,8 +579,10 @@ class TestMultiSelectDropdownUI:
         page.wait_for_load_state("networkidle")
         _open_multiselect(page, "project_ids")
         assert page.locator(".ms-popover.ms-open").count() == 1
-        # Click on an unrelated control (the Search field, which is outside).
-        page.click("input[name='q']")
+        # Click on an unrelated element outside the form. The heading is used
+        # instead of the Search field because the open popover overlays the row
+        # beneath the filter triggers, Search included.
+        page.click("h1:has-text('Backlog')")
         expect(page.locator(".ms-popover.ms-open")).to_have_count(0)
 
     def test_opening_popover_does_not_move_neighboring_triggers(self, page: Page, base_url: str):
@@ -586,6 +603,24 @@ class TestMultiSelectDropdownUI:
             assert after is not None
             assert after["x"] == pytest.approx(before[field]["x"])
             assert after["y"] == pytest.approx(before[field]["y"])
+
+    def test_opening_popover_does_not_push_date_fields_down(self, page: Page, base_url: str):
+        """JRB-016: an open popover overlays the rows beneath it instead of
+        displacing them - the Created From/To date fields must not move."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        dates = ("created_after", "created_before")
+        before = {name: page.locator(f"input[name='{name}']").bounding_box() for name in dates}
+        assert all(before.values()), "both date inputs need a layout box"
+
+        for field in MULTI_FIELDS:
+            _open_multiselect(page, field)
+            for name in dates:
+                after = page.locator(f"input[name='{name}']").bounding_box()
+                assert after is not None
+                assert after["y"] == pytest.approx(before[name]["y"]), (
+                    f"opening {field}'s popover pushed input[name='{name}'] down"
+                )
 
     def test_popovers_are_hidden_on_initial_load(self, page: Page, base_url: str):
         """Filter options remain hidden until their trigger is selected."""
@@ -655,8 +690,8 @@ class TestMultiSelectDropdownUI:
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
         _select_in_multiselect(page, "project_ids", str(web["id"]))
-        # Close the popover by clicking outside, then submit.
-        page.click("input[name='q']")
+        # The selection already closed the popover; submit the form with it
+        # closed - the checked checkbox is still serialized by HTMX.
         assert page.locator(".ms-popover.ms-open").count() == 0
         page.click("button:has-text('Filter')")
         page.wait_for_load_state("networkidle")
