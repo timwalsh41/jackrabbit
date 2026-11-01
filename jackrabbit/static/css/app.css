@@ -64,10 +64,17 @@
   vertical-align: bottom;
 }
 .ms-popover {
-  /* Stay in normal flow so the form reserves vertical space for all options,
-     while the fixed-width .ms-field above prevents horizontal reflow. */
-  position: static;
+  /* Overlay, don't displace: the popover is absolutely positioned below its
+     trigger so opening it covers the row beneath instead of pushing the
+     Created From/To fields (and everything else) down. app.css loads after
+     tailwind.css, so this re-declares the template's `absolute` utility; the
+     fixed-width .ms-field prevents horizontal reflow, and .ms-field's
+     `position: relative` anchors the popover to its own trigger. */
+  position: absolute;
+  top: 100%;
+  left: 0;
   margin-top: 0.25rem;
+  z-index: 50;
   overflow: visible;
   max-height: none;
   visibility: hidden;
