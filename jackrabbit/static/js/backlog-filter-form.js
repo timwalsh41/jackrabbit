@@ -29,6 +29,154 @@
   var MAX_POPOVER_WIDTH = 420;
   var VIEWPORT_PADDING = 12;
 
+  /* ---- filter persistence (sessionStorage, per tab) ----
+   *
+   * The backlog is entered with no query params when the user returns to it
+   * from another view (the nav link in base.html is a plain /backlog link),
+   * so the active filters would be lost. They are stashed in sessionStorage:
+   * per-tab and cleared when the tab closes - literal "for a session"
+   * semantics. One capture point covers filter submits, sort clicks and
+   * pagination (all use hx-push-url=true and include the filter form, so
+   * every one of them pushes a /backlog URL whose query IS the filter state).
+   * One global stash per tab, not per project: the last seen backlog query
+   * wins, and URLs that already carry params (project-scoped links, shared
+   * URLs, back/forward) are honored as-is and just update the stash.
+   */
+  var FILTER_STASH_KEY = "backlog-filter-query";
+  var HIDDEN_FIELDS = ["sort", "order", "page", "page_size"];
+  var CHECKBOX_FIELDS = [
+    "project_ids",
+    "types",
+    "statuses",
+    "priorities",
+    "sprint_ids",
+    "label_ids",
+  ];
+  var MODE_RADIOS = ["project_filter_mode", "type_filter_mode", "status_filter_mode"];
+  var VALUE_FIELDS = ["q", "created_after", "created_before", "label_match"];
+
+  function stashQuery(query) {
+    try {
+      sessionStorage.setItem(FILTER_STASH_KEY, query);
+    } catch (err) {
+      /* Storage unavailable (private mode, quota): persistence degrades to
+       * the old behaviour of losing filters on navigation. */
+    }
+  }
+
+  function readStash() {
+    try {
+      return sessionStorage.getItem(FILTER_STASH_KEY);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // Capture: every pushed URL that is a /backlog URL rewrites the stash with
+  // its query string (empty when the pushed URL has none, which itself is a
+  // valid state - e.g. right after Clear filters).
+  function onPushedIntoHistory(event) {
+    var path = (event.detail && event.detail.path) || "";
+    var querySplit = path.indexOf("?");
+    if (querySplit === -1) {
+      if (path !== "/backlog") {
+        return;
+      }
+      stashQuery("");
+      return;
+    }
+    if (path.slice(0, querySplit) !== "/backlog") {
+      return;
+    }
+    stashQuery(path.slice(querySplit + 1));
+  }
+
+  // Populate #backlog-filter-form from the stashed query params. Checkboxes
+  // are first all unchecked, then the requested values are checked, so the
+  // form ends up exactly matching the stored selection.
+  function applyParamsToForm(form, params) {
+    HIDDEN_FIELDS.forEach(function (name) {
+      var field = form.querySelector('input[type="hidden"][name="' + name + '"]');
+      var value = params.get(name);
+      if (field && value !== null) {
+        field.value = value;
+      }
+    });
+    CHECKBOX_FIELDS.forEach(function (name) {
+      var wanted = params.getAll(name);
+      var boxes = form.querySelectorAll('input[type="checkbox"][name="' + name + '"]');
+      for (var i = 0; i < boxes.length; i++) {
+        boxes[i].checked = wanted.indexOf(boxes[i].value) !== -1;
+      }
+    });
+    MODE_RADIOS.forEach(function (name) {
+      var wanted = params.get(name) || "include";
+      var radios = form.querySelectorAll('input[type="radio"][name="' + name + '"]');
+      for (var i = 0; i < radios.length; i++) {
+        radios[i].checked = radios[i].value === wanted;
+      }
+    });
+    VALUE_FIELDS.forEach(function (name) {
+      var field = form.querySelector('[name="' + name + '"]');
+      var value = params.get(name);
+      if (field && value !== null) {
+        field.value = value;
+      }
+    });
+    var panel = form.querySelector("#labels-filter-panel");
+    if (panel && params.getAll("label_ids").length > 0) {
+      panel.open = true;
+    }
+  }
+
+  // Restore: on a parameter-less backlog page load with a stored query, put
+  // the query back into the form and re-trigger its hx-get (hx-push-url
+  // rewrites the URL to the filtered query, so the address bar catches up).
+  // URLs that already carry params are skipped - they say what they mean.
+  function restoreBacklogFilters() {
+    var form = document.getElementById("backlog-filter-form");
+    if (!form) {
+      return;
+    }
+    if (window.location.pathname !== "/backlog" || window.location.search !== "") {
+      return;
+    }
+    var stored = readStash();
+    if (!stored) {
+      return;
+    }
+    var params;
+    try {
+      params = new URLSearchParams(stored);
+    } catch (err) {
+      return;
+    }
+    if (!Array.from(params.keys()).length) {
+      return;
+    }
+    applyParamsToForm(form, params);
+    if (window.htmx) {
+      window.htmx.trigger(form, "submit");
+    }
+  }
+
+  // Clear filters: wipe the stash before the plain link navigates, so the
+  // param-less backlog load that follows stays unfiltered.
+  function onClearFiltersClick(event) {
+    if (!event.target.closest("[data-clear-filters]")) {
+      return;
+    }
+    stashKeyRemoval();
+  }
+
+  function stashKeyRemoval() {
+    try {
+      sessionStorage.removeItem(FILTER_STASH_KEY);
+    } catch (err) {
+      /* Storage unavailable: nothing stashed, nothing to wipe. */
+    }
+  }
+
   function syncForm(event) {
     var detail = event.detail || {};
     var parameters = detail.parameters || {};
@@ -49,6 +197,8 @@
   }
 
   document.addEventListener("htmx:configRequest", syncForm);
+  document.body.addEventListener("htmx:pushedIntoHistory", onPushedIntoHistory);
+  document.addEventListener("click", onClearFiltersClick);
 
   /* ---- multi-select dropdown component ---- */
 
@@ -264,10 +414,17 @@
     }
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initMultiSelect);
-  } else {
+  function init() {
     initMultiSelect();
+    // htmx processes the body on its own (earlier-registered) DOMContentLoaded
+    // handler, so the form is already wired when the restore re-triggers it.
+    restoreBacklogFilters();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
   }
   // Re-init after every htmx swap, in case the form is re-rendered.
   document.body.addEventListener("htmx:afterOnLoad", initMultiSelect);
