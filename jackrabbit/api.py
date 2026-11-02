@@ -52,6 +52,7 @@ from jackrabbit.services import (
     ConflictError,
     LabelService,
     LinkService,
+    ParentLinkConflictError,
     ProjectService,
     SprintService,
     TicketService,
@@ -881,7 +882,12 @@ def create_link(
             source_id=source_id,
             target_id=link_in.target_id,
             link_type=link_in.link_type,
+            replace_parent=link_in.replace_parent,
         )
+    except ParentLinkConflictError as e:
+        # JRB-019: the ticket already has a parent; the detail carries the
+        # existing parent id so the UI confirm flow can name it.
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

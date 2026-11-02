@@ -1216,6 +1216,21 @@ class SprintService:
         }
 
 
+class ParentLinkConflictError(ValueError):
+    """A PARENT/CHILD link would give a ticket a second parent (JRB-019).
+
+    Raised by ``LinkService.create_link`` when the ticket already has a
+    parent and ``replace_parent`` was not requested. Subclasses ``ValueError``
+    so every existing caller keeps mapping link errors to HTTP errors; the
+    links API catches this subclass specifically to answer 409 with the
+    existing parent id in the response detail.
+    """
+
+    def __init__(self, message: str, existing_parent_id: int) -> None:
+        super().__init__(message)
+        self.existing_parent_id = existing_parent_id
+
+
 class LinkService:
     def __init__(self, session: Session):
         self.session = session
@@ -1254,8 +1269,53 @@ class LinkService:
 
         return None
 
+    def get_parent(self, ticket_id: int) -> Ticket | None:
+        """Return the parent ticket of ``ticket_id`` (JRB-019), or None.
+
+        The parent is the source of the PARENT link whose target is
+        ``ticket_id`` (the same link a CHILD link creates the inverse of).
+        """
+        link = self.session.exec(
+            select(TicketLink).where(
+                TicketLink.target_id == ticket_id,
+                TicketLink.link_type == LinkType.PARENT,
+            )
+        ).first()
+        if link is None:
+            return None
+        return self.session.get(Ticket, link.source_id)
+
+    def _delete_link_pair(self, link: TicketLink) -> None:
+        """Delete a link and its inverse link (if any), flushed but uncommitted."""
+        source_id = link.source_id
+        target_id = link.target_id
+        link_type = link.link_type
+
+        self.session.delete(link)
+        self.session.flush()
+
+        inverse_type = self._get_inverse_link_type(link_type)
+        if inverse_type is None:
+            return
+        inverse_link = self.session.exec(
+            select(TicketLink).where(
+                TicketLink.source_id == target_id,
+                TicketLink.target_id == source_id,
+                TicketLink.link_type == inverse_type,
+            )
+        ).first()
+        if inverse_link:
+            self.session.delete(inverse_link)
+        self.session.flush()
+
     def create_link(
-        self, source_id: int, target_id: int, link_type: LinkType, *, commit: bool = True
+        self,
+        source_id: int,
+        target_id: int,
+        link_type: LinkType,
+        *,
+        commit: bool = True,
+        replace_parent: bool = False,
     ) -> TicketLink:
         # Validate
         error = self._validate_link(source_id, target_id, link_type)
@@ -1272,6 +1332,46 @@ class LinkService:
         ).first()
         if existing:
             return existing
+
+        # Single-parent constraint (JRB-019): a ticket may have at most one
+        # parent. PARENT and CHILD are inverses, so the same violation is
+        # guarded from both directions: a second PARENT link for the same
+        # target, and a second CHILD link for the same source.
+        existing_parent: TicketLink | None = None
+        if link_type == LinkType.PARENT:
+            existing_parent = self.session.exec(
+                select(TicketLink).where(
+                    TicketLink.target_id == target_id,
+                    TicketLink.link_type == LinkType.PARENT,
+                    TicketLink.source_id != source_id,
+                )
+            ).first()
+        elif link_type == LinkType.CHILD:
+            existing_parent = self.session.exec(
+                select(TicketLink).where(
+                    TicketLink.source_id == source_id,
+                    TicketLink.link_type == LinkType.CHILD,
+                    TicketLink.target_id != target_id,
+                )
+            ).first()
+        if existing_parent is not None:
+            child_id = target_id if link_type == LinkType.PARENT else source_id
+            existing_parent_id = (
+                existing_parent.source_id
+                if link_type == LinkType.PARENT
+                else existing_parent.target_id
+            )
+            if not replace_parent:
+                raise ParentLinkConflictError(
+                    f"Ticket {child_id} already has a parent (ticket "
+                    f"{existing_parent_id}): a ticket can have only one parent. "
+                    "Set replace_parent=true to re-parent it.",
+                    existing_parent_id,
+                )
+            # Atomic re-parent (JRB-019): remove the old PARENT/CHILD pair
+            # before creating the new one; both writes land in the single
+            # commit at the bottom of this method.
+            self._delete_link_pair(existing_parent)
 
         # Create the link (plus its inverse if applicable). The pre-check above
         # can race with a concurrent insert of the same unique key; the uq
@@ -1352,38 +1452,7 @@ class LinkService:
         if not link:
             return False
 
-        source_id = link.source_id
-        target_id = link.target_id
-        link_type = link.link_type
-
-        # Delete the link
-        self.session.delete(link)
-        self.session.flush()
-
-        # Delete inverse link if applicable
-        inverse_type = self._get_inverse_link_type(link_type)
-        if inverse_type and inverse_type != link_type:
-            # For parent/child and blocks/blocked_by
-            inverse_link = self.session.exec(
-                select(TicketLink).where(
-                    TicketLink.source_id == target_id,
-                    TicketLink.target_id == source_id,
-                    TicketLink.link_type == inverse_type,
-                )
-            ).first()
-            if inverse_link:
-                self.session.delete(inverse_link)
-        elif inverse_type == link_type:
-            # For relates_to (self-inverse)
-            inverse_link = self.session.exec(
-                select(TicketLink).where(
-                    TicketLink.source_id == target_id,
-                    TicketLink.target_id == source_id,
-                    TicketLink.link_type == link_type,
-                )
-            ).first()
-            if inverse_link:
-                self.session.delete(inverse_link)
+        self._delete_link_pair(link)
 
         self.session.commit()
         return True

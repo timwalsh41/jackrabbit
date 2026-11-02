@@ -186,6 +186,100 @@ class TestCreateAllLinkTypes:
         assert response.status_code == 404
 
 
+class TestSingleParentConstraint:
+    """JRB-019: a second parent link is a 409 conflict unless replace_parent.
+
+    The conflict detail carries the existing parent id so the UI confirm
+    flow can name it.
+    """
+
+    @pytest.fixture
+    async def second_epic(self, client_with_seeds: AsyncClient) -> dict:
+        return await _ticket(client_with_seeds, "Epic B", type_="Epic")
+
+    async def test_second_parent_returns_409_with_existing_parent_id(
+        self, client_with_seeds: AsyncClient, tickets, second_epic
+    ):
+        first = await _link(
+            client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent"
+        )
+        assert first.status_code == 201, first.text
+
+        response = await _link(
+            client_with_seeds, second_epic["id"], tickets["story"]["id"], "parent"
+        )
+
+        assert response.status_code == 409, response.text
+        detail = response.json()["detail"]
+        assert str(tickets["epic"]["id"]) in detail
+
+    async def test_second_child_returns_409_with_existing_parent_id(
+        self, client_with_seeds: AsyncClient, tickets, second_epic
+    ):
+        first = await _link(
+            client_with_seeds, tickets["story"]["id"], tickets["epic"]["id"], "child"
+        )
+        assert first.status_code == 201, first.text
+
+        response = await _link(
+            client_with_seeds, tickets["story"]["id"], second_epic["id"], "child"
+        )
+
+        assert response.status_code == 409, response.text
+        detail = response.json()["detail"]
+        assert str(tickets["epic"]["id"]) in detail
+
+    async def test_replace_parent_replaces_old_pair(
+        self, client_with_seeds: AsyncClient, tickets, second_epic
+    ):
+        first = await _link(
+            client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent"
+        )
+        assert first.status_code == 201, first.text
+
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{second_epic['id']}/links",
+            json={
+                "source_id": second_epic["id"],
+                "target_id": tickets["story"]["id"],
+                "link_type": "parent",
+                "replace_parent": True,
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        assert visible == {
+            ("parent", second_epic["id"], tickets["story"]["id"]),
+            ("child", tickets["story"]["id"], second_epic["id"]),
+        }
+
+    async def test_replace_child_replaces_old_pair(
+        self, client_with_seeds: AsyncClient, tickets, second_epic
+    ):
+        first = await _link(
+            client_with_seeds, tickets["story"]["id"], tickets["epic"]["id"], "child"
+        )
+        assert first.status_code == 201, first.text
+
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{tickets['story']['id']}/links",
+            json={
+                "source_id": tickets["story"]["id"],
+                "target_id": second_epic["id"],
+                "link_type": "child",
+                "replace_parent": True,
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        assert visible == {
+            ("parent", second_epic["id"], tickets["story"]["id"]),
+            ("child", tickets["story"]["id"], second_epic["id"]),
+        }
+
+
 class TestDeleteLinks:
     """DELETE /api/v1/tickets/{source_id}/links/{link_id}."""
 

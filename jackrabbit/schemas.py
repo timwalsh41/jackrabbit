@@ -375,7 +375,9 @@ class TicketLinkBase(BaseModel):
 
 
 class TicketLinkCreate(TicketLinkBase):
-    pass
+    # JRB-019: when the ticket already has a parent, re-parent it instead of
+    # rejecting the link with a conflict. Only meaningful for parent/child.
+    replace_parent: bool = False
 
 
 class TicketLinkRead(TicketLinkBase):

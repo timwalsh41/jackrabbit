@@ -1181,6 +1181,7 @@ async def ticket_detail(
     request: Request,
     ticket_id: int,
     ticket_service: TicketService = Depends(get_ticket_service),
+    link_service: LinkService = Depends(get_link_service),
 ) -> HTMLResponse:
     """Ticket detail page (deep-linkable).
 
@@ -1197,6 +1198,18 @@ async def ticket_detail(
     # the template, so rendering never depends on lazy relationship loads).
     project = ticket_service.session.get(Project, ticket.project_id)
     project_prefix = project.prefix if project else "UNK"
+
+    # Parent back-link context (JRB-019): resolve the parent via LinkService
+    # while the session is open and pass plain scalars to the template, so
+    # rendering never depends on lazy relationship loads.
+    parent = link_service.get_parent(ticket_id)
+    parent_id: int | None = None
+    parent_full_id: str | None = None
+    if parent is not None:
+        parent_id = cast(int, parent.id)
+        parent_project = ticket_service.session.get(Project, parent.project_id)
+        parent_prefix = parent_project.prefix if parent_project else "UNK"
+        parent_full_id = f"{parent_prefix}-{parent.number:03d}"
 
     return templates.TemplateResponse(
         request,
@@ -1218,6 +1231,8 @@ async def ticket_detail(
             "branch_name": ticket.branch_name,
             "pr_url": ticket.pr_url,
             "original_id": ticket.original_id,
+            "parent_id": parent_id,
+            "parent_full_id": parent_full_id,
         },
     )
 
