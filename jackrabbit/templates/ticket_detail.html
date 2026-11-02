@@ -25,7 +25,14 @@
                   hx-on::after-request="if(event.detail.successful) { window.location.href = '/backlog'; }">
                 <button type="submit" class="px-3 py-1.5 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-md hover:bg-red-50">Delete</button>
             </form>
-            <a href="/backlog" class="text-indigo-600 hover:text-indigo-800 ml-2">← Back to Backlog</a>
+            {# Parent back-link (JRB-019) takes the top-right spot; Back to
+               Backlog sits below it, left-aligned in the actions column. #}
+            <div class="flex flex-col items-start gap-1">
+                {% if parent_id %}
+                <a href="/tickets/{{ parent_id }}" id="parent-backlink" class="text-indigo-600 hover:text-indigo-800 text-sm" title="Back to parent issue {{ parent_full_id }}">↑ Parent: {{ parent_full_id }}</a>
+                {% endif %}
+                <a href="/backlog" class="text-indigo-600 hover:text-indigo-800 text-sm">← Back to Backlog</a>
+            </div>
         </div>
     </div>
 

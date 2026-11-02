@@ -7,7 +7,12 @@ from jackrabbit.models import (
     TicketLink,
     TicketType,
 )
-from jackrabbit.services import LinkService, ProjectService, TicketService
+from jackrabbit.services import (
+    LinkService,
+    ParentLinkConflictError,
+    ProjectService,
+    TicketService,
+)
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine, select
 
@@ -130,6 +135,126 @@ class TestCreateLinkRace:
         first = link_service.create_link(a.id, b.id, LinkType.RELATES_TO)
         second = link_service.create_link(a.id, b.id, LinkType.RELATES_TO)
         assert first.id == second.id
+
+
+class TestSingleParentConstraint:
+    """JRB-019: a ticket can have at most one parent.
+
+    PARENT and CHILD are inverses, so both directions of the same violation
+    are guarded: a second PARENT link for a target that already has one, and
+    a second CHILD link for a source that already has one.
+    """
+
+    @pytest.fixture
+    def second_epic(self, ticket_service, test_project):
+        return ticket_service.create_ticket(
+            project_id=test_project.id,
+            title="Second Epic",
+            type=TicketType.EPIC,
+        )
+
+    def test_second_parent_link_rejected_names_existing_parent(
+        self, link_service, epic_ticket, story_ticket, second_epic
+    ):
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        with pytest.raises(ParentLinkConflictError) as excinfo:
+            link_service.create_link(second_epic.id, story_ticket.id, LinkType.PARENT)
+
+        assert excinfo.value.existing_parent_id == epic_ticket.id
+        assert str(epic_ticket.id) in str(excinfo.value)
+
+    def test_conflict_is_a_value_error(self, link_service, epic_ticket, story_ticket, second_epic):
+        """The API maps ValueError to an HTTP error, so the conflict must
+        subclass ValueError to keep surfacing correctly."""
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        with pytest.raises(ValueError):
+            link_service.create_link(second_epic.id, story_ticket.id, LinkType.PARENT)
+
+    def test_second_child_link_rejected_names_existing_parent(
+        self, link_service, epic_ticket, story_ticket, second_epic
+    ):
+        link_service.create_link(story_ticket.id, epic_ticket.id, LinkType.CHILD)
+
+        with pytest.raises(ParentLinkConflictError) as excinfo:
+            link_service.create_link(story_ticket.id, second_epic.id, LinkType.CHILD)
+
+        assert excinfo.value.existing_parent_id == epic_ticket.id
+
+    def test_replace_parent_replaces_old_pair_atomically(
+        self, link_service, epic_ticket, story_ticket, second_epic
+    ):
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        link = link_service.create_link(
+            second_epic.id, story_ticket.id, LinkType.PARENT, replace_parent=True
+        )
+
+        assert link.source_id == second_epic.id
+        assert link.target_id == story_ticket.id
+        visible = {
+            (lnk.source_id, lnk.target_id, lnk.link_type)
+            for lnk in link_service.get_links_for_ticket(story_ticket.id)
+        }
+        assert visible == {
+            (second_epic.id, story_ticket.id, LinkType.PARENT),
+            (story_ticket.id, second_epic.id, LinkType.CHILD),
+        }
+
+    def test_replace_child_replaces_old_pair(
+        self, link_service, epic_ticket, story_ticket, second_epic
+    ):
+        link_service.create_link(story_ticket.id, epic_ticket.id, LinkType.CHILD)
+
+        link = link_service.create_link(
+            story_ticket.id, second_epic.id, LinkType.CHILD, replace_parent=True
+        )
+
+        assert link.target_id == second_epic.id
+        visible = {
+            (lnk.source_id, lnk.target_id, lnk.link_type)
+            for lnk in link_service.get_links_for_ticket(story_ticket.id)
+        }
+        assert visible == {
+            (second_epic.id, story_ticket.id, LinkType.PARENT),
+            (story_ticket.id, second_epic.id, LinkType.CHILD),
+        }
+
+    def test_replace_parent_with_no_existing_parent_just_creates(
+        self, link_service, epic_ticket, story_ticket
+    ):
+        link = link_service.create_link(
+            epic_ticket.id, story_ticket.id, LinkType.PARENT, replace_parent=True
+        )
+
+        assert link.source_id == epic_ticket.id
+        assert link.target_id == story_ticket.id
+
+    def test_exact_duplicate_parent_stays_idempotent(self, link_service, epic_ticket, story_ticket):
+        """Re-adding the very same parent link is not a conflict."""
+        first = link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        second = link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        assert second.id == first.id
+
+    def test_get_parent_returns_parent_ticket(self, link_service, epic_ticket, story_ticket):
+        assert link_service.get_parent(story_ticket.id) is None
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+        parent = link_service.get_parent(story_ticket.id)
+        assert parent is not None
+        assert parent.id == epic_ticket.id
+
+    def test_non_parent_links_unaffected_by_constraint(
+        self, link_service, story_ticket, bug_ticket, spike_ticket
+    ):
+        """blocks/relates_to are not parent links: multiple ones stay legal."""
+        link_service.create_link(story_ticket.id, bug_ticket.id, LinkType.BLOCKS)
+        link_service.create_link(story_ticket.id, spike_ticket.id, LinkType.BLOCKS)
+        link_service.create_link(story_ticket.id, bug_ticket.id, LinkType.RELATES_TO)
+
+        assert len(link_service.get_links_for_ticket(story_ticket.id)) >= 3
 
 
 @pytest.fixture

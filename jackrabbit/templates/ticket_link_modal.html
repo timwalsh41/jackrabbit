@@ -18,7 +18,8 @@
                 </button>
             </div>
             
-            <form hx-post="/api/v1/tickets/{{ ticket.id }}/links"
+            <form id="link-modal-form"
+                  hx-post="/api/v1/tickets/{{ ticket.id }}/links"
                   hx-target="#links-section"
                   hx-swap="outerHTML"
                   hx-ext="json-enc"
@@ -65,6 +66,8 @@
                     </div>
                     <input type="hidden" name="source_id" value="{{ ticket.id }}">
                     <input type="hidden" name="target_id" id="target_id" data-ticket-type="" required>
+                    {# JRB-019: flipped to true by the confirm flow after a 409 #}
+                    <input type="hidden" name="replace_parent" id="replace-parent-flag" value="false">
                     <div id="target-results" class="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto hidden"></div>
                     <p class="mt-1 text-xs text-gray-500" id="target-help">Select a link type first</p>
                 </div>
@@ -192,4 +195,29 @@
     
     // Focus search input on modal open
     document.getElementById('target_search').focus();
+
+    // Single-parent confirm flow (JRB-019): a 409 from the links API means
+    // the ticket already has a parent. Confirm before re-parenting.
+    (function() {
+        var form = document.getElementById('link-modal-form');
+        if (!form) return;
+        document.body.addEventListener('htmx:responseError', function(evt) {
+            if (evt.detail.elt !== form) return;
+            var xhr = evt.detail.xhr;
+            if (!xhr || xhr.status !== 409) return;
+            var message = 'The ticket already has a parent.';
+            try {
+                var data = JSON.parse(xhr.responseText);
+                if (data && typeof data.detail === 'string' && data.detail) {
+                    message = data.detail;
+                }
+            } catch (e) { /* non-JSON body: keep the fallback message */ }
+            if (window.confirm(
+                'A ticket can have only one parent.\n\n' + message +
+                '\n\nReplace the current parent?')) {
+                document.getElementById('replace-parent-flag').value = 'true';
+                form.requestSubmit();
+            }
+        });
+    })();
 </script>

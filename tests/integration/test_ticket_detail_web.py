@@ -35,6 +35,73 @@ async def get_page(client: httpx.AsyncClient, url: str) -> httpx.Response:
     return await client.get(url, headers={"accept": "text/html"})
 
 
+class TestParentBacklink:
+    """JRB-019: the detail page links back to the ticket's parent issue."""
+
+    async def test_detail_page_shows_parent_backlink(self, client: httpx.AsyncClient):
+        epic = await create_ticket(client, title="Parent Epic", type=TicketType.EPIC)
+        story = await create_ticket(client, title="Child Story")
+        link = await client.post(
+            f"/api/v1/tickets/{epic['id']}/links",
+            json={
+                "source_id": epic["id"],
+                "target_id": story["id"],
+                "link_type": "parent",
+            },
+        )
+        assert link.status_code == 201, link.text
+
+        response = await get_page(client, f"/tickets/{story['id']}")
+
+        assert response.status_code == 200
+        assert f"↑ Parent: UNS-{epic['number']:03d}" in response.text
+        assert f'href="/tickets/{epic["id"]}"' in response.text
+
+    async def test_backlink_sits_above_back_to_backlog(self, client: httpx.AsyncClient):
+        """The parent link takes the top-right spot; Back to Backlog stays below."""
+        epic = await create_ticket(client, title="Parent Epic", type=TicketType.EPIC)
+        story = await create_ticket(client, title="Child Story")
+        link = await client.post(
+            f"/api/v1/tickets/{epic['id']}/links",
+            json={
+                "source_id": epic["id"],
+                "target_id": story["id"],
+                "link_type": "parent",
+            },
+        )
+        assert link.status_code == 201, link.text
+
+        response = await get_page(client, f"/tickets/{story['id']}")
+
+        parent_pos = response.text.find("↑ Parent:")
+        backlog_pos = response.text.find("← Back to Backlog")
+        assert 0 < parent_pos < backlog_pos
+
+    async def test_detail_page_without_parent_has_no_backlink(self, client: httpx.AsyncClient):
+        story = await create_ticket(client, title="Orphan Story")
+        response = await get_page(client, f"/tickets/{story['id']}")
+        assert response.status_code == 200
+        assert "↑ Parent:" not in response.text
+
+    async def test_parent_detail_page_has_no_backlink_for_epic(self, client: httpx.AsyncClient):
+        """The Epic side of the link is the parent: it gets no backlink."""
+        epic = await create_ticket(client, title="Parent Epic", type=TicketType.EPIC)
+        story = await create_ticket(client, title="Child Story")
+        link = await client.post(
+            f"/api/v1/tickets/{epic['id']}/links",
+            json={
+                "source_id": epic["id"],
+                "target_id": story["id"],
+                "link_type": "parent",
+            },
+        )
+        assert link.status_code == 201, link.text
+
+        response = await get_page(client, f"/tickets/{epic['id']}")
+        assert response.status_code == 200
+        assert "↑ Parent:" not in response.text
+
+
 class TestTicketDetailPage:
     async def test_detail_page_renders_at_tickets_id(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
