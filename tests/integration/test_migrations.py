@@ -219,3 +219,95 @@ def test_repo_root_is_exported_from_the_database_module() -> None:
 
     assert (database.REPO_ROOT / "alembic.ini").is_file()
     assert (database.REPO_ROOT / "alembic" / "env.py").is_file()
+
+
+def test_upgrade_from_prior_revision_resolves_legacy_parent_duplicates(tmp_path: Path, monkeypatch):
+    """The head migration (c4d5e6f7a8b9) adds partial unique indexes that
+    forbid multiple PARENT links to the same target. Legacy databases upgraded
+    from the previous revision (b2f6c1d4e7a9) could legally contain such
+    duplicates (only (source_id, target_id, link_type) was unique), so the
+    migration must resolve the conflicts instead of failing with an
+    IntegrityError while creating the indexes — the upgrade runs during
+    application startup, and a failed upgrade means the instance cannot start.
+
+    Seeded legacy data (one project, tickets 1..4):
+    - two distinct PARENT links to ticket 3 (from 1 and from 2), each with its
+      CHILD inverse — a direct violation of the new indexes;
+    - an unpaired CHILD link (4 -> 1) whose inverse PARENT never existed.
+
+    The migration must keep the newest PARENT row per target (highest id), drop
+    the now-orphaned inverse CHILD rows, and still create both indexes."""
+    db_path = tmp_path / "legacy-dupes.db"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    cfg = _alembic_config(database_url)
+
+    # Upgrade to the revision *before* the single-parent indexes, where the
+    # conflicting links are still legal, and seed the legacy data.
+    command.upgrade(cfg, "b2f6c1d4e7a9")
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        project_id = conn.execute(
+            text(
+                "INSERT INTO project (prefix, name, description, is_system, "
+                "created_at, updated_at) VALUES ('LEG', 'Legacy', '', 0, "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+        ).lastrowid
+
+        def _insert_ticket(number: int) -> int:
+            return conn.execute(
+                text(
+                    "INSERT INTO ticket (project_id, number, title, "
+                    "created_at, updated_at) VALUES (:pid, :number, :title, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"pid": project_id, "number": number, "title": f"Ticket {number}"},
+            ).lastrowid
+
+        epic_id = _insert_ticket(1)
+        parent_a_id = _insert_ticket(2)
+        parent_b_id = _insert_ticket(3)
+        unpaired_child_id = _insert_ticket(4)
+
+        def _insert_link(source_id: int, target_id: int, link_type: str) -> int:
+            return conn.execute(
+                text(
+                    "INSERT INTO ticketlink (source_id, target_id, link_type, "
+                    "created_at) VALUES (:src, :tgt, :link_type, CURRENT_TIMESTAMP)"
+                ),
+                {"src": source_id, "tgt": target_id, "link_type": link_type},
+            ).lastrowid
+
+        # Conflict: two distinct PARENT links to the same target (the epic),
+        # each with its CHILD inverse — a direct violation of the new indexes.
+        _insert_link(parent_a_id, epic_id, "PARENT")
+        _insert_link(epic_id, parent_a_id, "CHILD")
+        _insert_link(parent_b_id, epic_id, "PARENT")
+        _insert_link(epic_id, parent_b_id, "CHILD")
+        # A CHILD link whose inverse PARENT never existed.
+        _insert_link(epic_id, unpaired_child_id, "CHILD")
+    engine.dispose()
+
+    # The upgrade that used to fail with an IntegrityError on the indexes.
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        parent_rows = conn.execute(
+            text("SELECT source_id, target_id FROM ticketlink WHERE link_type = 'PARENT'")
+        ).fetchall()
+        child_rows = conn.execute(
+            text("SELECT source_id, target_id FROM ticketlink WHERE link_type = 'CHILD'")
+        ).fetchall()
+        index_names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
+    engine.dispose()
+
+    # The newest PARENT link (from parent_b) survives; the duplicate from
+    # parent_a and its inverse CHILD are gone.
+    assert parent_rows == [(parent_b_id, epic_id)]
+    # The surviving CHILD is the inverse of the surviving PARENT; the orphaned
+    # inverses (of the deleted duplicate and of the never-paired link) are gone.
+    assert child_rows == [(epic_id, parent_b_id)]
+    # Both partial unique indexes exist, so the resolved data satisfies them.
+    assert {"uq_ticket_link_parent_target", "uq_ticket_link_child_source"} <= index_names
