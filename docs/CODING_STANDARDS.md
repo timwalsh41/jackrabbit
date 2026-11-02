@@ -62,7 +62,8 @@
 - Bug fixes: regression test that fails before fix, passes after
 
 ### Error Handling
-- API endpoints return structured errors (RFC 7807 `ProblemDetail` shape)
+- API endpoints raise FastAPI `HTTPException`; FastAPI serializes it as JSON `{"detail": ...}` (JRB-019 amendment 2026-11-02: the repo never adopted RFC 7807 `ProblemDetail` — this bullet documents the implemented convention)
+  - Domain errors surface as service exceptions (`ValueError` subclasses, e.g. `ParentLinkConflictError`) and are mapped to HTTP status codes (`400`/`409`) in `api.py`
 - Validation errors use `422` with field-level messages
 - Internal errors use `500` with correlation ID for debugging
 

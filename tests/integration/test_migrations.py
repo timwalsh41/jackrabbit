@@ -64,6 +64,40 @@ def test_upgrade_creates_all_tables(tmp_path: Path, monkeypatch):
     engine.dispose()
 
 
+def test_single_parent_partial_unique_indexes(tmp_path: Path, monkeypatch):
+    """JRB-019 review remediation: the head migration adds two partial unique
+    indexes enforcing one parent per child at the DB level (one PARENT row per
+    target, one CHILD row per source), and downgrade removes them."""
+    db_path = tmp_path / "singleparent.db"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    cfg = _alembic_config(database_url)
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(database_url)
+    indexes = {idx["name"]: idx for idx in inspect(engine).get_indexes("ticketlink")}
+    assert indexes["uq_ticket_link_parent_target"]["unique"]
+    assert indexes["uq_ticket_link_child_source"]["unique"]
+    engine.dispose()
+
+    # Downgrade one step: the index migration is undone, tables stay.
+    command.downgrade(cfg, "-1")
+    engine = create_engine(database_url)
+    names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
+    assert "uq_ticket_link_parent_target" not in names
+    assert "uq_ticket_link_child_source" not in names
+    assert "ticketlink" in _tables(engine)
+    engine.dispose()
+
+    # Re-upgrade restores them.
+    command.upgrade(cfg, "head")
+    engine = create_engine(database_url)
+    names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
+    assert "uq_ticket_link_parent_target" in names
+    assert "uq_ticket_link_child_source" in names
+    engine.dispose()
+
+
 def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypatch):
     """upgrade head -> downgrade -1 -> upgrade head round-trips cleanly."""
     db_path = tmp_path / "roundtrip.db"
@@ -77,14 +111,18 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
     assert "transition" in _tables(engine)
     engine.dispose()
 
-    # Downgrade one step: the labels migration (the head step) is undone, so
-    # the label tables are gone while everything older stays in place.
+    # Downgrade one step: the single-parent index migration (the head step)
+    # is undone, so the partial unique indexes are gone while everything
+    # older (including the label tables) stays in place.
     command.downgrade(cfg, "-1")
     engine = create_engine(database_url)
     tables = _tables(engine)
-    assert "label" not in tables
-    assert "ticketlabel" not in tables
+    assert "label" in tables
+    assert "ticketlabel" in tables
     assert "transition" in tables
+    index_names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
+    assert "uq_ticket_link_parent_target" not in index_names
+    assert "uq_ticket_link_child_source" not in index_names
 
     # Data survives the rename round-trip: insert a row at the downgraded
     # revision and confirm it is still there after re-upgrading.
@@ -107,7 +145,7 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
     # The 0001 migration seeds the UNS system project; the inserted row must
     # also have survived the downgrade -> re-upgrade round-trip.
     assert prefixes == {"UNS", "RT"}
-    assert revision == "b2f6c1d4e7a9"
+    assert revision == "c4d5e6f7a8b9"
     engine.dispose()
 
 

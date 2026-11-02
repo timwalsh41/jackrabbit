@@ -1308,6 +1308,44 @@ class LinkService:
             self.session.delete(inverse_link)
         self.session.flush()
 
+    def _find_existing_parent(
+        self, source_id: int, target_id: int, link_type: LinkType
+    ) -> TicketLink | None:
+        """Return the parent link that would conflict with this one, if any.
+
+        Single-parent constraint (JRB-019): a ticket may have at most one
+        parent. PARENT and CHILD are inverses, so the same violation is
+        detected from both directions: a second PARENT link for the same
+        target, and a second CHILD link for the same source. Returns None for
+        every other link type.
+        """
+        if link_type == LinkType.PARENT:
+            return self.session.exec(
+                select(TicketLink).where(
+                    TicketLink.target_id == target_id,
+                    TicketLink.link_type == LinkType.PARENT,
+                    TicketLink.source_id != source_id,
+                )
+            ).first()
+        if link_type == LinkType.CHILD:
+            return self.session.exec(
+                select(TicketLink).where(
+                    TicketLink.source_id == source_id,
+                    TicketLink.link_type == LinkType.CHILD,
+                    TicketLink.target_id != target_id,
+                )
+            ).first()
+        return None
+
+    @staticmethod
+    def _parent_conflict_error(child_id: int, existing_parent_id: int) -> ParentLinkConflictError:
+        return ParentLinkConflictError(
+            f"Ticket {child_id} already has a parent (ticket "
+            f"{existing_parent_id}): a ticket can have only one parent. "
+            "Set replace_parent=true to re-parent it.",
+            existing_parent_id,
+        )
+
     def create_link(
         self,
         source_id: int,
@@ -1334,26 +1372,12 @@ class LinkService:
             return existing
 
         # Single-parent constraint (JRB-019): a ticket may have at most one
-        # parent. PARENT and CHILD are inverses, so the same violation is
-        # guarded from both directions: a second PARENT link for the same
-        # target, and a second CHILD link for the same source.
-        existing_parent: TicketLink | None = None
-        if link_type == LinkType.PARENT:
-            existing_parent = self.session.exec(
-                select(TicketLink).where(
-                    TicketLink.target_id == target_id,
-                    TicketLink.link_type == LinkType.PARENT,
-                    TicketLink.source_id != source_id,
-                )
-            ).first()
-        elif link_type == LinkType.CHILD:
-            existing_parent = self.session.exec(
-                select(TicketLink).where(
-                    TicketLink.source_id == source_id,
-                    TicketLink.link_type == LinkType.CHILD,
-                    TicketLink.target_id != target_id,
-                )
-            ).first()
+        # parent. The DB-level partial unique indexes (models.TicketLink /
+        # migration c4d5e6f7a8b9) backstop this pre-check: a concurrent
+        # writer that commits a conflicting parent between the pre-check and
+        # the insert below turns the insert into an IntegrityError, mapped
+        # onto ParentLinkConflictError in the except branch.
+        existing_parent = self._find_existing_parent(source_id, target_id, link_type)
         if existing_parent is not None:
             child_id = target_id if link_type == LinkType.PARENT else source_id
             existing_parent_id = (
@@ -1362,12 +1386,7 @@ class LinkService:
                 else existing_parent.target_id
             )
             if not replace_parent:
-                raise ParentLinkConflictError(
-                    f"Ticket {child_id} already has a parent (ticket "
-                    f"{existing_parent_id}): a ticket can have only one parent. "
-                    "Set replace_parent=true to re-parent it.",
-                    existing_parent_id,
-                )
+                raise self._parent_conflict_error(child_id, existing_parent_id)
             # Atomic re-parent (JRB-019): remove the old PARENT/CHILD pair
             # before creating the new one; both writes land in the single
             # commit at the bottom of this method.
@@ -1432,7 +1451,7 @@ class LinkService:
                 self.session.commit()
             else:
                 self.session.flush()
-        except IntegrityError:
+        except IntegrityError as exc:
             self.session.rollback()
             existing = self.session.exec(
                 select(TicketLink).where(
@@ -1443,6 +1462,20 @@ class LinkService:
             ).first()
             if existing:
                 return existing
+            # JRB-019 review remediation: a lost single-parent race against a
+            # concurrent writer trips the DB-level partial unique indexes (not
+            # the uq key above), so no duplicate row exists after rollback.
+            # Map that onto ParentLinkConflictError so the API still answers
+            # 409 with the winning parent id instead of a 500.
+            conflicting_parent = self._find_existing_parent(source_id, target_id, link_type)
+            if conflicting_parent is not None:
+                child_id = target_id if link_type == LinkType.PARENT else source_id
+                existing_parent_id = (
+                    conflicting_parent.source_id
+                    if link_type == LinkType.PARENT
+                    else conflicting_parent.target_id
+                )
+                raise self._parent_conflict_error(child_id, existing_parent_id) from exc
             raise
         self.session.refresh(link)
         return link
