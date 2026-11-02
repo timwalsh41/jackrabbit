@@ -6,7 +6,7 @@ API request/response schemas are in `schemas.py`.
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, text
 from sqlmodel import Field, Relationship, SQLModel
 from sqlmodel._compat import NaiveDatetime
 
@@ -193,6 +193,26 @@ class TicketLink(SQLModel, table=True):
         # race handling depends on this unique constraint existing.
         UniqueConstraint(
             "source_id", "target_id", "link_type", name="uq_ticket_link_source_target_type"
+        ),
+        # JRB-019 review remediation: DB-level single-parent enforcement.
+        # PARENT and CHILD are inverses, so the two partial unique indexes
+        # together guarantee a ticket can have at most one parent even when a
+        # writer bypasses LinkService's pre-check (race backstop). Matches
+        # alembic migration c4d5e6f7a8b9.
+        # NOTE: SQLModel/SQLAlchemy persist StrEnum columns as the member
+        # *name* ('PARENT', 'CHILD'), so the WHERE clauses match both the name
+        # and the lowercase value defensively.
+        Index(
+            "uq_ticket_link_parent_target",
+            "target_id",
+            unique=True,
+            sqlite_where=text("link_type IN ('PARENT', 'parent')"),
+        ),
+        Index(
+            "uq_ticket_link_child_source",
+            "source_id",
+            unique=True,
+            sqlite_where=text("link_type IN ('CHILD', 'child')"),
         ),
     )
 

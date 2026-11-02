@@ -13,6 +13,7 @@ from jackrabbit.services import (
     ProjectService,
     TicketService,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine, select
 
@@ -255,6 +256,194 @@ class TestSingleParentConstraint:
         link_service.create_link(story_ticket.id, bug_ticket.id, LinkType.RELATES_TO)
 
         assert len(link_service.get_links_for_ticket(story_ticket.id)) >= 3
+
+
+class TestDbLevelSingleParentEnforcement:
+    """JRB-019 review remediation: the single-parent rule is also enforced at
+    the DB level by partial unique indexes (one PARENT row per target, one
+    CHILD row per source), so even a writer that bypasses the service-level
+    pre-check cannot commit a second parent."""
+
+    @pytest.fixture
+    def second_epic(self, ticket_service, test_project):
+        return ticket_service.create_ticket(
+            project_id=test_project.id,
+            title="Second Epic",
+            type=TicketType.EPIC,
+        )
+
+    def test_second_parent_link_rejected_at_db_level(
+        self, session, link_service, epic_ticket, story_ticket, second_epic
+    ):
+        """A rogue PARENT link that skips the service pre-check still cannot
+        commit: the partial unique index raises IntegrityError on flush."""
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        rogue = TicketLink(
+            source_id=second_epic.id, target_id=story_ticket.id, link_type=LinkType.PARENT
+        )
+        session.add(rogue)
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+
+        # The child still has exactly one parent.
+        parent = link_service.get_parent(story_ticket.id)
+        assert parent is not None and parent.id == epic_ticket.id
+
+    def test_second_child_link_rejected_at_db_level(
+        self, session, link_service, epic_ticket, story_ticket, second_epic
+    ):
+        """The CHILD direction is the same violation (inverse link), so the
+        matching index on source_id stops it at the DB level too."""
+        link_service.create_link(story_ticket.id, epic_ticket.id, LinkType.CHILD)
+
+        rogue = TicketLink(
+            source_id=story_ticket.id, target_id=second_epic.id, link_type=LinkType.CHILD
+        )
+        session.add(rogue)
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+
+        parent = link_service.get_parent(story_ticket.id)
+        assert parent is not None and parent.id == epic_ticket.id
+
+    def test_one_epic_still_may_parent_many_children(
+        self, link_service, epic_ticket, story_ticket, bug_ticket
+    ):
+        """The indexes limit *parents per child*, not children per parent:
+        a legitimate one-epic-many-children fan-out must keep working."""
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+        link_service.create_link(epic_ticket.id, bug_ticket.id, LinkType.PARENT)
+
+        assert link_service.get_parent(story_ticket.id).id == epic_ticket.id
+        assert link_service.get_parent(bug_ticket.id).id == epic_ticket.id
+
+    def test_non_parent_link_types_keep_their_multiplicity(
+        self, session, link_service, story_ticket, bug_ticket, spike_ticket
+    ):
+        """Two BLOCKS links from the same source stay legal — the partial
+        indexes must not constrain blocks/relates_to."""
+        link_service.create_link(story_ticket.id, bug_ticket.id, LinkType.BLOCKS)
+        link_service.create_link(story_ticket.id, spike_ticket.id, LinkType.BLOCKS)
+
+        blocks = [
+            lnk
+            for lnk in link_service.get_links_for_ticket(story_ticket.id)
+            if lnk.link_type == LinkType.BLOCKS
+        ]
+        assert {(lnk.target_id) for lnk in blocks} == {bug_ticket.id, spike_ticket.id}
+
+
+class TestParentConflictRaceMapping:
+    """JRB-019 review remediation: when a concurrent writer wins the
+    single-parent race between create_link's pre-check and its insert, the
+    partial unique index raises IntegrityError — which must be mapped onto
+    ParentLinkConflictError (API 409), not surfaced as a 500.
+
+    The race window is simulated deterministically (SQLite serializes real
+    writers): the conflicting parent is committed, and the loser's pre-check
+    is stubbed to return None, exactly the stale-snapshot state a concurrent
+    insert produces.
+    """
+
+    @pytest.fixture
+    def second_epic(self, ticket_service, test_project):
+        return ticket_service.create_ticket(
+            project_id=test_project.id,
+            title="Second Epic",
+            type=TicketType.EPIC,
+        )
+
+    @pytest.fixture
+    def blind_pre_check(self, monkeypatch):
+        """Simulate the race window: the single-parent pre-check misses the
+        conflicting row a concurrent writer just committed (only the first
+        call — the handler's post-rollback re-check sees committed state)."""
+        real_find = LinkService._find_existing_parent
+        calls = {"n": 0}
+
+        def stub(self, source_id, target_id, link_type):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None
+            return real_find(self, source_id, target_id, link_type)
+
+        monkeypatch.setattr(LinkService, "_find_existing_parent", stub)
+
+    def test_parent_race_integrity_error_maps_to_conflict(
+        self, link_service, epic_ticket, story_ticket, second_epic, blind_pre_check
+    ):
+        # The winner committed first; the loser's stale pre-check missed it.
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        with pytest.raises(ParentLinkConflictError) as excinfo:
+            link_service.create_link(second_epic.id, story_ticket.id, LinkType.PARENT)
+
+        assert excinfo.value.existing_parent_id == epic_ticket.id
+
+    def test_child_race_integrity_error_maps_to_conflict(
+        self, link_service, epic_ticket, story_ticket, second_epic, blind_pre_check
+    ):
+        link_service.create_link(story_ticket.id, epic_ticket.id, LinkType.CHILD)
+
+        with pytest.raises(ParentLinkConflictError) as excinfo:
+            link_service.create_link(story_ticket.id, second_epic.id, LinkType.CHILD)
+
+        assert excinfo.value.existing_parent_id == epic_ticket.id
+
+    def test_concurrent_writers_leave_exactly_one_parent(
+        self, link_service, epic_ticket, story_ticket, second_epic, blind_pre_check
+    ):
+        """End state of the race: exactly one parent survives and it is the
+        winner's; the loser surfaces the 409-mapped conflict."""
+        link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        with pytest.raises(ParentLinkConflictError):
+            link_service.create_link(second_epic.id, story_ticket.id, LinkType.PARENT)
+
+        visible = {
+            (lnk.source_id, lnk.target_id, lnk.link_type)
+            for lnk in link_service.get_links_for_ticket(story_ticket.id)
+        }
+        assert visible == {
+            (epic_ticket.id, story_ticket.id, LinkType.PARENT),
+            (story_ticket.id, epic_ticket.id, LinkType.CHILD),
+        }
+
+    def test_same_key_parent_race_stays_idempotent(
+        self, session, link_service, epic_ticket, story_ticket
+    ):
+        """A lost race on the *same* key is still the existing idempotent path
+        (return the committed link), not a parent conflict and not a 500."""
+        first = link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+
+        # The loser's duplicate pre-check misses (stale snapshot), and its
+        # single-parent pre-check misses too, so the insert itself races.
+        real_exec = session.exec
+        state = {"first": True}
+
+        class _EmptyResult:
+            def first(self):
+                return None
+
+            def all(self):
+                return []
+
+        def fake_exec(query, *args, **kwargs):
+            if state["first"]:
+                state["first"] = False
+                return _EmptyResult()
+            return real_exec(query, *args, **kwargs)
+
+        session.exec = fake_exec  # type: ignore[method-assign]
+        try:
+            second = link_service.create_link(epic_ticket.id, story_ticket.id, LinkType.PARENT)
+        finally:
+            session.exec = real_exec  # type: ignore[method-assign]
+
+        assert second.id == first.id
 
 
 @pytest.fixture

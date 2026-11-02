@@ -254,6 +254,51 @@ class TestSingleParentConstraint:
             ("child", tickets["story"]["id"], second_epic["id"]),
         }
 
+    async def test_db_backstop_race_still_answers_409(
+        self,
+        client_with_seeds: AsyncClient,
+        tickets,
+        second_epic,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """DB-level enforcement backstop (JRB-019 review remediation): when a
+        concurrent writer wins the single-parent race and create_link's
+        pre-check misses (simulated by stubbing the pre-check), the
+        IntegrityError from the partial unique index must be mapped onto the
+        same 409-with-existing-parent-id response — never a 500."""
+        from jackrabbit.services import LinkService
+
+        first = await _link(
+            client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent"
+        )
+        assert first.status_code == 201, first.text
+
+        # Blind only the first call (the pre-check); the post-rollback
+        # re-check inside the handler must see committed state.
+        real_find = LinkService._find_existing_parent
+        calls = {"n": 0}
+
+        def stub(self, source_id, target_id, link_type):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None
+            return real_find(self, source_id, target_id, link_type)
+
+        monkeypatch.setattr(LinkService, "_find_existing_parent", stub)
+        response = await _link(
+            client_with_seeds, second_epic["id"], tickets["story"]["id"], "parent"
+        )
+
+        assert response.status_code == 409, response.text
+        detail = response.json()["detail"]
+        assert str(tickets["epic"]["id"]) in detail
+        # The child ends with exactly one parent — the race winner's.
+        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        assert visible == {
+            ("parent", tickets["epic"]["id"], tickets["story"]["id"]),
+            ("child", tickets["story"]["id"], tickets["epic"]["id"]),
+        }
+
     async def test_replace_child_replaces_old_pair(
         self, client_with_seeds: AsyncClient, tickets, second_epic
     ):
