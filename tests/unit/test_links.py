@@ -895,5 +895,66 @@ class TestCreateChildTicket:
         assert "not found" in str(exc_info.value).lower()
 
 
+class TestOpenBlockerFilter:
+    """JRB-018: open blockers are blockers whose source is not terminal
+    (Complete and Rejected are terminal)."""
+
+    @staticmethod
+    def _links_with_statuses(session, link_service, blocker_statuses, story_ticket):
+        """Create a blocks link per (title, status) and return the blocker links."""
+        from jackrabbit.services import TicketService
+
+        ticket_service = TicketService(session)
+        blockers = []
+        for title, status in blocker_statuses:
+            blocker = ticket_service.create_ticket(project_id=1, title=title)
+            blocker.status = status
+            session.add(blocker)
+            session.commit()
+            session.refresh(blocker)
+            link_service.create_link(blocker.id, story_ticket.id, LinkType.BLOCKS)
+            blockers.append(blocker)
+        return link_service.get_blockers(story_ticket.id)
+
+    def test_complete_blocker_is_not_open(self, session, link_service, story_ticket):
+        from jackrabbit.web import _open_blockers
+
+        blockers = self._links_with_statuses(
+            session, link_service, [("Done", "Complete")], story_ticket
+        )
+        assert _open_blockers(blockers) == []
+
+    def test_rejected_blocker_is_not_open(self, session, link_service, story_ticket):
+        from jackrabbit.web import _open_blockers
+
+        blockers = self._links_with_statuses(
+            session, link_service, [("Dropped", "Rejected")], story_ticket
+        )
+        assert _open_blockers(blockers) == []
+
+    def test_open_statuses_are_open_blockers(self, session, link_service, story_ticket):
+        from jackrabbit.web import _open_blockers
+
+        blockers = self._links_with_statuses(
+            session,
+            link_service,
+            [("A", "Open"), ("B", "Groomed"), ("C", "In Progress"), ("D", "Ready for Review")],
+            story_ticket,
+        )
+        assert [b.source.title for b in _open_blockers(blockers)] == ["A", "B", "C", "D"]
+
+    def test_mixed_only_open_returned(self, session, link_service, story_ticket):
+        from jackrabbit.web import _open_blockers
+
+        blockers = self._links_with_statuses(
+            session,
+            link_service,
+            [("Done", "Complete"), ("Active", "Open"), ("Dropped", "Rejected")],
+            story_ticket,
+        )
+        open_titles = [b.source.title for b in _open_blockers(blockers)]
+        assert open_titles == ["Active"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

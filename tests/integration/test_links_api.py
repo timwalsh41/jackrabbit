@@ -22,6 +22,43 @@ async def _link(client: AsyncClient, source_id: int, target_id: int, link_type: 
     )
 
 
+GROOM_FIELDS = {
+    "approach": "Do the thing",
+    "files_to_change": "src/a.py",
+    "test_plan": "run tests",
+    "validation_steps": "verify",
+}
+
+
+async def _blocker_ticket(client: AsyncClient, title: str) -> dict:
+    """A groomable Story that can be advanced to Complete."""
+    response = await client.post(
+        "/api/v1/tickets", json={"project_id": 2, "title": title, "type": "Story", **GROOM_FIELDS}
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _transition(client: AsyncClient, ticket_id: int, to_status: str) -> None:
+    response = await client.post(
+        f"/api/v1/tickets/{ticket_id}/transition", json={"to_status": to_status}
+    )
+    assert response.status_code == 200, response.text
+
+
+async def _advance_to_complete(client: AsyncClient, ticket_id: int) -> None:
+    """Step a ticket forward through each status to Complete."""
+    for status in ("Groomed", "In Progress", "Ready for Review", "Complete"):
+        await _transition(client, ticket_id, status)
+
+
+async def _links_section_html(client: AsyncClient, ticket_id: int) -> str:
+    response = await client.get(f"/tickets/{ticket_id}/links", headers={"accept": "text/html"})
+    assert response.status_code == 200, response.text
+    assert "text/html" in response.headers["content-type"]
+    return response.text
+
+
 async def _links_of(client: AsyncClient, ticket_id: int) -> set[tuple[str, int, int]]:
     """Set of (link_type, source_id, target_id) visible from a ticket."""
     response = await client.get(f"/api/v1/tickets/{ticket_id}/links")
@@ -305,3 +342,82 @@ async def test_create_link_htmx_returns_links_section(
     assert "Story X" in response.text
     assert 'title="Story X"' in response.text
     assert 'title="Epic X"' not in response.text
+
+
+class TestBlockerWarningHidesWhenBlockersTerminal:
+    """JRB-018: the links-section blocker warning must count only non-terminal
+    blockers (Complete and Rejected are terminal) and list only those."""
+
+    async def _block_story(self, client_with_seeds: AsyncClient, *blockers: dict) -> dict:
+        """Create a story blocked by each of the given blocker tickets."""
+        story = await _blocker_ticket(client_with_seeds, "Blocked Story")
+        for blocker in blockers:
+            response = await _link(client_with_seeds, blocker["id"], story["id"], "blocks")
+            assert response.status_code == 201, response.text
+        return story
+
+    async def test_all_blockers_complete_hides_warning(self, client_with_seeds: AsyncClient):
+        blocker = await _blocker_ticket(client_with_seeds, "Done Blocker")
+        story = await self._block_story(client_with_seeds, blocker)
+        await _advance_to_complete(client_with_seeds, blocker["id"])
+
+        html = await _links_section_html(client_with_seeds, story["id"])
+        assert "This ticket has open blockers" not in html
+
+    async def test_mixed_blockers_lists_only_open(self, client_with_seeds: AsyncClient):
+        done = await _blocker_ticket(client_with_seeds, "Done Blocker")
+        open_blocker = await _blocker_ticket(client_with_seeds, "Open Blocker")
+        story = await self._block_story(client_with_seeds, done, open_blocker)
+        await _advance_to_complete(client_with_seeds, done["id"])
+
+        html = await _links_section_html(client_with_seeds, story["id"])
+        start = html.find("This ticket has open blockers")
+        # The warning block ends right before the link-modal container.
+        warning = html[start : html.find("link-modal-container", start)]
+        assert "This ticket has open blockers" in warning
+        assert "Open Blocker" in warning
+        assert "Done Blocker" not in warning
+
+    async def test_rejected_blocker_hides_warning(self, client_with_seeds: AsyncClient):
+        blocker = await _blocker_ticket(client_with_seeds, "Rejected Blocker")
+        story = await self._block_story(client_with_seeds, blocker)
+        await _transition(client_with_seeds, blocker["id"], "Rejected")
+
+        html = await _links_section_html(client_with_seeds, story["id"])
+        assert "This ticket has open blockers" not in html
+
+    async def test_open_blocker_still_warns(self, client_with_seeds: AsyncClient):
+        blocker = await _blocker_ticket(client_with_seeds, "Open Blocker")
+        story = await self._block_story(client_with_seeds, blocker)
+
+        html = await _links_section_html(client_with_seeds, story["id"])
+        start = html.find("This ticket has open blockers")
+        warning = html[start : html.find("link-modal-container", start)]
+        assert "Open Blocker" in warning
+
+
+class TestBacklogRowOpenBlockerBadge:
+    """JRB-018: the backlog row open-blocker badge also excludes Rejected."""
+
+    async def test_rejected_blocker_shows_no_badge(self, client_with_seeds: AsyncClient):
+        blocker = await _blocker_ticket(client_with_seeds, "Rejected Blocker")
+        story = await _blocker_ticket(client_with_seeds, "Blocked Story")
+        response = await _link(client_with_seeds, blocker["id"], story["id"], "blocks")
+        assert response.status_code == 201, response.text
+        await _transition(client_with_seeds, blocker["id"], "Rejected")
+
+        response = await client_with_seeds.get("/backlog", headers={"accept": "text/html"})
+        assert response.status_code == 200
+        row = response.text[response.text.find("Blocked Story") :]
+        assert "open blocker" not in row
+
+    async def test_open_blocker_shows_badge(self, client_with_seeds: AsyncClient):
+        blocker = await _blocker_ticket(client_with_seeds, "Open Blocker")
+        story = await _blocker_ticket(client_with_seeds, "Blocked Story")
+        response = await _link(client_with_seeds, blocker["id"], story["id"], "blocks")
+        assert response.status_code == 201, response.text
+
+        response = await client_with_seeds.get("/backlog", headers={"accept": "text/html"})
+        assert response.status_code == 200
+        row = response.text[response.text.find("Blocked Story") :]
+        assert "open blocker" in row

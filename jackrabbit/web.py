@@ -22,6 +22,7 @@ from jackrabbit.models import (
     Project,
     Sprint,
     Ticket,
+    TicketLink,
     TicketStatus,
     TicketType,
 )
@@ -278,6 +279,18 @@ async def plan(
 
 
 # Link web routes
+_TERMINAL_STATUSES = frozenset({TicketStatus.COMPLETE, TicketStatus.REJECTED})
+
+
+def _open_blockers(blockers: list[TicketLink]) -> list[TicketLink]:
+    """Blockers whose source ticket is not in a terminal status (JRB-018).
+
+    A terminal blocker (Complete or Rejected) no longer blocks work, so the
+    "This ticket has open blockers" warning must not count it.
+    """
+    return [b for b in blockers if b.source.status not in _TERMINAL_STATUSES]
+
+
 def _links_section_response(
     request: Request,
     ticket_id: int,
@@ -292,6 +305,7 @@ def _links_section_response(
 
     links = link_service.get_links_for_ticket(ticket_id)
     blockers = link_service.get_blockers(ticket_id)
+    open_blockers = _open_blockers(blockers)
 
     # Separate links by type AND side: a link row belongs to the section of its
     # semantic role relative to THIS ticket (target-side for parent/child, source-side
@@ -331,6 +345,7 @@ def _links_section_response(
             "blocked_by_links": blocked_by_links,
             "relates_to_links": relates_to_links,
             "blockers": blockers,
+            "open_blockers": open_blockers,
             "all_tickets": all_tickets,
             "LinkType": LinkType,
             "TicketType": TicketType,

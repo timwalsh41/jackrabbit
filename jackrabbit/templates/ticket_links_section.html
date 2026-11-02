@@ -94,8 +94,8 @@
     </div>
     {% endif %}
 
-    {# Blocker warning #}
-    {% if blockers %}
+    {# Blocker warning: only non-terminal blockers count as open (JRB-018) #}
+    {% if open_blockers %}
     <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
         <div class="flex items-start gap-3">
             <svg class="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -107,7 +107,7 @@
                     The following tickets must be completed before this ticket can start:
                 </p>
                 <ul class="mt-2 space-y-1">
-                    {% for blocker in blockers %}
+                    {% for blocker in open_blockers %}
                     {% set blocker_ticket = blocker.source %}
                     <li class="text-sm text-yellow-700">
                         <a href="/ticket/{{ blocker_ticket.id }}" class="font-medium underline hover:text-yellow-900">
