@@ -24,13 +24,19 @@
 : A typed relationship between two tickets. Types: `parent`/`child` (epic→story), `blocks`/`blocked_by` (dependencies), `relates_to` (bidirectional association).
 
 **Groomed**
-: A ticket status meaning the approach has been assessed and four structured fields are populated: `approach`, `files_to_change`, `test_plan`, `validation_steps`. `Epic` is exempt from this gate (a planning container, not a unit of code) and may be groomed with the fields blank — see ADR-0008.
+: A ticket status meaning the approach has been assessed and four structured fields are populated: `approach`, `files_to_change`, `test_plan`, `validation_steps`. Story and Bug must also carry at least one **Acceptance criterion**. `Epic` is exempt from this gate (a planning container, not a unit of code) and may be groomed with the fields blank; `Spike` is exempt from all groomed-field requirements — see ADR-0008 and ADR-0025.
+
+**Acceptance Criterion**
+: A single structured, checkable statement of a condition that must hold for a ticket to be done. A ticket carries zero or more criteria, ordered; each has its own text and verification state. Criteria are authored at grooming time and locked once work begins; editing them later requires a round-trip through `Groomed`. A criterion is **verified** when the verifier's independent check confirms it — the checkbox is the sign-off, not the implementer's self-assessment. Evidence lives in the ticket's Agent Execution Evidence section, not on the row.
 
 **In Progress**
 : A ticket status meaning a git branch has been created (naming convention: `{project}-{number}-{slug}`) and work is underway.
 
 **Ready for Review**
 : A ticket status meaning a PR (or report for Spike) is up for human approval.
+
+**Complete**
+: A terminal ticket status meaning the work is merged and done. Guarded: every acceptance criterion on the ticket must be verified before a ticket may reach `Complete` — see ADR-0025.
 
 **Story Points**
 : Optional integer estimate of effort for planning.
