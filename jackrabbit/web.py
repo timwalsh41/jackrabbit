@@ -165,6 +165,16 @@ async def ticket_edit(
     label_service: LabelService = Depends(get_label_service),
     criterion_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
+    """Render the ticket edit form (full page, or the row-edit modal partial
+    for HTMX requests).
+
+    Template context (docs/CODING_STANDARDS.md — HTML Templates): the full
+    page (ticket_form.html) receives ``criteria_texts`` (the ticket's
+    existing criterion texts, pre-filled into the criteria editor) and
+    ``criteria_editable`` (False once the ticket is past Groomed, rendering
+    the editor read-only); the modal partial (ticket_edit_modal.html) does
+    not include the criteria editor.
+    """
     ticket = ticket_service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -1071,7 +1081,13 @@ async def ticket_transition_groomed_modal(
 ) -> HTMLResponse:
     """Modal for transitioning to Groomed with approach, files_to_change,
     test_plan, validation_steps fields, plus the acceptance-criteria editor
-    (JRB-023, ADR-0025): existing rows pre-filled and editable."""
+    (JRB-023, ADR-0025): existing rows pre-filled and editable.
+
+    Template context (docs/CODING_STANDARDS.md — HTML Templates): ``ticket``
+    is the ticket being groomed; ``criteria_texts`` holds the ticket's
+    existing criterion texts pre-filled into the editor; ``criteria_editable``
+    is False once the ticket is past Groomed, rendering the editor read-only.
+    """
     ticket = ticket_service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -1083,13 +1099,6 @@ async def ticket_transition_groomed_modal(
             "ticket": ticket,
             "criteria_texts": [row.text for row in criterion_service.list_criteria(ticket)],
             "criteria_editable": ticket.status in (TicketStatus.OPEN, TicketStatus.GROOMED),
-        },
-    )
-    return templates.TemplateResponse(
-        request,
-        "ticket_transition_groomed_modal.html",
-        {
-            "ticket": ticket,
         },
     )
 
