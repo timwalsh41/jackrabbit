@@ -122,3 +122,102 @@ class TestEditSaveRedirect:
         assert r.status_code == 200, r.text
         assert r.json()["title"] == "Renamed via plain PATCH"
         assert "HX-Redirect" not in r.headers
+
+
+class TestEditFormCriteria:
+    """The ticket-detail edit view carries the Acceptance criteria editor
+    (JRB-023, ADR-0025): type-conditional asterisk header, editable rows with
+    add/remove controls, pre-filled existing criteria — read-only once the
+    ticket has moved past Groomed (rows are locked, ADR-0025)."""
+
+    async def _story_with_criteria(
+        self, client: httpx.AsyncClient, texts: list[str], **extra
+    ) -> dict:
+        payload = {
+            "project_id": 1,
+            "title": "Edit form criteria ticket",
+            "type": "Story",
+        }
+        payload.update(extra)
+        created = await client.post("/api/v1/tickets", json=payload)
+        assert created.status_code == 201, created.text
+        ticket = created.json()
+        if texts:
+            response = await client.patch(
+                f"/api/v1/tickets/{ticket['id']}", json={"criteria": texts}
+            )
+            assert response.status_code == 200, response.text
+        return ticket
+
+    async def test_story_edit_form_shows_criteria_asterisk_and_prefilled_rows(
+        self, client: httpx.AsyncClient
+    ):
+        ticket = await self._story_with_criteria(client, ["Write the report"])
+        response = await get_page(client, f"/tickets/{ticket['id']}/edit")
+        assert response.status_code == 200
+        html = response.text
+        assert "Acceptance criteria" in html
+        header = html[html.index("Acceptance criteria") : html.index("Acceptance criteria") + 200]
+        assert 'class="text-red-500"' in header
+        assert "Add criterion" in html
+        assert 'value="Write the report"' in html
+
+    async def test_epic_edit_form_shows_plain_criteria_label(self, client: httpx.AsyncClient):
+        ticket = await self._story_with_criteria(
+            client, [], type="Epic", title="Epic edit criteria"
+        )
+        response = await get_page(client, f"/tickets/{ticket['id']}/edit")
+        assert response.status_code == 200
+        html = response.text
+        assert "Acceptance criteria" in html
+        header = html[html.index("Acceptance criteria") : html.index("Acceptance criteria") + 200]
+        assert 'class="text-red-500"' not in header
+        assert "Add criterion" in html
+
+    async def test_criteria_rows_are_read_only_once_in_progress(
+        self, client_with_seeds: httpx.AsyncClient
+    ):
+        """From In Progress onward the rows are locked (ADR-0025): the edit
+        form shows them read-only and submits no criteria inputs, so saving
+        other fields never trips the 409 criteria-locked guard."""
+        ticket = await self._story_with_criteria(client_with_seeds, ["Locked criterion"])
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={
+                "to_status": "Groomed",
+                "approach": "Approach",
+                "files_to_change": "files",
+                "test_plan": "Plan",
+                "validation_steps": "Steps",
+                "criteria": ["Locked criterion"],
+            },
+        )
+        assert response.status_code == 200, response.text
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={
+                "to_status": "In Progress",
+                "branch_name": "feature/edit-criteria-001",
+            },
+        )
+        assert response.status_code == 200, response.text
+        response = await get_page(client_with_seeds, f"/tickets/{ticket['id']}/edit")
+        assert response.status_code == 200
+        html = response.text
+        assert "Locked criterion" in html
+        assert 'name="criteria"' not in html
+        assert "Add criterion" not in html
+
+    async def test_editing_other_fields_leaves_criteria_rows_untouched(
+        self, client_with_seeds: httpx.AsyncClient
+    ):
+        """The edit form omits the criteria list when the rows are unchanged,
+        so a plain title save does not replace (and re-number) the rows."""
+        ticket = await self._story_with_criteria(client_with_seeds, ["Untouched criterion"])
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}", json={"title": "Renamed only"}
+        )
+        assert response.status_code == 200, response.text
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        assert [row["text"] for row in rows] == ["Untouched criterion"]
+        assert rows[0]["id"] is not None
