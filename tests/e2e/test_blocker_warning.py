@@ -77,6 +77,16 @@ class TestBlockerWarningTerminalBlockers:
         page.wait_for_load_state("networkidle")
         page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
 
+        # Story/Bug grooming is gated on at least one criterion (ADR-0025);
+        # the modal criteria editor is JRB-023 scope, so the row is seeded
+        # via the app's own API here.
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            response = api.post(
+                f"/api/v1/tickets/{blocker['id']}/criteria",
+                json={"text": "Blocker is resolved"},
+            )
+            assert response.status_code == 201, response.text
+
         # Open -> Groomed (modal with four required fields)
         page.click("button:has-text('Groomed')")
         page.wait_for_selector("#groom-form", state="visible", timeout=10000)
@@ -105,6 +115,12 @@ class TestBlockerWarningTerminalBlockers:
         expect(
             page.locator("#ticket-content span:has-text('Ready for Review')").first
         ).to_be_visible(timeout=10000)
+
+        # The Complete guard (ADR-0025) requires every criterion verified
+        # first; the verifier signs off via the checklist.
+        page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
+        page.check("#criteria-checklist .criterion-row >> nth=0 >> input[type='checkbox']")
+        expect(page.locator("#criteria-checklist .criterion-tick").first).to_be_visible()
 
         # Ready for Review -> Complete
         page.click("button:has-text('Complete')")

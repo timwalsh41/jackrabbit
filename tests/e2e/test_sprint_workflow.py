@@ -127,6 +127,13 @@ class TestSprintWorkflow:
         expect(open_col).to_contain_text("Status Move Ticket", timeout=10000)
         assert "Status Move Ticket" not in groomed_col.inner_text()
 
+        # Story/Bug grooming is gated on at least one criterion (ADR-0025);
+        # the modal criteria editor is JRB-023 scope, so the row is seeded
+        # via the API here.
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            resp = api.post(f"/api/v1/tickets/{tid}/criteria", json={"text": "It works"})
+            assert resp.status_code == 201, resp.text
+
         # Groom it through the ticket detail UI
         page.goto(f"{base_url}/ticket/{tid}")
         page.wait_for_load_state("networkidle")

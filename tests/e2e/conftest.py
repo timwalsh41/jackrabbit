@@ -270,9 +270,10 @@ def make_ticket(base_url):
                         "files_to_change": "file.py",
                         "test_plan": "unit tests",
                         "validation_steps": "run tests",
-                        # Story/Bug grooming requires at least one criterion
-                        # (ADR-0025); the factory grooms Stories by default.
-                        "criteria": ["E2E acceptance criterion"],
+                        # Story/Bug grooming is gated on at least one criterion
+                        # (ADR-0025); the factory seeds two so the Complete
+                        # guard and the UI checklist have something to show.
+                        "criteria": ["E2E criterion one", "E2E criterion two"],
                     },
                 )
             if status in ("In Progress", "Ready for Review", "Complete"):
@@ -292,6 +293,13 @@ def make_ticket(base_url):
                     },
                 )
             if status == "Complete":
+                # The Complete guard (ADR-0025) requires every criterion
+                # verified first; the factory signs them off like a verifier.
+                for row in client.get(f"/api/v1/tickets/{tid}/criteria").json():
+                    client.patch(
+                        f"/api/v1/tickets/{tid}/criteria/{row['id']}",
+                        json={"verified": True},
+                    )
                 client.post(
                     f"/api/v1/tickets/{tid}/transition",
                     json={

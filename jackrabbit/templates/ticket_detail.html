@@ -321,6 +321,95 @@
         return html;
     }
 
+    function renderCriteria(ticket) {
+        if (!ticket.criteria || ticket.criteria.length === 0) {
+            return '<p class="text-gray-500 text-sm">No acceptance criteria yet</p>';
+        }
+        // Verifier sign-off (ADR-0025) is only offered while the ticket is
+        // In Progress or Ready for Review; everywhere else the checklist is
+        // read-only display (text is locked from In Progress onward).
+        const signOffAllowed = ['In Progress', 'Ready for Review'].includes(ticket.status);
+        let html = '<ul class="space-y-1">';
+        for (const c of ticket.criteria) {
+            const checked = c.verified ? 'checked' : '';
+            const disabled = signOffAllowed ? '' : 'disabled';
+            const verifiedAt = c.verified_at
+                ? new Date(c.verified_at).toLocaleString()
+                : '';
+            const tick = c.verified
+                ? `<span class="criterion-tick text-green-600 text-sm whitespace-nowrap">\u2713 <span class="text-xs text-gray-400">${verifiedAt}</span></span>`
+                : '';
+            html += `
+                <li class="criterion-row flex items-start gap-3 py-1">
+                    <input type="checkbox" id="criterion-check-${c.id}"
+                           class="mt-1 h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer"
+                           ${checked} ${disabled}
+                           onchange="toggleCriterion(${ticket.id}, ${c.id}, this.checked)">
+                    <label for="criterion-check-${c.id}" class="text-sm text-gray-700 flex-1">${escapeHtml(c.text)}</label>
+                    ${tick}
+                </li>
+            `;
+        }
+        html += '</ul>';
+        return html;
+    }
+
+    function renderCriteriaHistory(entries) {
+        if (!entries || entries.length === 0) {
+            return '<p class="text-gray-500 text-sm">No criterion changes yet</p>';
+        }
+        const labels = {
+            'added': 'Added',
+            'edited': 'Edited',
+            'verified': 'Verified',
+            'unverified': 'Reopened',
+        };
+        let html = '<div class="space-y-2">';
+        for (const e of entries) {
+            const label = labels[e.event] || e.event;
+            const time = e.at ? new Date(e.at).toLocaleString() : '';
+            html += `
+                <div class="flex items-start gap-3 p-2 bg-gray-50 rounded-lg">
+                    <span class="text-xs font-medium text-gray-500 min-w-[70px]">${label}</span>
+                    <div class="flex-1">
+                        <p class="text-sm text-gray-600">${escapeHtml(e.text)}</p>
+                        <p class="text-xs text-gray-400">${time}</p>
+                    </div>
+                </div>
+            `;
+        }
+        html += '</div>';
+        return html;
+    }
+
+    // Verifier sign-off: PATCH the criterion, then re-render the ticket
+    // content so the tick, timestamp and history entry appear (JRB-022).
+    async function toggleCriterion(ticketId, criterionId, checked) {
+        const errorBox = document.getElementById('criteria-error');
+        const showError = (message) => {
+            if (errorBox) {
+                errorBox.textContent = message;
+                errorBox.classList.remove('hidden');
+            }
+            htmx.ajax('GET', `/api/v1/tickets/${ticketId}`, {target: '#ticket-content', swap: 'innerHTML'});
+        };
+        try {
+            const response = await fetch(`/api/v1/tickets/${ticketId}/criteria/${criterionId}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({verified: checked}),
+            });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                showError(data.detail || 'Sign-off failed');
+                return;
+            }
+            htmx.ajax('GET', `/api/v1/tickets/${ticketId}`, {target: '#ticket-content', swap: 'innerHTML'});
+        } catch (err) {
+            showError('Sign-off failed: ' + err);
+        }
+    }
+
     function renderTicket(ticket) {
         const projectPrefix = ticket.project_prefix || '';
         const fullId = `${projectPrefix}-${String(ticket.number).padStart(3, '0')}`;
@@ -366,6 +455,15 @@
                     </div>
                 </div>
                 
+                <!-- Acceptance Criteria (ADR-0025) -->
+                <div class="pb-4 border-b border-gray-200">
+                    <h3 class="text-sm font-medium text-gray-900 mb-2">Acceptance criteria</h3>
+                    <div id="criteria-error" class="hidden mb-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md" role="alert"></div>
+                    <div id="criteria-checklist">
+                        ${renderCriteria(ticket)}
+                    </div>
+                </div>
+
                 <!-- Ticket Details -->
                 <div class="grid gap-4 md:grid-cols-2 pb-4 border-b border-gray-200">
                     <div>
@@ -391,6 +489,12 @@
                 <div id="transition-history">
                     <h3 class="text-sm font-medium text-gray-900 mb-3">Transition History</h3>
                     ${transitionHistory}
+                </div>
+
+                <!-- Criteria History (ADR-0025) -->
+                <div id="criteria-history">
+                    <h3 class="text-sm font-medium text-gray-900 mb-3">Criteria History</h3>
+                    ${renderCriteriaHistory(ticket.criteria_history || [])}
                 </div>
 
                 <!-- Links Section -->

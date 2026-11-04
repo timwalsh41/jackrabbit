@@ -54,6 +54,12 @@ class TestRejectRestore:
         """
         ticket = make_ticket(status="Groomed", title="Restore Groomed Ticket")
         tid = ticket["id"]
+        # Criterion rows are seeded while Open: the CRUD locks criteria once
+        # the ticket leaves Groomed, and the restore re-checks the criterion
+        # guard (ADR-0025) alongside the 4-field guard.
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            resp = client.post(f"/api/v1/tickets/{tid}/criteria", json={"text": "Restore works"})
+            assert resp.status_code == 201, resp.text
         self._reject_via_ui(page, base_url, tid)
 
         # Restore buttons for prior states are offered
