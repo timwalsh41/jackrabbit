@@ -40,7 +40,7 @@ def apply_env_overrides(overrides: Mapping[str, str]) -> None:
 # Typer registers each command under its kebab-case name (init_db -> init-db,
 # create_project -> create-project), so the default-to-server rule in main()
 # must match the registered names, not the Python function names.
-_COMMANDS = {"server", "init-db", "create-project", "seed"}
+_COMMANDS = {"server", "init-db", "create-project", "seed", "report-legacy-criteria"}
 
 
 def main(args: list[str] | None = None) -> None:
@@ -213,6 +213,58 @@ def seed(
 
     result = seed_demo_data(session)
     typer.echo(result.summary())
+
+
+@app.command("report-legacy-criteria")
+def report_legacy_criteria() -> None:
+    """Dry-run report for the JRB-024 legacy criteria data migration.
+
+    Scans every ticket description for a legacy markdown acceptance-criteria
+    checkbox section and reports what the one-time data migration
+    (d9c3f7b1a5e8) would do — which tickets would gain unchecked criterion
+    rows, and which sections are malformed (prose inside the list, empty
+    items, several matching headings) and will therefore be left untouched
+    by the migration. Read-only: nothing is written.
+    """
+    from sqlalchemy import text
+
+    from jackrabbit.database import get_session
+    from jackrabbit.legacy_criteria import parse_legacy_criteria
+
+    session = next(get_session())
+    rows = session.execute(
+        text(
+            "SELECT t.id, p.prefix, t.number, t.description "
+            "FROM ticket t JOIN project p ON p.id = t.project_id ORDER BY t.id"
+        )
+    ).all()
+
+    clean = 0
+    malformed = 0
+    imported = 0
+    for ticket_id, prefix, number, description in rows:
+        full_id = f"{prefix}-{number:03d}"
+        parsed = parse_legacy_criteria(description)
+        if parsed.warnings:
+            malformed += 1
+            typer.echo(f"{full_id} (id {ticket_id}): MALFORMED — {'; '.join(parsed.warnings)}")
+        elif parsed.criteria:
+            clean += 1
+            imported += len(parsed.criteria)
+            typer.echo(
+                f"{full_id} (id {ticket_id}): {len(parsed.criteria)} "
+                "criterion(ies) would be imported (unchecked):"
+            )
+            for position, criterion in enumerate(parsed.criteria, start=1):
+                typer.echo(f"    {position}. {criterion}")
+        else:
+            typer.echo(f"{full_id} (id {ticket_id}): no legacy acceptance-criteria section")
+
+    typer.echo(
+        f"Scanned {len(rows)} ticket(s): {clean} would migrate "
+        f"({imported} criterion(ies) imported), {malformed} malformed "
+        "(left untouched by the migration)."
+    )
 
 
 if __name__ == "__main__":
