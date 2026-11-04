@@ -14,6 +14,7 @@ from sqlmodel import Session, func, select
 
 from jackrabbit.labels import normalize_label_name
 from jackrabbit.models import (
+    CriterionEvent,
     Label,
     LinkType,
     Priority,
@@ -807,7 +808,7 @@ class TicketService:
             # Only tickets carrying at least one unverified criterion row; the
             # subquery excludes zero-criterion tickets by construction.
             unverified = select(TicketCriterion.ticket_id).where(
-                TicketCriterion.verified.is_(False)
+                TicketCriterion.verified.is_(False)  # type: ignore[attr-defined]
             )
             query = query.where(Ticket.id.in_(unverified))  # type: ignore[union-attr]
             count_query = count_query.where(Ticket.id.in_(unverified))  # type: ignore[union-attr]
@@ -1687,7 +1688,7 @@ class CriterionService:
             raise ValueError("Criterion text is required")
         return cleaned
 
-    def _append_history(self, ticket: Ticket, event: str, text: str) -> None:
+    def _append_history(self, ticket: Ticket, event: CriterionEvent, text: str) -> None:
         """Append an audit entry for a criterion change (ADR-0025).
 
         Mirrors the Transition audit trail: appended in the same session as
@@ -1729,7 +1730,7 @@ class CriterionService:
         # Keep the eagerly-loaded collection in sync, so guards and readers
         # that use ticket.criteria see the new row without a reload.
         ticket.criteria.append(row)
-        self._append_history(ticket, "added", cleaned)
+        self._append_history(ticket, CriterionEvent.ADDED, cleaned)
         self.session.commit()
         self.session.refresh(row)
         return row
@@ -1755,7 +1756,7 @@ class CriterionService:
             new_text = self._normalize(text)
             if new_text != row.text:
                 row.text = new_text
-                self._append_history(ticket, "edited", new_text)
+                self._append_history(ticket, CriterionEvent.EDITED, new_text)
         if position is not None:
             row.position = position
         self.session.add(row)
@@ -1778,11 +1779,11 @@ class CriterionService:
         if verified:
             row.verified = True
             row.verified_at = utc_now()
-            event = "verified"
+            event = CriterionEvent.VERIFIED
         else:
             row.verified = False
             row.verified_at = None
-            event = "unverified"
+            event = CriterionEvent.UNVERIFIED
         self._append_history(ticket, event, row.text)
         self.session.add(row)
         self.session.commit()
@@ -1826,7 +1827,7 @@ class CriterionService:
         for row in rows:
             self.session.add(row)
             ticket.criteria.append(row)
-            self._append_history(ticket, "added", row.text)
+            self._append_history(ticket, CriterionEvent.ADDED, row.text)
         if commit:
             self.session.commit()
             for row in rows:

@@ -6,7 +6,7 @@ API request/response schemas are in `schemas.py`.
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import Index, UniqueConstraint, text
+from sqlalchemy import Index, String, UniqueConstraint, text
 from sqlmodel import Field, Relationship, SQLModel
 from sqlmodel._compat import NaiveDatetime
 
@@ -36,6 +36,15 @@ class LinkType(StrEnum):
     BLOCKS = "blocks"
     BLOCKED_BY = "blocked_by"
     RELATES_TO = "relates_to"
+
+
+class CriterionEvent(StrEnum):
+    """The kind of change a TicketCriterionHistory entry records (ADR-0025)."""
+
+    ADDED = "added"
+    EDITED = "edited"
+    VERIFIED = "verified"
+    UNVERIFIED = "unverified"
 
 
 class Priority(StrEnum):
@@ -233,7 +242,11 @@ class TicketCriterionHistory(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     ticket_id: int = Field(foreign_key="ticket.id", index=True)
-    event: str  # "added" | "edited" | "verified" | "unverified"
+    # Stored as the enum's value ("added" etc.) in a plain VARCHAR column,
+    # matching migration a8c1e5f7b3d9 and existing rows: sa_type keeps
+    # SQLModel from mapping the StrEnum to sa.Enum, which would store the
+    # member names instead.
+    event: CriterionEvent = Field(sa_type=String)
     text: str
     at: datetime = Field(default_factory=utc_now)
 

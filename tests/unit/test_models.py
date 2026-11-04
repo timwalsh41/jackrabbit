@@ -1,6 +1,8 @@
 """Tests for Jackrabbit models."""
 
+import pytest
 from jackrabbit.models import (
+    CriterionEvent,
     LinkType,
     Priority,
     TicketStatus,
@@ -40,6 +42,18 @@ def test_enums() -> None:
     assert LinkType.BLOCKS.value == "blocks"
     assert LinkType.BLOCKED_BY.value == "blocked_by"
     assert LinkType.RELATES_TO.value == "relates_to"
+
+    assert CriterionEvent.ADDED.value == "added"
+    assert CriterionEvent.EDITED.value == "edited"
+    assert CriterionEvent.VERIFIED.value == "verified"
+    assert CriterionEvent.UNVERIFIED.value == "unverified"
+
+    # A CriterionEvent member equals its canonical string value, so existing
+    # string comparisons against stored rows keep working.
+    assert CriterionEvent.ADDED == "added"
+
+    with pytest.raises(ValueError):
+        CriterionEvent("created")  # not one of the four criterion events
 
 
 def test_project_create_schema() -> None:

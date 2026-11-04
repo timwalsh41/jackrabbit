@@ -10,6 +10,7 @@ from typing import cast
 
 import pytest
 from jackrabbit.models import (
+    CriterionEvent,
     Project,
     TicketCriterion,
     TicketCriterionHistory,
@@ -506,3 +507,19 @@ class TestCriterionHistory:
         with pytest.raises(ValueError, match="Criterion text is required"):
             ticket_service.transition(open_story, TicketStatus.GROOMED, criteria=["Good", "   "])
         assert self._history(session, open_story) == []
+
+    def test_event_enum_round_trips_through_the_varchar_column(
+        self, criterion_service, session, open_story
+    ):
+        """The CriterionEvent enum stores its value ("added"), not its member
+        name: the VARCHAR representation is identical to the pre-enum rows
+        (migration a8c1e5f7b3d9) and to plain-string comparisons."""
+        criterion_service.add_criterion(open_story, "It works")
+        entry = self._history(session, open_story)[0]
+        assert entry.event == "added"
+        assert entry.event == CriterionEvent.ADDED
+        # A raw re-read (bypassing the identity map) still yields the value.
+        session.expire_all()
+        reloaded = self._history(session, open_story)[0]
+        assert reloaded.event == "added"
+        assert reloaded.event == CriterionEvent.ADDED
