@@ -677,6 +677,7 @@ class TicketService:
         created_before: date | str | None = None,
         label_ids: Sequence[int] | None = None,
         label_match: str = "all",
+        criteria_state: Literal["unverified"] | None = None,
         sort: str = "number",
         order: str = "desc",
         page: int = 1,
@@ -693,6 +694,13 @@ class TicketService:
         ``label_match="all"`` (the default) a ticket must carry *every* listed
         label; with ``label_match="any"`` it must carry at least one. An empty
         or missing ``label_ids`` applies no label filter.
+
+        ``criteria_state="unverified"`` selects only the tickets carrying at
+        least one unverified criterion row (user story 17). A ticket with zero
+        criterion rows never matches: it has nothing to sign off, so its state
+        is not "unverified". ``None`` applies no criteria filter. Spike
+        tickets are not exempt here — this is a data query, not the
+        Complete-transition guard.
 
         ``q`` is a case-insensitive substring match over the ticket's title,
         its description and the names of its labels.
@@ -795,6 +803,14 @@ class TicketService:
                 )
             query = query.where(Ticket.id.in_(carrying))  # type: ignore[union-attr]
             count_query = count_query.where(Ticket.id.in_(carrying))  # type: ignore[union-attr]
+        if criteria_state == "unverified":
+            # Only tickets carrying at least one unverified criterion row; the
+            # subquery excludes zero-criterion tickets by construction.
+            unverified = select(TicketCriterion.ticket_id).where(
+                TicketCriterion.verified.is_(False)
+            )
+            query = query.where(Ticket.id.in_(unverified))  # type: ignore[union-attr]
+            count_query = count_query.where(Ticket.id.in_(unverified))  # type: ignore[union-attr]
         if created_after is not None:
             after = _start_of_day(created_after)
             query = query.where(Ticket.created_at >= after)

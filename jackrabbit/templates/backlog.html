@@ -139,6 +139,15 @@
                         value="{{ current_filters.created_before.isoformat() if current_filters.created_before else '' }}"
                         class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
+                <!-- Criteria-state filter: the checkbox is the form control, so an
+                     unchecked box submits nothing (no filter) and a checked one
+                     submits criteria_state=unverified. -->
+                <label for="criteria_state" class="ms-field flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" id="criteria_state" name="criteria_state" value="unverified"
+                        class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        {% if current_filters.criteria_state %}checked{% endif %}>
+                    <span>Unverified criteria</span>
+                </label>
             </div>
             <!-- Label filter: a collapsible panel with a checkbox per label in use -->
             <details id="labels-filter-panel" class="border border-gray-200 rounded-md p-3" {% if current_filters.label_ids %}open{% endif %}>
