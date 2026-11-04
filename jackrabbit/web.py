@@ -28,6 +28,7 @@ from jackrabbit.models import (
 )
 from jackrabbit.schemas import ProjectCreate, ProjectUpdate
 from jackrabbit.services import (
+    CriterionService,
     FilterMode,
     LabelService,
     LinkService,
@@ -88,6 +89,10 @@ def get_project_service(session: Session = Depends(get_session)) -> ProjectServi
 
 def get_ticket_service(session: Session = Depends(get_session)) -> TicketService:
     return TicketService(session)
+
+
+def get_criterion_service(session: Session = Depends(get_session)) -> CriterionService:
+    return CriterionService(session)
 
 
 def get_sprint_service(session: Session = Depends(get_session)) -> SprintService:
@@ -158,6 +163,7 @@ async def ticket_edit(
     project_service: ProjectService = Depends(get_project_service),
     sprint_service: SprintService = Depends(get_sprint_service),
     label_service: LabelService = Depends(get_label_service),
+    criterion_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     ticket = ticket_service.get_ticket(ticket_id)
     if not ticket:
@@ -170,6 +176,10 @@ async def ticket_edit(
 
     # HTMX request (Edit button in a ticket row): return the modal partial
     # whose form hx-patches the API and swaps the updated row back in place.
+    criteria_context = {
+        "criteria_texts": [row.text for row in criterion_service.list_criteria(ticket)],
+        "criteria_editable": ticket.status in (TicketStatus.OPEN, TicketStatus.GROOMED),
+    }
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(
             request,
@@ -198,6 +208,7 @@ async def ticket_edit(
             "TicketStatus": TicketStatus,
             "current_labels": current_labels,
             "label_suggestions": label_suggestions,
+            **criteria_context,
         },
     )
 
@@ -1038,13 +1049,24 @@ async def ticket_transition_groomed_modal(
     request: Request,
     ticket_id: int,
     ticket_service: TicketService = Depends(get_ticket_service),
+    criterion_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     """Modal for transitioning to Groomed with approach, files_to_change,
-    test_plan, validation_steps fields."""
+    test_plan, validation_steps fields, plus the acceptance-criteria editor
+    (JRB-023, ADR-0025): existing rows pre-filled and editable."""
     ticket = ticket_service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
+    return templates.TemplateResponse(
+        request,
+        "ticket_transition_groomed_modal.html",
+        {
+            "ticket": ticket,
+            "criteria_texts": [row.text for row in criterion_service.list_criteria(ticket)],
+            "criteria_editable": ticket.status in (TicketStatus.OPEN, TicketStatus.GROOMED),
+        },
+    )
     return templates.TemplateResponse(
         request,
         "ticket_transition_groomed_modal.html",

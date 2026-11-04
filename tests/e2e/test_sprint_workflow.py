@@ -137,6 +137,7 @@ class TestSprintWorkflow:
         page.fill("textarea[name='files_to_change']", "f.py")
         page.fill("textarea[name='test_plan']", "tests")
         page.fill("textarea[name='validation_steps']", "validate")
+        page.fill("input[name='criteria']", "Sprint move criterion")
         page.click("#groom-form button[type='submit']")
         expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
             timeout=10000

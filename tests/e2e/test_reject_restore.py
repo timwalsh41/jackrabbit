@@ -45,9 +45,14 @@ class TestRejectRestore:
     def test_restore_to_groomed_rechecks_guards(
         self, page: Page, base_url: str, seeded_projects, make_ticket
     ):
-        """Restoring to Groomed re-checks the 4-field guard."""
-        # Open ticket: the factory has NOT filled the grooming fields
-        ticket = make_ticket(status="Open", title="Restore Groomed Ticket")
+        """Restoring to Groomed re-checks the 4-field guard.
+
+        The ticket starts Groomed (the factory fills the four fields and one
+        criterion, ADR-0025), so the restore guard can be exercised on the
+        fields alone: the criterion guard is already satisfied and criteria
+        are locked while the ticket sits in Rejected.
+        """
+        ticket = make_ticket(status="Groomed", title="Restore Groomed Ticket")
         tid = ticket["id"]
         self._reject_via_ui(page, base_url, tid)
 
@@ -57,13 +62,30 @@ class TestRejectRestore:
         expect(restore_row.locator("button:has-text('Groomed')")).to_be_visible()
         expect(restore_row.locator("button:has-text('Open')")).to_be_visible()
 
-        # Guards are re-checked: without grooming fields the restore fails
+        # Clear the four groomed fields via the API so the restore guard
+        # fails on Approach (criteria cannot be edited while Rejected).
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            resp = client.patch(
+                f"/api/v1/tickets/{tid}",
+                json={
+                    "approach": "",
+                    "files_to_change": "",
+                    "test_plan": "",
+                    "validation_steps": "",
+                },
+            )
+            assert resp.status_code == 200
+
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
         page.click("#transition-buttons button:has-text('Groomed')")
         banner = page.locator("#transition-error")
         expect(banner).to_be_visible(timeout=10000)
         expect(banner).to_contain_text("Approach is required")
 
-        # Fill the four groomed fields via the API, then restore succeeds
+        # Fill the four groomed fields back via the API, then restore succeeds
+        # (the criterion row from grooming still satisfies that guard).
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             resp = client.patch(
                 f"/api/v1/tickets/{tid}",

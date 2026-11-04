@@ -1,0 +1,74 @@
+{# Repeatable acceptance-criteria editor (JRB-023, ADR-0025).
+
+   Used by the grooming surfaces: the Groomed transition modal and the
+   ticket-detail edit form. The section header shows a red asterisk for
+   Story/Bug (at least one criterion required) and a plain label for Epic/Spike
+   (exempt) — deliberately no "(Optional)" text, because the requirement is
+   type-conditional. One text-input row per criterion with a remove button; the
+   Add criterion button appends fresh rows; existing rows arrive pre-filled.
+
+   Expected context (set by the route / a wrapping {% with %}):
+     ticket_type:       str — the ticket's type value ("Story", "Epic", ...)
+     criteria_texts:    list[str] — the ticket's existing criterion texts
+     criteria_editable: bool — False once the ticket has moved past Groomed
+                               (rows are locked from In Progress onward)
+ #}
+{% set requires_criteria = ticket_type in ['Story', 'Bug'] %}
+<div class="criteria-field" data-criteria-field
+     data-original-criteria="{{ criteria_texts | map('trim') | list | tojson }}">
+    <div class="flex items-baseline justify-between mb-1">
+        <span class="block text-sm font-medium text-gray-700">
+            Acceptance criteria{% if requires_criteria %} <span class="text-red-500">*</span>{% endif %}
+        </span>
+        {% if criteria_editable %}
+        <button type="button" data-criteria-add
+                class="text-xs font-medium text-indigo-600 hover:text-indigo-500">
+            + Add criterion
+        </button>
+        {% endif %}
+    </div>
+
+    {% if criteria_editable %}
+    <div data-criteria-rows class="space-y-2">
+        {% set criteria_input_class = "w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" %}
+        {% set criteria_remove_class = "shrink-0 w-7 h-7 rounded-full border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-400 leading-none" %}
+        {% for text in criteria_texts %}
+        <div class="flex items-center gap-2" data-criteria-row>
+            <input type="text" name="criteria" value="{{ text }}"
+                   class="{{ criteria_input_class }}"
+                   placeholder="Describe one criterion...">
+            <button type="button" data-criteria-remove aria-label="Remove criterion"
+                    class="{{ criteria_remove_class }}">×</button>
+        </div>
+        {% endfor %}
+        {# A Story/Bug with no criteria yet gets one fresh row to fill in, so
+           the grooming gate is visible before the submit fails on it. Rows
+           carry no HTML `required`: the gate is the server-side Groomed guard
+           (an empty row must not block an unrelated save, e.g. in the edit
+           form). #}
+        {% if criteria_texts | length == 0 and requires_criteria %}
+        <div class="flex items-center gap-2" data-criteria-row>
+            <input type="text" name="criteria"
+                   class="{{ criteria_input_class }}"
+                   placeholder="Describe one criterion...">
+            <button type="button" data-criteria-remove aria-label="Remove criterion"
+                    class="{{ criteria_remove_class }}">×</button>
+        </div>
+        {% endif %}
+    </div>
+    <p class="mt-1 text-xs text-gray-500">
+        {% if requires_criteria %}At least one criterion is required for {{ ticket_type }} tickets. {% endif %}Each row is one acceptance criterion.
+    </p>
+    {% else %}
+    <ul class="space-y-1 text-sm text-gray-700">
+        {% for text in criteria_texts %}
+        <li>• {{ text }}</li>
+        {% endfor %}
+        {% if criteria_texts | length == 0 %}
+        <li class="text-gray-500">No acceptance criteria.</li>
+        {% endif %}
+    </ul>
+    {% endif %}
+</div>
+
+<script src="{{ static_url('/static/js/criteria-rows.js') }}"></script>

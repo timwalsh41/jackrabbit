@@ -211,3 +211,99 @@ class TestEpicTransitionModals:
         assert 'name="branch_name"' in html
         assert "required" not in html
         assert "Optional for Epics" in html
+
+
+class TestGroomedModalCriteria:
+    """The Groomed transition modal carries the Acceptance criteria editor
+    (JRB-023, ADR-0025): a section header with a red asterisk for Story/Bug
+    (at least one criterion required) and a plain label for Epic/Spike
+    (exempt), one text-input row per criterion with a remove button, an
+    Add criterion button, and existing criteria pre-filled and editable.
+    """
+
+    async def _story_with_criteria(self, client: httpx.AsyncClient, texts: list[str]) -> dict:
+        ticket = await _create_ticket(client)
+        response = await client.patch(f"/api/v1/tickets/{ticket['id']}", json={"criteria": texts})
+        assert response.status_code == 200, response.text
+        return ticket
+
+    @pytest.mark.parametrize("ticket_type", ["Story", "Bug"])
+    async def test_required_type_shows_criteria_asterisk(
+        self, client: httpx.AsyncClient, ticket_type: str
+    ):
+        """Story/Bug tickets get the red-asterisk criteria header, the add
+        and remove controls, and a fresh empty row to fill in."""
+        ticket = await _create_ticket(client, project_id=1)
+        await client.patch(f"/api/v1/tickets/{ticket['id']}", json={"type": ticket_type})
+        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        assert response.status_code == 200
+        html = response.text
+        assert "Acceptance criteria" in html
+        # The red asterisk sits on the criteria header (type-conditional).
+        header = html[html.index("Acceptance criteria") : html.index("Acceptance criteria") + 200]
+        assert 'class="text-red-500"' in header
+        # Add and remove controls, and an empty editable row to start from.
+        assert "Add criterion" in html
+        assert "data-criteria-remove" in html
+        assert html.count('name="criteria"') == 1
+        # No HTML-required on the row: the at-least-one gate is the server-side
+        # Groomed guard (a blank row must not block an unrelated save).
+        criteria_input = html[html.index('name="criteria"') : html.index('name="criteria"') + 200]
+        assert "required" not in criteria_input
+
+    @pytest.mark.parametrize("ticket_type", ["Epic", "Spike"])
+    async def test_exempt_type_shows_plain_criteria_label(
+        self, client: httpx.AsyncClient, ticket_type: str
+    ):
+        """Epic/Spike tickets get a plain criteria label: no red asterisk and
+        no HTML-required row, and no empty row is pushed on them."""
+        payload = {
+            "project_id": 1,
+            "title": f"Transition web {ticket_type} criteria test",
+            "type": ticket_type,
+        }
+        response = await client.post("/api/v1/tickets", json=payload)
+        assert response.status_code in (200, 201)
+        ticket = response.json()
+        modal = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        assert modal.status_code == 200
+        html = modal.text
+        assert "Acceptance criteria" in html
+        header = html[html.index("Acceptance criteria") : html.index("Acceptance criteria") + 200]
+        assert 'class="text-red-500"' not in header
+        assert "Add criterion" in html
+        # No criteria authored yet and the type is exempt: no rows to fill.
+        assert 'name="criteria"' not in html
+
+    async def test_existing_criteria_are_prefilled_and_editable(self, client: httpx.AsyncClient):
+        """Criteria authored before the modal opens are pre-filled as
+        editable text-input rows."""
+        ticket = await self._story_with_criteria(client, ["First criterion", "Second criterion"])
+        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        assert response.status_code == 200
+        html = response.text
+        assert 'value="First criterion"' in html
+        assert 'value="Second criterion"' in html
+        assert html.count('name="criteria"') == 2
+
+    async def test_added_and_removed_rows_persist_through_transition(
+        self, client_with_seeds: httpx.AsyncClient
+    ):
+        """The criteria list submitted with the Groomed transition (exactly
+        what the modal form posts) replaces the ticket's rows: additions and
+        removals made before transitioning persist."""
+        ticket = await self._story_with_criteria(client_with_seeds, ["Keep me", "Drop me"])
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={
+                "to_status": "Groomed",
+                "approach": "Approach",
+                "files_to_change": "files",
+                "test_plan": "Plan",
+                "validation_steps": "Steps",
+                "criteria": ["Keep me", "Added in the modal"],
+            },
+        )
+        assert response.status_code == 200, response.text
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        assert [row["text"] for row in rows] == ["Keep me", "Added in the modal"]

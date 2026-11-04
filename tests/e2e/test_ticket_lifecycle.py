@@ -79,6 +79,9 @@ class TestTicketLifecycle:
         page.fill("textarea[name='files_to_change']", "file1.py, file2.py")
         page.fill("textarea[name='test_plan']", "Unit tests")
         page.fill("textarea[name='validation_steps']", "1. Run tests")
+        # Stories require at least one acceptance criterion (ADR-0025): the
+        # modal starts one fresh row for them.
+        page.fill("input[name='criteria']", "It works")
 
         # Submit via the form-scoped button (avoids the "Groomed →" transition button)
         page.click("#groom-form button[type='submit']")
@@ -242,13 +245,14 @@ class TestTicketLifecycle:
         # Open: only Groomed (guarded) and Rejected may be next
         assert_invalid_absent("Complete", "Ready for Review", "In Progress")
 
-        # --- Open -> Groomed via modal (4 fields required) ---
+        # --- Open -> Groomed via modal (4 fields + one criterion required) ---
         page.click("button:has-text('Groomed')")
         page.wait_for_selector("#groom-form", state="visible", timeout=10000)
         page.fill("textarea[name='approach']", "Walk approach")
         page.fill("textarea[name='files_to_change']", "walk.py")
         page.fill("textarea[name='test_plan']", "walk tests")
         page.fill("textarea[name='validation_steps']", "walk validation")
+        page.fill("input[name='criteria']", "Walk criterion")
         page.click("#groom-form button[type='submit']")
         expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
             timeout=10000
@@ -392,6 +396,98 @@ def test_groom_epic_without_structured_fields_via_api(
         )
         assert response.status_code == 400
         assert "Approach is required" in response.json()["detail"]
+
+
+class TestGroomedModalCriteria:
+    """The Groomed modal's Acceptance criteria editor, end to end (JRB-023,
+    ADR-0025): rows can be added and removed before transitioning, existing
+    criteria arrive pre-filled, and grooming through the UI lands the rows."""
+
+    def test_groom_story_with_criteria_lands_rows(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Groom a Story through the UI with two criteria: the ticket comes
+        out Groomed and the rows are persisted in order."""
+        import httpx
+
+        ticket = make_ticket(status="Open")
+        tid = ticket["id"]
+
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
+        page.click("button:has-text('Groomed')")
+        page.wait_for_selector("#groom-form", state="visible", timeout=10000)
+
+        page.fill("textarea[name='approach']", "Criteria approach")
+        page.fill("textarea[name='files_to_change']", "criteria.py")
+        page.fill("textarea[name='test_plan']", "unit tests")
+        page.fill("textarea[name='validation_steps']", "run tests")
+
+        # The section header carries the red asterisk for a Story.
+        expect(page.locator("#groom-form .text-red-500").first).to_be_visible()
+
+        # One fresh row to start with; add a second via Add criterion.
+        page.fill("#groom-form input[name='criteria']", "It works")
+        page.click("#groom-form button:has-text('Add criterion')")
+        page.fill("#groom-form input[name='criteria'] >> nth=1", "It is tested")
+
+        page.click("#groom-form button[type='submit']")
+        expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
+            timeout=10000
+        )
+
+        # The rows landed as structured criteria, in order.
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            rows = api.get(f"/api/v1/tickets/{tid}/criteria").json()
+        assert [row["text"] for row in rows] == ["It works", "It is tested"]
+
+    def test_existing_criteria_prefilled_and_removable_before_transition(
+        self, page: Page, base_url: str, seeded_projects, make_ticket
+    ):
+        """Criteria authored before the modal opens arrive pre-filled as
+        editable rows; removing one before transitioning persists the removal
+        through the Groomed transition payload."""
+        import httpx
+
+        tid = make_ticket(status="Open")["id"]
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            response = api.patch(
+                f"/api/v1/tickets/{tid}",
+                json={"criteria": ["Keep me", "Remove me"]},
+            )
+            assert response.status_code == 200, response.text
+
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
+        page.click("button:has-text('Groomed')")
+        page.wait_for_selector("#groom-form", state="visible", timeout=10000)
+
+        # Both existing rows are pre-filled and editable.
+        rows = page.locator("#groom-form input[name='criteria']")
+        expect(rows).to_have_count(2)
+        assert rows.nth(0).input_value() == "Keep me"
+        assert rows.nth(1).input_value() == "Remove me"
+
+        # Remove the second row, then groom with the remaining one.
+        page.locator("#groom-form [data-criteria-row]").nth(1).locator(
+            "[data-criteria-remove]"
+        ).click()
+        expect(rows).to_have_count(1)
+
+        page.fill("textarea[name='approach']", "Prefill approach")
+        page.fill("textarea[name='files_to_change']", "prefill.py")
+        page.fill("textarea[name='test_plan']", "unit tests")
+        page.fill("textarea[name='validation_steps']", "run tests")
+        page.click("#groom-form button[type='submit']")
+        expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
+            timeout=10000
+        )
+
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            remaining = api.get(f"/api/v1/tickets/{tid}/criteria").json()
+        assert [row["text"] for row in remaining] == ["Keep me"]
 
 
 if __name__ == "__main__":

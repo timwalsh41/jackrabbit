@@ -156,6 +156,10 @@
                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                           placeholder="Step-by-step validation...">{{ ticket.validation_steps if ticket else '' }}</textarea>
             </div>
+
+            {% with ticket_type = ticket.type.value, criteria_texts = criteria_texts or [], criteria_editable = criteria_editable %}
+            {% include "criteria_field.html" %}
+            {% endwith %}
             {% endif %}
 
             <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">

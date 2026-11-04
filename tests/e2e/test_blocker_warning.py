@@ -84,6 +84,7 @@ class TestBlockerWarningTerminalBlockers:
         page.fill("textarea[name='files_to_change']", "src/blocker.py")
         page.fill("textarea[name='test_plan']", "unit tests")
         page.fill("textarea[name='validation_steps']", "run tests")
+        page.fill("input[name='criteria']", "Blocker resolved criterion")
         page.click("#groom-form button[type='submit']")
         expect(page.locator("#ticket-content span:has-text('Groomed')").first).to_be_visible(
             timeout=10000

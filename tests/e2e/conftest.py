@@ -270,6 +270,9 @@ def make_ticket(base_url):
                         "files_to_change": "file.py",
                         "test_plan": "unit tests",
                         "validation_steps": "run tests",
+                        # Story/Bug grooming requires at least one criterion
+                        # (ADR-0025); the factory grooms Stories by default.
+                        "criteria": ["E2E acceptance criterion"],
                     },
                 )
             if status in ("In Progress", "Ready for Review", "Complete"):
