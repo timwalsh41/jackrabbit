@@ -555,6 +555,13 @@ def list_tickets(
     q: str | None = Query(None, description="Search in title, description and label names"),
     label_ids: list[str] = Query(default=[], description="Label ids to filter by"),
     label_match: str = Query("all", description="Label match mode: all or any"),
+    criteria_state: Literal["unverified"] | None = Query(
+        default=None,
+        description=(
+            "Criteria-state filter: 'unverified' selects tickets carrying at "
+            "least one unverified criterion (zero-criterion tickets never match)"
+        ),
+    ),
     sort: str = Query(
         "number",
         description="Sort field: number, title, type, status, priority, story_points, created_at",
@@ -588,6 +595,7 @@ def list_tickets(
         q=q,
         label_ids=parsed_label_ids,
         label_match=match_mode,
+        criteria_state=criteria_state,
         sort=sort,
         order=order,
         page=page,

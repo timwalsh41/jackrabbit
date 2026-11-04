@@ -338,6 +338,119 @@ class TestBacklogPage:
         assert "Critical outage" not in r.text
 
 
+class TestBacklogCriteriaStateFilter:
+    """The backlog's criteria-state filter (JRB-020, user story 17):
+    criteria_state=unverified lists the tickets carrying at least one
+    unverified criterion; zero-criterion tickets never match."""
+
+    @pytest.fixture
+    async def criteria_tickets(self, test_db, client_with_seeds):
+        """Tickets in different criteria states, built through the services."""
+        from jackrabbit.services import CriterionService
+        from sqlmodel import select
+
+        by_prefix = {p.prefix: p for p in test_db.exec(select(Project)).all()}
+        uns = by_prefix["UNS"]
+        ticket_service = TicketService(test_db)
+        criterion_service = CriterionService(test_db)
+
+        def _groomed_story(title: str, criteria: list[str]):
+            ticket = ticket_service.create_ticket(
+                project_id=uns.id,
+                title=title,
+                approach="Approach",
+                files_to_change="files",
+                test_plan="Plan",
+                validation_steps="Steps",
+            )
+            groomed = ticket_service.transition(
+                ticket, TicketStatus.GROOMED, reason="groomed", criteria=criteria
+            )
+            assert groomed.status == TicketStatus.GROOMED
+            return groomed
+
+        unverified = _groomed_story("Unverified grooming output", ["It works"])
+
+        mixed = _groomed_story("Partially signed off", ["It works", "It is tested"])
+        mixed = ticket_service.transition(mixed, TicketStatus.IN_PROGRESS, "Started")
+        rows = criterion_service.list_criteria(mixed)
+        criterion_service.sign_off(mixed, rows[1].id, True)
+
+        verified = _groomed_story("Fully signed off", ["It works"])
+        verified = ticket_service.transition(verified, TicketStatus.IN_PROGRESS, "Started")
+        rows = criterion_service.list_criteria(verified)
+        criterion_service.sign_off(verified, rows[0].id, True)
+
+        plain = ticket_service.create_ticket(project_id=uns.id, title="No criteria at all")
+
+        return {
+            "unverified": unverified,
+            "mixed": mixed,
+            "verified": verified,
+            "plain": plain,
+        }
+
+    async def test_backlog_criteria_filter_control_present(self, client, backlog_tickets):
+        """The filter form exposes the criteria-state checkbox."""
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        assert 'name="criteria_state"' in r.text
+        assert 'value="unverified"' in r.text
+
+    async def test_backlog_filter_by_unverified_criteria(self, client_with_seeds, criteria_tickets):
+        r = await _get(client_with_seeds, "/backlog", params={"criteria_state": "unverified"})
+        assert r.status_code == 200
+        assert "Unverified grooming output" in r.text
+        assert "Partially signed off" in r.text
+        assert "Fully signed off" not in r.text
+        assert "No criteria at all" not in r.text
+
+    async def test_backlog_criteria_filter_empty_means_no_filter(
+        self, client_with_seeds, criteria_tickets
+    ):
+        """Empty-string param (always-submitted form) must not filter or 422."""
+        r = await _get(client_with_seeds, "/backlog", params={"criteria_state": ""})
+        assert r.status_code == 200
+        for title in (
+            "Unverified grooming output",
+            "Partially signed off",
+            "Fully signed off",
+            "No criteria at all",
+        ):
+            assert title in r.text
+
+    async def test_backlog_criteria_filter_reflected_in_the_form(
+        self, client_with_seeds, criteria_tickets
+    ):
+        """An active criteria filter is pre-checked in the filter form."""
+        r = await _get(client_with_seeds, "/backlog", params={"criteria_state": "unverified"})
+        assert r.status_code == 200
+        checkbox = re.search(r'<input[^>]*name="criteria_state"[^>]*>', r.text)
+        assert checkbox is not None
+        assert "checked" in checkbox.group(0)
+
+    async def test_backlog_invalid_criteria_state_returns_422(
+        self, client_with_seeds, criteria_tickets
+    ):
+        r = await _get(client_with_seeds, "/backlog", params={"criteria_state": "verified"})
+        assert r.status_code == 422
+
+    async def test_backlog_criteria_filter_combined_with_other_filters(
+        self, client_with_seeds, criteria_tickets
+    ):
+        """The criteria filter composes with the other filters (AND logic)."""
+        r = await _get(
+            client_with_seeds,
+            "/backlog",
+            params={"criteria_state": "unverified", "status": TicketStatus.GROOMED.value},
+        )
+        assert r.status_code == 200
+        assert "Unverified grooming output" in r.text
+        assert "Partially signed off" not in r.text
+        assert "Fully signed off" not in r.text
+        assert "No criteria at all" not in r.text
+
+
 class TestNewTicketForm:
     async def test_new_ticket_modal_htmx(self, client_with_seeds):
         projects = (await client_with_seeds.get("/api/v1/projects")).json()

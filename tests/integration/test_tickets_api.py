@@ -473,6 +473,117 @@ class TestTicketsFiltering:
         assert all(item["sprint_id"] is None for item in data["items"])
 
 
+class TestTicketsCriteriaStateFilter:
+    """GET /api/v1/tickets?criteria_state=unverified (JRB-020, user story 17):
+    tickets carrying at least one unverified criterion; zero-criterion tickets
+    never match (they have nothing to sign off, not something outstanding)."""
+
+    async def _seed(self, client: AsyncClient) -> dict:
+        """Seed tickets in different criteria states (all in project 2)."""
+        ids: dict[str, int] = {}
+
+        async def _criteria_story(title: str, criteria: list[str]) -> dict:
+            ticket = await _create_ticket(
+                client,
+                2,
+                title,
+                approach="a",
+                files_to_change="f",
+                test_plan="t",
+                validation_steps="v",
+            )
+            groomed = await _transition(
+                client, ticket["id"], "Groomed", reason="g", criteria=criteria
+            )
+            assert groomed.status_code == 200, groomed.text
+            return ticket
+
+        # Groomed, one unverified criterion.
+        unverified = await _criteria_story("Unverified grooming output", ["It works"])
+        ids["unverified"] = unverified["id"]
+
+        # In Progress, one verified and one unverified criterion.
+        mixed = await _criteria_story("Partially signed off", ["It works", "It is tested"])
+        started = await _transition(client, mixed["id"], "In Progress", reason="w")
+        assert started.status_code == 200
+        rows = (await client.get(f"/api/v1/tickets/{mixed['id']}/criteria")).json()
+        signed = await client.patch(
+            f"/api/v1/tickets/{mixed['id']}/criteria/{rows[1]['id']}", json={"verified": True}
+        )
+        assert signed.status_code == 200
+        ids["mixed"] = mixed["id"]
+
+        # In Progress, every criterion verified.
+        verified = await _criteria_story("Fully signed off", ["It works"])
+        started = await _transition(client, verified["id"], "In Progress", reason="w")
+        assert started.status_code == 200
+        rows = (await client.get(f"/api/v1/tickets/{verified['id']}/criteria")).json()
+        signed = await client.patch(
+            f"/api/v1/tickets/{verified['id']}/criteria/{rows[0]['id']}", json={"verified": True}
+        )
+        assert signed.status_code == 200
+        ids["verified"] = verified["id"]
+
+        # Open story without criterion rows.
+        plain = await _create_ticket(client, 2, "No criteria at all")
+        ids["plain"] = plain["id"]
+        return ids
+
+    async def test_matches_tickets_with_an_unverified_criterion(
+        self, client_with_seeds: AsyncClient
+    ):
+        ids = await self._seed(client_with_seeds)
+        response = await client_with_seeds.get(
+            "/api/v1/tickets", params={"criteria_state": "unverified"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        assert {item["id"] for item in data["items"]} == {
+            ids["unverified"],
+            ids["mixed"],
+        }
+
+    async def test_excludes_tickets_with_every_criterion_verified(
+        self, client_with_seeds: AsyncClient
+    ):
+        ids = await self._seed(client_with_seeds)
+        response = await client_with_seeds.get(
+            "/api/v1/tickets", params={"criteria_state": "unverified"}
+        )
+        listed = {item["id"] for item in response.json()["items"]}
+        assert ids["verified"] not in listed
+
+    async def test_excludes_tickets_with_zero_criteria(self, client_with_seeds: AsyncClient):
+        ids = await self._seed(client_with_seeds)
+        response = await client_with_seeds.get(
+            "/api/v1/tickets", params={"criteria_state": "unverified"}
+        )
+        listed = {item["id"] for item in response.json()["items"]}
+        assert ids["plain"] not in listed
+
+    async def test_composes_with_the_status_filter(self, client_with_seeds: AsyncClient):
+        ids = await self._seed(client_with_seeds)
+        response = await client_with_seeds.get(
+            "/api/v1/tickets", params={"criteria_state": "unverified", "status": "Groomed"}
+        )
+        data = response.json()
+        assert data["total"] == 1
+        assert data["items"][0]["id"] == ids["unverified"]
+
+    async def test_unknown_criteria_state_is_422(self, client_with_seeds: AsyncClient):
+        response = await client_with_seeds.get(
+            "/api/v1/tickets", params={"criteria_state": "verified"}
+        )
+        assert response.status_code == 422
+
+    async def test_no_criteria_state_param_applies_no_filter(self, client_with_seeds: AsyncClient):
+        await self._seed(client_with_seeds)
+        response = await client_with_seeds.get("/api/v1/tickets")
+        assert response.status_code == 200
+        assert response.json()["total"] == 4
+
+
 class TestTicketsPagination:
     """GET /api/v1/tickets pagination and sorting."""
 

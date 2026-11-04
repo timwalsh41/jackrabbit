@@ -5,7 +5,7 @@ from datetime import date
 from enum import StrEnum
 from functools import cache
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -531,6 +531,19 @@ def _parse_label_match(value: str) -> str:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
 
+def _parse_criteria_state(value: str) -> Literal["unverified"] | None:
+    """Parse the criteria-state filter (""/absent means "no filter").
+
+    Matches the JSON API's ``criteria_state`` param: the only supported state
+    is "unverified" (tickets carrying at least one unverified criterion).
+    """
+    if value is None or value == "":
+        return None
+    if value.strip().lower() == "unverified":
+        return "unverified"
+    raise HTTPException(status_code=422, detail="criteria_state must be one of: unverified")
+
+
 def _parse_multi_ints(values: list[str], field: str = "value") -> list[int]:
     """Parse a repeated query param (``a=1&a=2``) into a list of ints.
 
@@ -598,6 +611,7 @@ def _build_backlog_context(
     page_size: int = 50,
     label_ids: list[int] | None = None,
     label_match: str = "all",
+    criteria_state: Literal["unverified"] | None = None,
     project: Project | None = None,
 ) -> dict:
     """Shared context builder for /backlog."""
@@ -622,6 +636,7 @@ def _build_backlog_context(
         created_before=created_before,
         label_ids=label_ids or [],
         label_match=label_match,
+        criteria_state=criteria_state,
         sort=sort,
         order=order,
         page=page,
@@ -688,6 +703,7 @@ def _build_backlog_context(
             "created_before": created_before,
             "label_ids": list(label_ids or []),
             "label_match": label_match,
+            "criteria_state": criteria_state,
             "sort": sort,
             "order": order,
         },
@@ -722,6 +738,7 @@ async def backlog(
     created_before: str = Query(""),
     label_ids: list[str] = Query(default=[]),
     label_match: str = Query("all"),
+    criteria_state: str = Query(""),
     sort: str = Query("number"),
     order: str = Query("desc"),
     page: int = Query(1),
@@ -753,6 +770,7 @@ async def backlog(
         created_before=_parse_optional_date(created_before, "created_before"),
         label_ids=_parse_label_ids(label_ids),
         label_match=_parse_label_match(label_match),
+        criteria_state=_parse_criteria_state(criteria_state),
         sort=sort,
         order=order,
         page=page,
