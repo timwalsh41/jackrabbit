@@ -8,7 +8,7 @@ from jackrabbit.models import (
     TicketType,
     Transition,
 )
-from jackrabbit.services import ProjectService, TicketService
+from jackrabbit.services import CriterionService, ProjectService, TicketService
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine, select
 
@@ -86,6 +86,27 @@ def test_epic(session, project_service):
     )
 
 
+@pytest.fixture
+def test_spike(session, project_service):
+    """Create a test Spike in OPEN status."""
+    project = project_service.get_project_by_prefix("UNS")
+    service = TicketService(session)
+    return service.create_ticket(
+        project_id=project.id,
+        title="Test Spike",
+        type=TicketType.SPIKE,
+    )
+
+
+def _fill_groomed_fields(ticket):
+    """Fill the four structured fields on a ticket (not committed)."""
+    ticket.approach = "Approach"
+    ticket.files_to_change = "files"
+    ticket.test_plan = "Plan"
+    ticket.validation_steps = "Steps"
+    return ticket
+
+
 class TestCanTransition:
     """Tests for can_transition method."""
 
@@ -120,10 +141,13 @@ class TestCanTransition:
         assert not can
         assert "Validation steps is required" in error
 
-        # Add validation_steps - should succeed
+        # Add validation_steps
         test_ticket.validation_steps = "Validation steps here"
         ticket_service.session.add(test_ticket)
         ticket_service.session.commit()
+
+        # ... plus at least one acceptance criterion (ADR-0025)
+        CriterionService(ticket_service.session).add_criterion(test_ticket, "It works")
         can, error = ticket_service.can_transition(test_ticket, TicketStatus.GROOMED)
         assert can
         assert error is None
@@ -256,6 +280,11 @@ class TestCanTransition:
 
     def test_rejected_to_prior_state_requires_guards(self, ticket_service, test_ticket):
         """Rejected -> prior state allowed only if that state's guard criteria are met."""
+        # A criterion must exist before the ticket is rejected (rows are
+        # locked from In Progress onward, and the Groomed gate re-runs on
+        # restore, ADR-0025).
+        CriterionService(ticket_service.session).add_criterion(test_ticket, "It works")
+
         test_ticket.status = TicketStatus.REJECTED
         ticket_service.session.add(test_ticket)
         ticket_service.session.commit()
@@ -436,6 +465,84 @@ class TestEpicTransitions:
             assert reason_contains in (error or "")
 
 
+class TestCriteriaGate:
+    """The Groomed gate is type-conditional (ADR-0025, amending ADR-0008):
+    Story/Bug require the four fields plus at least one criterion; Epic is
+    exempt; Spike is fully exempt (no fields, no criteria)."""
+
+    @pytest.mark.parametrize("type_name", ["Story", "Bug"])
+    def test_grooming_requires_at_least_one_criterion(
+        self, ticket_service, session, project_service, type_name
+    ):
+        """Story and Bug grooming fails without at least one criterion."""
+        project = project_service.get_project_by_prefix("UNS")
+        ticket = ticket_service.create_ticket(
+            project_id=project.id,
+            title=f"Test {type_name}",
+            type=TicketType(type_name),
+        )
+        _fill_groomed_fields(ticket)
+        session.add(ticket)
+        session.commit()
+
+        can, error = ticket_service.can_transition(ticket, TicketStatus.GROOMED)
+        assert not can
+        assert "acceptance criterion" in error
+
+        CriterionService(session).add_criterion(ticket, "It works")
+        can, error = ticket_service.can_transition(ticket, TicketStatus.GROOMED)
+        assert can
+        assert error is None
+
+    def test_epic_grooms_without_fields_or_criteria(self, ticket_service, test_epic):
+        """An Epic stays exempt: no fields, no criteria required."""
+        can, error = ticket_service.can_transition(test_epic, TicketStatus.GROOMED)
+        assert can
+        assert error is None
+
+    def test_spike_grooms_with_no_fields_and_no_criteria(self, ticket_service, test_spike):
+        """ADR-0008 relaxation: a Spike is fully exempt from the Groomed gate."""
+        can, error = ticket_service.can_transition(test_spike, TicketStatus.GROOMED)
+        assert can
+        assert error is None
+
+        ticket = ticket_service.transition(test_spike, TicketStatus.GROOMED, "Spike grooming")
+        assert ticket.status == TicketStatus.GROOMED
+
+    def test_spike_still_groomed_with_fields_present(self, ticket_service, test_spike):
+        """A Spike that happens to carry fields is not penalised."""
+        _fill_groomed_fields(test_spike)
+        ticket_service.session.add(test_spike)
+        ticket_service.session.commit()
+        can, error = ticket_service.can_transition(test_spike, TicketStatus.GROOMED)
+        assert can
+        assert error is None
+
+    def test_rejected_restore_to_groomed_requires_criterion(self, ticket_service, test_ticket):
+        """A Rejected -> Groomed restore re-runs the gate, including the
+        criterion requirement (ADR-0009 restore path)."""
+        _fill_groomed_fields(test_ticket)
+        test_ticket.status = TicketStatus.REJECTED
+        ticket_service.session.add(test_ticket)
+        ticket_service.session.commit()
+
+        can, error = ticket_service.can_transition(test_ticket, TicketStatus.GROOMED)
+        assert not can
+        assert "acceptance criterion" in error
+
+        # Restore to Open (free backward move), add the criterion there — the
+        # rows are locked outside Open/Groomed — then reject again.
+        ticket_service.transition(test_ticket, TicketStatus.OPEN, "Restore")
+        CriterionService(ticket_service.session).add_criterion(test_ticket, "It works")
+        test_ticket.status = TicketStatus.REJECTED
+        ticket_service.session.add(test_ticket)
+        ticket_service.session.commit()
+
+        can, error = ticket_service.can_transition(test_ticket, TicketStatus.GROOMED)
+        assert can
+        assert error is None
+
+
 class TestTransition:
     """Tests for transition method."""
 
@@ -449,7 +556,9 @@ class TestTransition:
         ticket_service.session.commit()
 
         # Transition OPEN -> GROOMED
-        ticket = ticket_service.transition(test_ticket, TicketStatus.GROOMED, "Ready for grooming")
+        ticket = ticket_service.transition(
+            test_ticket, TicketStatus.GROOMED, "Ready for grooming", criteria=["It works"]
+        )
 
         assert ticket.status == TicketStatus.GROOMED
         assert ticket.updated_at is not None
@@ -541,7 +650,9 @@ class TestTransition:
         ticket_service.session.add(test_ticket)
         ticket_service.session.commit()
 
-        ticket_service.transition(test_ticket, TicketStatus.GROOMED, "Grooved")
+        ticket_service.transition(
+            test_ticket, TicketStatus.GROOMED, "Grooved", criteria=["It works"]
+        )
         test_ticket.branch_name = "feature/test"
         ticket_service.session.add(test_ticket)
         ticket_service.session.commit()
@@ -579,6 +690,10 @@ class TestAllTransitionCombinations:
 
     def _setup_ticket_for_transition(self, ticket_service, test_ticket, from_status, to_status):
         """Set up ticket with required fields for transitioning from from_status to to_status."""
+        # The ticket starts Open: give it the criterion the Groomed gate needs
+        # (also re-checked on a Rejected -> Groomed restore, ADR-0025).
+        CriterionService(ticket_service.session).add_criterion(test_ticket, "It works")
+
         # First set the from_status
         test_ticket.status = from_status
 
@@ -755,7 +870,11 @@ class TestTransitionAPI:
         # Transition OPEN -> GROOMED
         response = client.post(
             f"/api/v1/tickets/{ticket_id}/transition",
-            json={"to_status": "Groomed", "reason": "Ready for grooming"},
+            json={
+                "to_status": "Groomed",
+                "reason": "Ready for grooming",
+                "criteria": ["It works"],
+            },
         )
         assert response.status_code == 200
         data = response.json()
@@ -780,6 +899,40 @@ class TestTransitionAPI:
         )
         assert response.status_code == 400
         assert "Approach is required" in response.json()["detail"]
+
+    def test_can_transition_reflects_criteria_gate(self, client):
+        """The pre-check endpoint reflects the type-conditional criterion gate.
+
+        A Story with fields but no criterion fails; an Epic passes."""
+        client.post("/api/v1/projects", json={"prefix": "TEST", "name": "Test Project"})
+        story = client.post(
+            "/api/v1/tickets",
+            json={
+                "project_id": 2,
+                "title": "Story",
+                "approach": "Approach",
+                "files_to_change": "files",
+                "test_plan": "Plan",
+                "validation_steps": "Steps",
+            },
+        ).json()
+        epic = client.post(
+            "/api/v1/tickets", json={"project_id": 2, "title": "Epic", "type": "Epic"}
+        ).json()
+
+        response = client.get(
+            f"/api/v1/tickets/{story['id']}/transition/can", params={"to_status": "Groomed"}
+        )
+        assert response.json()["can_transition"] is False
+        assert (
+            response.json()["error_message"]
+            == "At least one acceptance criterion is required to transition to Groomed"
+        )
+
+        response = client.get(
+            f"/api/v1/tickets/{epic['id']}/transition/can", params={"to_status": "Groomed"}
+        )
+        assert response.json()["can_transition"] is True
 
 
 if __name__ == "__main__":

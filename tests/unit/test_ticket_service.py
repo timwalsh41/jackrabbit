@@ -430,7 +430,9 @@ class TestTransitionSideEffects:
             test_plan="Plan",
             validation_steps="Steps",
         )
-        ticket = ticket_service.transition(sample_ticket, TicketStatus.GROOMED)
+        ticket = ticket_service.transition(
+            sample_ticket, TicketStatus.GROOMED, criteria=["It works"]
+        )
         ticket = ticket_service.transition(ticket, TicketStatus.IN_PROGRESS)
         assert ticket.branch_name == "feature/WEB-001-sample-ticket"
 

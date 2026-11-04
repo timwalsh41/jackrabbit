@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from jackrabbit.models import (
     LinkType,
@@ -316,6 +316,9 @@ class TicketUpdate(BaseModel):
     # a label is removed by updating without it. When absent, labels are left
     # untouched.
     labels: list[str] | None = None
+    # Acceptance criteria (ADR-0025). When present, the ticket's whole
+    # criteria list is replaced (rows are editable only in Open/Groomed).
+    criteria: list[str] | None = None
 
     @field_validator("labels", mode="before")
     @classmethod
@@ -387,6 +390,36 @@ class TicketLinkRead(TicketLinkBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CriterionCreate(BaseModel):
+    """A new acceptance criterion row on a ticket (ADR-0025)."""
+
+    text: str
+
+
+class CriterionUpdate(BaseModel):
+    """Update a criterion's text and/or move it to a new ordinal position.
+
+    Both fields are optional; omitted fields are left untouched. Verified
+    state is not settable here (sign-off is the verifier's action).
+    """
+
+    text: str | None = None
+    position: int | None = Field(default=None, ge=0)
+
+
+class CriterionRead(BaseModel):
+    """An acceptance criterion row as returned to clients."""
+
+    id: int
+    position: int
+    text: str
+    verified: bool
+    verified_at: datetime | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TransitionRequest(BaseModel):
     to_status: TicketStatus
     reason: str | None = None
@@ -397,6 +430,10 @@ class TransitionRequest(BaseModel):
     files_to_change: str | None = None
     test_plan: str | None = None
     validation_steps: str | None = None
+    # Acceptance criteria authored at grooming time (ADR-0025). When present,
+    # the list REPLACES the ticket's criteria as part of the same atomic
+    # transition; only accepted on the Groomed transition.
+    criteria: list[str] | None = None
 
 
 class TransitionResponse(BaseModel):

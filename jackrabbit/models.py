@@ -132,6 +132,14 @@ class Ticket(SQLModel, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"lazy": "selectin"},
     )
+    # Structured acceptance criteria (ADR-0025). Loaded eagerly like the label
+    # attachments, so rendering a list of tickets does not trigger a query per
+    # row. Deleting the ticket removes its criterion rows with it.
+    criteria: list["TicketCriterion"] = Relationship(
+        back_populates="ticket",
+        cascade_delete=True,
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
 
     @property
     def triage_role(self) -> TriageRole | None:
@@ -185,6 +193,26 @@ class TicketLabel(SQLModel, table=True):
         back_populates="ticket_links",
         sa_relationship_kwargs={"lazy": "selectin"},
     )
+
+
+class TicketCriterion(SQLModel, table=True):
+    """One structured acceptance criterion on a ticket (ADR-0025).
+
+    Rows are authored at grooming time and locked from In Progress onward;
+    ``verified``/``verified_at`` are the independent verifier's sign-off state.
+    Evidence prose stays in the description's Agent Execution Evidence section,
+    not on the row (ADR-0016).
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="ticket.id", index=True)
+    position: int = Field(default=0)
+    text: str
+    verified: bool = False
+    verified_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+    ticket: Ticket = Relationship(back_populates="criteria")
 
 
 class TicketLink(SQLModel, table=True):

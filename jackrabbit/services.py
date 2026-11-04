@@ -20,6 +20,7 @@ from jackrabbit.models import (
     Project,
     Sprint,
     Ticket,
+    TicketCriterion,
     TicketLabel,
     TicketLink,
     TicketStatus,
@@ -39,6 +40,14 @@ def utc_now() -> datetime:
 
 class ConflictError(ValueError):
     """Raised when an operation conflicts with existing state (maps to HTTP 409)."""
+
+
+class CriterionLockedError(ValueError):
+    """Raised when criteria are edited after work began (maps to HTTP 409).
+
+    Acceptance criteria are locked from In Progress onward (ADR-0025): edits
+    require a round-trip back to Groomed, then forward again.
+    """
 
 
 FilterMode = Literal["include", "exclude"]
@@ -381,24 +390,33 @@ class TicketService:
 
         Returns error message or None if valid.
 
-        An Epic is a planning container rather than a unit of code, so it is
-        exempt from the Open -> Groomed structured-field gate (ADR-0008) and
-        from the Groomed -> In Progress branch-name format check (ADR-0010);
-        its branch name is auto-generated instead. Story, Bug and Spike are
-        still gated exactly as before.
+        The Open -> Groomed structured-field gate (ADR-0008, as amended by
+        ADR-0025) is type-conditional: a Story or Bug requires the four groomed
+        fields plus at least one acceptance criterion; an Epic is exempt (it is
+        a planning container, not a unit of code); a Spike is fully exempt
+        (spikes produce reports, not code). An Epic is also exempt from the
+        Groomed -> In Progress branch-name format check (ADR-0010); its branch
+        name is auto-generated instead.
         """
         if to_status == TicketStatus.GROOMED and from_status == TicketStatus.OPEN:
             # An Epic may be groomed without the four structured fields: it is
-            # a planning container, not a unit of code (ADR-0008).
-            if ticket.type != TicketType.EPIC:
-                if not ticket.approach or not ticket.approach.strip():
-                    return "Approach is required to transition to Groomed"
-                if not ticket.files_to_change or not ticket.files_to_change.strip():
-                    return "Files to change is required to transition to Groomed"
-                if not ticket.test_plan or not ticket.test_plan.strip():
-                    return "Test plan is required to transition to Groomed"
-                if not ticket.validation_steps or not ticket.validation_steps.strip():
-                    return "Validation steps is required to transition to Groomed"
+            # a planning container, not a unit of code (ADR-0008). A Spike is
+            # fully exempt (ADR-0008 as amended by ADR-0025): it produces a
+            # report, not code, so it needs no groomed fields or criteria.
+            if ticket.type in (TicketType.EPIC, TicketType.SPIKE):
+                return None
+            if not ticket.approach or not ticket.approach.strip():
+                return "Approach is required to transition to Groomed"
+            if not ticket.files_to_change or not ticket.files_to_change.strip():
+                return "Files to change is required to transition to Groomed"
+            if not ticket.test_plan or not ticket.test_plan.strip():
+                return "Test plan is required to transition to Groomed"
+            if not ticket.validation_steps or not ticket.validation_steps.strip():
+                return "Validation steps is required to transition to Groomed"
+            # Story/Bug grooming requires at least one structured acceptance
+            # criterion (ADR-0025), so the contract for done is explicit.
+            if not ticket.criteria:
+                return "At least one acceptance criterion is required to transition to Groomed"
         elif to_status == TicketStatus.IN_PROGRESS and from_status == TicketStatus.GROOMED:
             # Branch name is auto-generated if empty, but validate the format
             # when a value is supplied. An Epic is exempt from the format check
@@ -508,14 +526,36 @@ class TicketService:
         return None
 
     def transition(
-        self, ticket: Ticket, to_status: TicketStatus, reason: str | None = None
+        self,
+        ticket: Ticket,
+        to_status: TicketStatus,
+        reason: str | None = None,
+        criteria: Sequence[str] | None = None,
     ) -> Ticket:
         """Perform a guarded transition and create audit log entry.
-        Raises ValueError if transition is not allowed."""
+
+        When ``criteria`` is provided (the Groomed transition payload,
+        ADR-0025), the list atomically REPLACES the ticket's criterion rows in
+        the same commit as the status change; a guard failure (or an invalid
+        criterion text) rolls everything back. Only accepted on the Groomed
+        transition. Raises ValueError if the transition is not allowed.
+        """
         from_status = ticket.status
+
+        if criteria is not None and to_status != TicketStatus.GROOMED:
+            raise ValueError("Criteria can only be set on the Groomed transition")
+
+        # Stage the criteria replacement before the guard runs, so the guard
+        # sees the new rows. Nothing is committed here: either the whole
+        # transition (ticket + rows + audit record) commits below, or a
+        # rollback below discards the staged rows along with any pending
+        # field changes.
+        if criteria is not None:
+            CriterionService(self.session).replace_criteria(ticket, criteria, commit=False)
 
         can_transition, error = self.can_transition(ticket, to_status)
         if not can_transition:
+            self.session.rollback()
             raise ValueError(error)
 
         # Auto-generate branch name on transition to IN_PROGRESS if empty
@@ -1550,6 +1590,143 @@ class LinkService:
                 )
             ).all()
         )
+
+
+class CriterionService:
+    """Owns the structured acceptance criteria attached to tickets (ADR-0025).
+
+    Rows are freely editable while a ticket is Open or Groomed. From In
+    Progress onward they are locked: edits require a round-trip back to
+    Groomed, then forward again, so the contract an implementer builds
+    against cannot silently shift mid-run.
+    """
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    # -- validation -------------------------------------------------------
+
+    @staticmethod
+    def _ensure_editable(ticket: Ticket) -> None:
+        """Reject edits once the ticket has moved past Groomed."""
+        if ticket.status not in (TicketStatus.OPEN, TicketStatus.GROOMED):
+            raise CriterionLockedError(
+                "Criteria are locked once a ticket is In Progress "
+                f"(current status: {ticket.status.value}); edit them after a "
+                "round-trip back to Groomed"
+            )
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        """Trim a criterion text; blank text is rejected."""
+        cleaned = (text or "").strip()
+        if not cleaned:
+            raise ValueError("Criterion text is required")
+        return cleaned
+
+    def _get_row(self, ticket: Ticket, criterion_id: int) -> TicketCriterion | None:
+        """The criterion row on this ticket, or None if it is elsewhere."""
+        return self.session.exec(
+            select(TicketCriterion).where(
+                TicketCriterion.id == criterion_id,
+                TicketCriterion.ticket_id == ticket.id,
+            )
+        ).first()
+
+    # -- CRUD -------------------------------------------------------------
+
+    def list_criteria(self, ticket: Ticket) -> list[TicketCriterion]:
+        """The ticket's criteria in ordinal order."""
+        return list(
+            self.session.exec(
+                select(TicketCriterion)
+                .where(TicketCriterion.ticket_id == ticket.id)
+                .order_by(TicketCriterion.position, TicketCriterion.id)  # type: ignore[arg-type]
+            ).all()
+        )
+
+    def add_criterion(self, ticket: Ticket, text: str) -> TicketCriterion:
+        """Append a criterion row; the ticket must be Open or Groomed."""
+        cleaned = self._normalize(text)
+        self._ensure_editable(ticket)
+        position = max((row.position for row in ticket.criteria), default=-1) + 1
+        row = TicketCriterion(ticket_id=cast(int, ticket.id), position=position, text=cleaned)
+        self.session.add(row)
+        # Keep the eagerly-loaded collection in sync, so guards and readers
+        # that use ticket.criteria see the new row without a reload.
+        ticket.criteria.append(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return row
+
+    def update_criterion(
+        self,
+        ticket: Ticket,
+        criterion_id: int,
+        text: str | None = None,
+        position: int | None = None,
+    ) -> TicketCriterion | None:
+        """Update a criterion's text and/or ordinal position.
+
+        Returns None if the criterion does not belong to this ticket.
+        """
+        row = self._get_row(ticket, criterion_id)
+        if row is None:
+            return None
+        if text is None and position is None:
+            return row
+        self._ensure_editable(ticket)
+        if text is not None:
+            row.text = self._normalize(text)
+        if position is not None:
+            row.position = position
+        self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return row
+
+    def delete_criterion(self, ticket: Ticket, criterion_id: int) -> bool:
+        """Delete a criterion row; False if it does not belong to this ticket."""
+        row = self._get_row(ticket, criterion_id)
+        if row is None:
+            return False
+        self._ensure_editable(ticket)
+        self.session.delete(row)
+        self.session.commit()
+        return True
+
+    def replace_criteria(
+        self, ticket: Ticket, texts: Sequence[str], commit: bool = True
+    ) -> list[TicketCriterion]:
+        """Replace the ticket's whole criteria list (ADR-0025).
+
+        Every text is validated before anything is written, so an invalid
+        entry leaves the existing rows untouched. With ``commit=False`` the
+        change is only staged: the caller commits it together with the
+        surrounding transition, or rolls back to discard it. Deletes are
+        flushed before the inserts so a row can reuse a position.
+        """
+        cleaned = [self._normalize(text) for text in texts]
+        self._ensure_editable(ticket)
+
+        for row in list(ticket.criteria):
+            ticket.criteria.remove(row)
+            self.session.delete(row)
+        if commit:
+            self.session.flush()
+
+        rows = [
+            TicketCriterion(ticket_id=cast(int, ticket.id), position=position, text=text)
+            for position, text in enumerate(cleaned)
+        ]
+        for row in rows:
+            self.session.add(row)
+            ticket.criteria.append(row)
+        if commit:
+            self.session.commit()
+            for row in rows:
+                self.session.refresh(row)
+        return rows
 
 
 class LabelService:

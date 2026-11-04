@@ -234,7 +234,9 @@ def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Tic
             validation_steps="Visual check on staging",
         )
     )
-    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready for development")
+    ticket_service.transition(
+        tickets[-1], TicketStatus.GROOMED, "Ready for development", criteria=["It works"]
+    )
 
     # In Progress ticket in WEB (branch auto-generated on transition)
     tickets.append(
@@ -250,7 +252,7 @@ def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Tic
             validation_steps="Manual check",
         )
     )
-    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready")
+    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready", criteria=["It works"])
     ticket_service.transition(tickets[-1], TicketStatus.IN_PROGRESS, "Started work")
 
     # Ready for Review ticket in API (PR URL provided at transition time)
@@ -267,7 +269,7 @@ def seeded_tickets(test_db: Session, seeded_projects: list[Project]) -> list[Tic
             validation_steps="Load test on staging",
         )
     )
-    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready")
+    ticket_service.transition(tickets[-1], TicketStatus.GROOMED, "Ready", criteria=["It works"])
     ticket_service.transition(tickets[-1], TicketStatus.IN_PROGRESS, "Started work")
     tickets[-1].pr_url = "https://github.com/test/repo/pull/1"
     ticket_service.transition(tickets[-1], TicketStatus.READY_FOR_REVIEW, "PR opened")
@@ -337,7 +339,9 @@ def groomed_ticket(test_db: Session, seeded_projects: list[Project]) -> Ticket:
         validation_steps="1. Run tests 2. Manual verification",
     )
     # Transition to GROOMED
-    ticket_service.transition(ticket, TicketStatus.GROOMED, "Ready for development")
+    ticket_service.transition(
+        ticket, TicketStatus.GROOMED, "Ready for development", criteria=["It works"]
+    )
     return ticket
 
 
@@ -357,7 +361,7 @@ def in_progress_ticket(test_db: Session, seeded_projects: list[Project]) -> Tick
         test_plan="Unit tests",
         validation_steps="Run tests",
     )
-    ticket_service.transition(ticket, TicketStatus.GROOMED, "Ready")
+    ticket_service.transition(ticket, TicketStatus.GROOMED, "Ready", criteria=["It works"])
     ticket_service.transition(ticket, TicketStatus.IN_PROGRESS, "Started work")
     return ticket
 
@@ -378,7 +382,7 @@ def ready_for_review_ticket(test_db: Session, seeded_projects: list[Project]) ->
         test_plan="Unit tests",
         validation_steps="Run tests",
     )
-    ticket_service.transition(ticket, TicketStatus.GROOMED, "Ready")
+    ticket_service.transition(ticket, TicketStatus.GROOMED, "Ready", criteria=["It works"])
     ticket_service.transition(ticket, TicketStatus.IN_PROGRESS, "Started work")
     ticket.pr_url = "https://github.com/test/repo/pull/1"
     ticket_service.transition(ticket, TicketStatus.READY_FOR_REVIEW, "PR opened")
