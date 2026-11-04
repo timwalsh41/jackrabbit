@@ -66,6 +66,7 @@ class TestGuardFailureErrorContract:
                 "files_to_change": "f",
                 "test_plan": "t",
                 "validation_steps": "v",
+                "criteria": ["It works"],
             },
         )
         await client.post(
@@ -92,6 +93,7 @@ class TestGuardFailureErrorContract:
                 "files_to_change": "f",
                 "test_plan": "t",
                 "validation_steps": "v",
+                "criteria": ["It works"],
             },
         )
         await client.post(

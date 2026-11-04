@@ -587,7 +587,7 @@ class TestMultiSelectFilters:
         c = ts.create_ticket(
             project_id=uns.id, title="UNS Spike Low", type=TicketType.SPIKE, priority=Priority.LOW
         )
-        ts.transition(b, TicketStatus.GROOMED, "groomed")
+        ts.transition(b, TicketStatus.GROOMED, "groomed", criteria=["It works"])
         ts.transition(b, TicketStatus.IN_PROGRESS, "started")
         ts.update_ticket(a, sprint_id=sprint.id)
         return {"bug": a, "story": b, "spike": c, "sprint": sprint, "projects": (uns, web, api)}

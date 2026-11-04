@@ -213,6 +213,7 @@ class TestPatchStatusIsGuarded:
                 "files_to_change": "a.py, b.py",
                 "test_plan": "Unit tests",
                 "validation_steps": "Visual check",
+                "criteria": ["It works"],
                 "transition_reason": "groomed from edit form",
             },
         )
@@ -243,7 +244,9 @@ class TestPatchStatusIsGuarded:
             test_plan="x",
             validation_steps="x",
         )
-        r1 = await _transition(client_with_seeds, created["id"], "Groomed", reason="groom")
+        r1 = await _transition(
+            client_with_seeds, created["id"], "Groomed", reason="groom", criteria=["It works"]
+        )
         assert r1.status_code == 200, r1.text
         r2 = await _transition(client_with_seeds, created["id"], "In Progress", reason="start")
         assert r2.status_code == 200, r2.text
@@ -286,7 +289,9 @@ class TestPatchStatusIsGuarded:
             test_plan="x",
             validation_steps="x",
         )
-        r1 = await _transition(client_with_seeds, created["id"], "Groomed", reason="groom")
+        r1 = await _transition(
+            client_with_seeds, created["id"], "Groomed", reason="groom", criteria=["It works"]
+        )
         assert r1.status_code == 200, r1.text
         response = await client_with_seeds.patch(
             f"/api/v1/tickets/{created['id']}", json={"status": "Open"}
@@ -341,7 +346,9 @@ class TestPatchStatusIsGuarded:
             test_plan="x",
             validation_steps="x",
         )
-        await _transition(client_with_seeds, created["id"], "Groomed", reason="groom")
+        await _transition(
+            client_with_seeds, created["id"], "Groomed", reason="groom", criteria=["It works"]
+        )
         await _transition(client_with_seeds, created["id"], "In Progress", reason="start")
         response = await client_with_seeds.patch(
             f"/api/v1/tickets/{created['id']}", json={"status": "Ready for Review"}
@@ -398,7 +405,7 @@ class TestTicketsFiltering:
             test_plan="t",
             validation_steps="v",
         )
-        await _transition(client, groomed["id"], "Groomed", reason="groomed")
+        await _transition(client, groomed["id"], "Groomed", reason="groomed", criteria=["It works"])
         await _create_ticket(client, web, "Open bug", type="Bug")
         await _create_ticket(client, api, "API story", type="Story")
         in_progress = await _create_ticket(
@@ -411,7 +418,7 @@ class TestTicketsFiltering:
             test_plan="t",
             validation_steps="v",
         )
-        await _transition(client, in_progress["id"], "Groomed", reason="g")
+        await _transition(client, in_progress["id"], "Groomed", reason="g", criteria=["It works"])
         await _transition(client, in_progress["id"], "In Progress", reason="w")
 
     async def test_filter_by_project(self, client_with_seeds: AsyncClient):
@@ -582,7 +589,9 @@ class TestTicketsTransitions:
         ticket_id = ticket["id"]
 
         # Open -> Groomed
-        response = await _transition(client_with_seeds, ticket_id, "Groomed", reason="groomed")
+        response = await _transition(
+            client_with_seeds, ticket_id, "Groomed", reason="groomed", criteria=["It works"]
+        )
         assert response.status_code == 200
         body = response.json()
         assert body["from_status"] == "Open"
@@ -621,7 +630,9 @@ class TestTicketsTransitions:
 
     async def test_backward_transition_allowed(self, client_with_seeds: AsyncClient):
         ticket = await self._groomable_ticket(client_with_seeds)
-        await _transition(client_with_seeds, ticket["id"], "Groomed", reason="g")
+        await _transition(
+            client_with_seeds, ticket["id"], "Groomed", reason="g", criteria=["It works"]
+        )
         response = await _transition(client_with_seeds, ticket["id"], "Open", reason="back to open")
         assert response.status_code == 200
         data = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
@@ -730,7 +741,7 @@ class TestTicketsMultiSelectFilters:
             test_plan="c",
             validation_steps="d",
         )
-        await _transition(client, inprog["id"], "Groomed", reason="g")
+        await _transition(client, inprog["id"], "Groomed", reason="g", criteria=["It works"])
         await _transition(client, inprog["id"], "In Progress", reason="w")
         spike = await _create_ticket(client, 1, "UNS Spike", type="Spike", priority="Low")
         return {

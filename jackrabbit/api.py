@@ -14,12 +14,16 @@ from jackrabbit.models import (
     Project,
     Sprint,
     Ticket,
+    TicketCriterion,
     TicketLink,
     TicketStatus,
     TicketType,
 )
 from jackrabbit.schemas import (
     CanTransitionResponse,
+    CriterionCreate,
+    CriterionRead,
+    CriterionUpdate,
     LabelCreate,
     LabelRead,
     LabelWithUsage,
@@ -50,6 +54,8 @@ from jackrabbit.schemas import (
 )
 from jackrabbit.services import (
     ConflictError,
+    CriterionLockedError,
+    CriterionService,
     LabelService,
     LinkService,
     ParentLinkConflictError,
@@ -86,6 +92,10 @@ def get_label_service(session: Session = Depends(get_session)) -> LabelService:
 
 def get_triage_service(session: Session = Depends(get_session)) -> TriageService:
     return TriageService(session)
+
+
+def get_criterion_service(session: Session = Depends(get_session)) -> CriterionService:
+    return CriterionService(session)
 
 
 def _label_reads(labels: list[Any]) -> list[LabelRead]:
@@ -659,6 +669,7 @@ def update_ticket(
     request: Request,
     service: TicketService = Depends(get_ticket_service),
     label_service: LabelService = Depends(get_label_service),
+    criterion_service: CriterionService = Depends(get_criterion_service),
 ) -> TicketRead | Response:
     ticket = service.get_ticket(ticket_id)
     if not ticket:
@@ -676,6 +687,10 @@ def update_ticket(
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
+    # Criteria likewise replace the ticket's whole list; the service enforces
+    # the Open/Groomed-only editability (ADR-0025).
+    new_criteria = cast(list[str] | None, update_data.pop("criteria", None))
+
     # Status changes go through the guarded TransitionService (same rules as
     # POST /transition: guarded forward, free backward, reject/restore) so they
     # never bypass transition guards or the Transition audit trail (ADR-0009).
@@ -688,6 +703,14 @@ def update_ticket(
     # pr_url + Ready for Review).
     if update_data:
         ticket = service.update_ticket(ticket, **update_data)
+
+    if new_criteria is not None:
+        try:
+            criterion_service.replace_criteria(ticket, new_criteria)
+        except CriterionLockedError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
 
     if new_status is not None and new_status != ticket.status:
         try:
@@ -788,7 +811,9 @@ def transition_ticket(
         if request.validation_steps is not None:
             ticket.validation_steps = request.validation_steps
 
-        ticket = service.transition(ticket, request.to_status, request.reason)
+        ticket = service.transition(
+            ticket, request.to_status, request.reason, criteria=request.criteria
+        )
         # ticket.project is only None for an uncommitted ticket; it was loaded
         # from the DB and transitioned, so the relationship is populated.
         project = cast(Project, ticket.project)
@@ -1022,6 +1047,87 @@ def detach_label(
         from jackrabbit.web import _labels_section_response
 
         return _labels_section_response(request, ticket_id, ticket_service, service)
+    return Response(status_code=204)
+
+
+# Criteria endpoints — structured acceptance criteria (ADR-0025)
+@router.get("/tickets/{ticket_id}/criteria", response_model=list[CriterionRead])
+def get_ticket_criteria(
+    ticket_id: int,
+    criterion_service: CriterionService = Depends(get_criterion_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> list[TicketCriterion]:
+    """The ticket's acceptance criteria in ordinal order."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return criterion_service.list_criteria(ticket)
+
+
+@router.post("/tickets/{ticket_id}/criteria", response_model=CriterionRead, status_code=201)
+def add_criterion(
+    ticket_id: int,
+    criterion_in: CriterionCreate,
+    criterion_service: CriterionService = Depends(get_criterion_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> TicketCriterion:
+    """Append an acceptance criterion; rejected once the ticket is In Progress."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    try:
+        return criterion_service.add_criterion(ticket, criterion_in.text)
+    except CriterionLockedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.patch("/tickets/{ticket_id}/criteria/{criterion_id}", response_model=CriterionRead)
+def update_criterion(
+    ticket_id: int,
+    criterion_id: int,
+    criterion_in: CriterionUpdate,
+    criterion_service: CriterionService = Depends(get_criterion_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> TicketCriterion:
+    """Update a criterion's text and/or ordinal position."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    try:
+        row = criterion_service.update_criterion(
+            ticket,
+            criterion_id,
+            text=criterion_in.text,
+            position=criterion_in.position,
+        )
+    except CriterionLockedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if row is None:
+        raise HTTPException(status_code=404, detail="Criterion not found for this ticket")
+    return row
+
+
+@router.delete("/tickets/{ticket_id}/criteria/{criterion_id}", status_code=204, response_model=None)
+def delete_criterion(
+    ticket_id: int,
+    criterion_id: int,
+    criterion_service: CriterionService = Depends(get_criterion_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> Response:
+    """Delete an acceptance criterion; rejected once the ticket is In Progress."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    try:
+        deleted = criterion_service.delete_criterion(ticket, criterion_id)
+    except CriterionLockedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Criterion not found for this ticket")
     return Response(status_code=204)
 
 

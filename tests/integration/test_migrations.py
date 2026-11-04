@@ -45,6 +45,7 @@ def test_upgrade_creates_all_tables(tmp_path: Path, monkeypatch):
         "transition",
         "label",
         "ticketlabel",
+        "ticketcriterion",
     } <= tables
     # The head migration renamed ticket_transition -> transition
     assert "ticket_transition" not in tables
@@ -65,15 +66,17 @@ def test_upgrade_creates_all_tables(tmp_path: Path, monkeypatch):
 
 
 def test_single_parent_partial_unique_indexes(tmp_path: Path, monkeypatch):
-    """JRB-019 review remediation: the head migration adds two partial unique
-    indexes enforcing one parent per child at the DB level (one PARENT row per
-    target, one CHILD row per source), and downgrade removes them."""
+    """JRB-019 review remediation: the c4d5e6f7a8b9 migration adds two partial
+    unique indexes enforcing one parent per child at the DB level (one PARENT
+    row per target, one CHILD row per source), and downgrade removes them."""
     db_path = tmp_path / "singleparent.db"
     database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", database_url)
     cfg = _alembic_config(database_url)
 
-    command.upgrade(cfg, "head")
+    # The index migration is no longer head (the criteria migration sits on
+    # top of it), so pin the test to its own revision.
+    command.upgrade(cfg, "c4d5e6f7a8b9")
     engine = create_engine(database_url)
     indexes = {idx["name"]: idx for idx in inspect(engine).get_indexes("ticketlink")}
     assert indexes["uq_ticket_link_parent_target"]["unique"]
@@ -81,7 +84,7 @@ def test_single_parent_partial_unique_indexes(tmp_path: Path, monkeypatch):
     engine.dispose()
 
     # Downgrade one step: the index migration is undone, tables stay.
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "b2f6c1d4e7a9")
     engine = create_engine(database_url)
     names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
     assert "uq_ticket_link_parent_target" not in names
@@ -90,7 +93,7 @@ def test_single_parent_partial_unique_indexes(tmp_path: Path, monkeypatch):
     engine.dispose()
 
     # Re-upgrade restores them.
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "c4d5e6f7a8b9")
     engine = create_engine(database_url)
     names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
     assert "uq_ticket_link_parent_target" in names
@@ -111,18 +114,19 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
     assert "transition" in _tables(engine)
     engine.dispose()
 
-    # Downgrade one step: the single-parent index migration (the head step)
-    # is undone, so the partial unique indexes are gone while everything
-    # older (including the label tables) stays in place.
+    # Downgrade one step: the criteria migration (the head step) is undone,
+    # so the criterion table is gone while everything older (including the
+    # label tables and the single-parent indexes) stays in place.
     command.downgrade(cfg, "-1")
     engine = create_engine(database_url)
     tables = _tables(engine)
     assert "label" in tables
     assert "ticketlabel" in tables
     assert "transition" in tables
+    assert "ticketcriterion" not in tables
     index_names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
-    assert "uq_ticket_link_parent_target" not in index_names
-    assert "uq_ticket_link_child_source" not in index_names
+    assert "uq_ticket_link_parent_target" in index_names
+    assert "uq_ticket_link_child_source" in index_names
 
     # Data survives the rename round-trip: insert a row at the downgraded
     # revision and confirm it is still there after re-upgrading.
@@ -143,9 +147,10 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
         prefixes = {row[0] for row in conn.execute(text("SELECT prefix FROM project")).fetchall()}
         revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     # The 0001 migration seeds the UNS system project; the inserted row must
-    # also have survived the downgrade -> re-upgrade round-trip.
+    # also have survived the downgrade -> re-upgrade round-trip. The round
+    # trip lands back on the head revision (the criteria migration).
     assert prefixes == {"UNS", "RT"}
-    assert revision == "c4d5e6f7a8b9"
+    assert revision == "f3b9d7c2a5e1"
     engine.dispose()
 
 
@@ -172,7 +177,37 @@ def test_full_downgrade_to_base_and_reupgrade(tmp_path: Path, monkeypatch):
         "transition",
         "label",
         "ticketlabel",
+        "ticketcriterion",
     } <= _tables(engine)
+    engine.dispose()
+
+
+def test_criteria_table_up_and_down(tmp_path: Path, monkeypatch):
+    """The JRB-021 migration creates the ticketcriterion table; downgrade -1
+    removes it while the labels tables stay in place."""
+    db_path = tmp_path / "criteria.db"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    cfg = _alembic_config(database_url)
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(database_url)
+    columns = {col["name"] for col in inspect(engine).get_columns("ticketcriterion")}
+    expected = {"id", "ticket_id", "position", "text", "verified", "verified_at", "created_at"}
+    assert expected <= columns
+    engine.dispose()
+
+    command.downgrade(cfg, "-1")
+    engine = create_engine(database_url)
+    tables = _tables(engine)
+    assert "ticketcriterion" not in tables
+    assert "label" in tables
+    assert "ticketlabel" in tables
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(database_url)
+    assert "ticketcriterion" in _tables(engine)
     engine.dispose()
 
 

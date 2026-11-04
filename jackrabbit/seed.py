@@ -46,6 +46,10 @@ GROOMING_FIELDS = {
 
 _PR_URL = "https://github.com/timwalsh41/jackrabbit/pull/1"
 
+# Story/Bug grooming requires at least one structured acceptance criterion
+# (ADR-0025); the demo seed gives each gated type a representative one.
+_DEMO_CRITERION = "The change is demonstrable in the seeded demo flow."
+
 # Ordered chain used to walk a ticket forward, so history reads like real work.
 _FORWARD_CHAIN = (
     TicketStatus.GROOMED,
@@ -370,11 +374,18 @@ class _Seeder:
         for status in _FORWARD_CHAIN[: _FORWARD_CHAIN.index(target) + 1]:
             if self._rank(ticket.status) >= self._rank(status):
                 continue
+            criteria = None
             if status == TicketStatus.GROOMED:
                 self.tickets.update_ticket(ticket, **GROOMING_FIELDS)
+                # Story/Bug grooming is gated on at least one criterion
+                # (ADR-0025); Epic/Spike are exempt and pass no criteria.
+                if ticket.type in (TicketType.STORY, TicketType.BUG):
+                    criteria = [_DEMO_CRITERION]
             elif status == TicketStatus.READY_FOR_REVIEW:
                 self.tickets.update_ticket(ticket, pr_url=_PR_URL)
-            self.tickets.transition(ticket, status, reason=f"seeded: now {status.value}")
+            self.tickets.transition(
+                ticket, status, reason=f"seeded: now {status.value}", criteria=criteria
+            )
             self.result.transitions += 1
 
     @staticmethod

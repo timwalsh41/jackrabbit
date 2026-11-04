@@ -197,7 +197,7 @@ class TestInlineFieldEditing:
         )
         response = await client.post(
             f"/api/v1/tickets/{ticket['id']}/transition",
-            json={"to_status": "Groomed", "reason": "ready"},
+            json={"to_status": "Groomed", "reason": "ready", "criteria": ["It works"]},
         )
         assert response.status_code == 200
         return ticket
