@@ -140,6 +140,13 @@ class Ticket(SQLModel, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"lazy": "selectin"},
     )
+    # Audit entries for criterion adds, edits, and sign-offs (ADR-0025),
+    # appended alongside the row change. Eagerly loaded like criteria.
+    criteria_history: list["TicketCriterionHistory"] = Relationship(
+        back_populates="ticket",
+        cascade_delete=True,
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
 
     @property
     def triage_role(self) -> TriageRole | None:
@@ -213,6 +220,24 @@ class TicketCriterion(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
     ticket: Ticket = Relationship(back_populates="criteria")
+
+
+class TicketCriterionHistory(SQLModel, table=True):
+    """Audit entry for a criterion change on a ticket (ADR-0025).
+
+    Mirrors the Transition audit-trail shape: one row is appended whenever a
+    criterion is added, edited, or (un)verified, carrying the criterion text
+    and the timestamp. Entries belong to the ticket, not to the row, so they
+    survive a criterion being deleted (e.g. a grooming round-trip replace).
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="ticket.id", index=True)
+    event: str  # "added" | "edited" | "verified" | "unverified"
+    text: str
+    at: datetime = Field(default_factory=utc_now)
+
+    ticket: Ticket = Relationship(back_populates="criteria_history")
 
 
 class TicketLink(SQLModel, table=True):

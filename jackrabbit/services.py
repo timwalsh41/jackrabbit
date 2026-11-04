@@ -21,6 +21,7 @@ from jackrabbit.models import (
     Sprint,
     Ticket,
     TicketCriterion,
+    TicketCriterionHistory,
     TicketLabel,
     TicketLink,
     TicketStatus,
@@ -331,11 +332,38 @@ class TicketService:
                 }
             )
 
+        # Criteria checklist and its audit trail (ADR-0025), for the detail
+        # view. Same dict shape as transitions: isoformat timestamps.
+        criteria = [
+            {
+                "id": row.id,
+                "position": row.position,
+                "text": row.text,
+                "verified": row.verified,
+                "verified_at": row.verified_at.isoformat() if row.verified_at else None,
+            }
+            for row in sorted(
+                ticket.criteria,
+                key=lambda row: (row.position, cast(int, row.id)),
+            )
+        ]
+        criteria_history = [
+            {
+                "id": entry.id,
+                "event": entry.event,
+                "text": entry.text,
+                "at": entry.at.isoformat() if entry.at else None,
+            }
+            for entry in sorted(ticket.criteria_history, key=lambda entry: cast(int, entry.id))
+        ]
+
         return {
             "ticket": ticket,
             "project_prefix": project_prefix,
             "links": links,
             "transitions": transitions,
+            "criteria": criteria,
+            "criteria_history": criteria_history,
         }
 
     def update_status(self, ticket: Ticket, status: TicketStatus) -> Ticket:
@@ -445,7 +473,11 @@ class TicketService:
             # Guard: requires PR merged or Spike report accepted - this is manual confirmation
             # We'll accept it if the user provides a reason, but warn if no reason given
             # The actual check is manual, so we just require a reason
-            pass
+            # Complete guard (ADR-0025): every acceptance criterion must be
+            # verified first. Spike tickets and tickets with no criterion rows
+            # are exempt - there is nothing to verify.
+            if ticket.type != TicketType.SPIKE and any(not row.verified for row in ticket.criteria):
+                return "All acceptance criteria must be verified before transitioning to Complete"
         return None
 
     def can_transition(self, ticket: Ticket, to_status: TicketStatus) -> tuple[bool, str | None]:
@@ -1617,12 +1649,37 @@ class CriterionService:
             )
 
     @staticmethod
+    def _ensure_signoff_allowed(ticket: Ticket) -> None:
+        """Reject sign-off outside In Progress/Ready for Review (ADR-0025).
+
+        Sign-off is the independent verifier's action: it happens while work
+        is under way or up for review, never before (rows are still being
+        authored) and never after (the ticket is done or rejected).
+        """
+        if ticket.status not in (TicketStatus.IN_PROGRESS, TicketStatus.READY_FOR_REVIEW):
+            raise CriterionLockedError(
+                "Criteria can only be signed off while In Progress or Ready "
+                f"for Review (current status: {ticket.status.value})"
+            )
+
+    @staticmethod
     def _normalize(text: str) -> str:
         """Trim a criterion text; blank text is rejected."""
         cleaned = (text or "").strip()
         if not cleaned:
             raise ValueError("Criterion text is required")
         return cleaned
+
+    def _append_history(self, ticket: Ticket, event: str, text: str) -> None:
+        """Append an audit entry for a criterion change (ADR-0025).
+
+        Mirrors the Transition audit trail: appended in the same session as
+        the row change, so it commits with it (or rolls back with it when the
+        caller is staging a transition with ``commit=False``).
+        """
+        self.session.add(
+            TicketCriterionHistory(ticket_id=cast(int, ticket.id), event=event, text=text)
+        )
 
     def _get_row(self, ticket: Ticket, criterion_id: int) -> TicketCriterion | None:
         """The criterion row on this ticket, or None if it is elsewhere."""
@@ -1655,6 +1712,7 @@ class CriterionService:
         # Keep the eagerly-loaded collection in sync, so guards and readers
         # that use ticket.criteria see the new row without a reload.
         ticket.criteria.append(row)
+        self._append_history(ticket, "added", cleaned)
         self.session.commit()
         self.session.refresh(row)
         return row
@@ -1677,9 +1735,38 @@ class CriterionService:
             return row
         self._ensure_editable(ticket)
         if text is not None:
-            row.text = self._normalize(text)
+            new_text = self._normalize(text)
+            if new_text != row.text:
+                row.text = new_text
+                self._append_history(ticket, "edited", new_text)
         if position is not None:
             row.position = position
+        self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return row
+
+    def sign_off(self, ticket: Ticket, criterion_id: int, verified: bool) -> TicketCriterion | None:
+        """Flip a criterion's verified state (the verifier's action, ADR-0025).
+
+        Allowed only while the ticket is In Progress or Ready for Review.
+        Verifying stamps ``verified_at``; un-verifying clears it. Every flip
+        appends a history entry. Returns None if the criterion does not
+        belong to this ticket.
+        """
+        row = self._get_row(ticket, criterion_id)
+        if row is None:
+            return None
+        self._ensure_signoff_allowed(ticket)
+        if verified:
+            row.verified = True
+            row.verified_at = utc_now()
+            event = "verified"
+        else:
+            row.verified = False
+            row.verified_at = None
+            event = "unverified"
+        self._append_history(ticket, event, row.text)
         self.session.add(row)
         self.session.commit()
         self.session.refresh(row)
@@ -1722,6 +1809,7 @@ class CriterionService:
         for row in rows:
             self.session.add(row)
             ticket.criteria.append(row)
+            self._append_history(ticket, "added", row.text)
         if commit:
             self.session.commit()
             for row in rows:
