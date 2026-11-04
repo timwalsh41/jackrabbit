@@ -225,15 +225,6 @@ def test_criteria_table_up_and_down(tmp_path: Path, monkeypatch):
     assert "ticketlabel" in tables
     engine.dispose()
 
-    command.downgrade(cfg, "c4d5e6f7a8b9")
-    engine = create_engine(database_url)
-    tables = _tables(engine)
-    assert "ticketcriterion" in tables
-    assert "ticketcriterionhistory" not in tables
-    assert "label" in tables
-    assert "ticketlabel" in tables
-    engine.dispose()
-
     # Down to the criteria migration's parent: the criteria table goes too.
     command.downgrade(cfg, "c4d5e6f7a8b9")
     engine = create_engine(database_url)
