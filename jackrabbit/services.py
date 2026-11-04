@@ -341,6 +341,7 @@ class TicketService:
                 "text": row.text,
                 "verified": row.verified,
                 "verified_at": row.verified_at.isoformat() if row.verified_at else None,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in sorted(
                 ticket.criteria,

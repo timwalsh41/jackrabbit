@@ -236,10 +236,22 @@ class TestInlineFieldEditing:
         for step in (
             {"to_status": "In Progress", "branch_name": "feature/branch"},
             {"to_status": "Ready for Review", "pr_url": "https://github.com/x/y/pull/1"},
-            {"to_status": "Complete", "reason": "done"},
         ):
             response = await client.post(f"/api/v1/tickets/{groomed['id']}/transition", json=step)
             assert response.status_code == 200, response.text
+        # The Complete guard (ADR-0025) needs every criterion verified first.
+        rows = (await client.get(f"/api/v1/tickets/{groomed['id']}/criteria")).json()
+        for row in rows:
+            signed = await client.patch(
+                f"/api/v1/tickets/{groomed['id']}/criteria/{row['id']}",
+                json={"verified": True},
+            )
+            assert signed.status_code == 200, signed.text
+        response = await client.post(
+            f"/api/v1/tickets/{groomed['id']}/transition",
+            json={"to_status": "Complete", "reason": "done"},
+        )
+        assert response.status_code == 200, response.text
         response = await get_page(client, f"/tickets/{groomed['id']}/fields")
         # Edit affordances removed for Complete tickets
         assert f"/tickets/{groomed['id']}/fields/approach/edit" not in response.text
