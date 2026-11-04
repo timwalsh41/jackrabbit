@@ -13,6 +13,11 @@ from sqlalchemy.engine import Engine, create_engine
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# The JRB-021 criteria *schema* migration. It is no longer head (the JRB-024
+# legacy checkbox data migration sits on top of it), so tests that verify its
+# own upgrade/downgrade pin this revision explicitly.
+CRITERIA_MIGRATION_REVISION = "f3b9d7c2a5e1"
+
 
 def _alembic_config(database_url: str) -> Config:
     """Alembic config pointed at a specific database."""
@@ -101,8 +106,12 @@ def test_single_parent_partial_unique_indexes(tmp_path: Path, monkeypatch):
     engine.dispose()
 
 
-def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypatch):
-    """upgrade head -> downgrade -1 -> upgrade head round-trips cleanly."""
+def test_downgrade_to_criteria_schema_then_reupgrade_round_trip(tmp_path: Path, monkeypatch):
+    """Downgrading to the criteria schema migration and back up round-trips.
+
+    The head step is now the JRB-024 data migration, whose downgrade is a
+    no-op (checkbox text cannot be reconstructed from rows), so the round
+    trip is pinned to the JRB-021 schema revision it sits on."""
     db_path = tmp_path / "roundtrip.db"
     database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -114,16 +123,16 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
     assert "transition" in _tables(engine)
     engine.dispose()
 
-    # Downgrade one step: the criteria migration (the head step) is undone,
-    # so the criterion table is gone while everything older (including the
-    # label tables and the single-parent indexes) stays in place.
-    command.downgrade(cfg, "-1")
+    # Downgrade to the criteria schema revision: the JRB-024 data migration is
+    # undone (a no-op on the schema) while everything older — the criterion
+    # table, label tables, and the single-parent indexes — stays in place.
+    command.downgrade(cfg, CRITERIA_MIGRATION_REVISION)
     engine = create_engine(database_url)
     tables = _tables(engine)
     assert "label" in tables
     assert "ticketlabel" in tables
     assert "transition" in tables
-    assert "ticketcriterion" not in tables
+    assert "ticketcriterion" in tables
     index_names = {idx["name"] for idx in inspect(engine).get_indexes("ticketlink")}
     assert "uq_ticket_link_parent_target" in index_names
     assert "uq_ticket_link_child_source" in index_names
@@ -148,9 +157,9 @@ def test_downgrade_minus_one_then_reupgrade_round_trip(tmp_path: Path, monkeypat
         revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     # The 0001 migration seeds the UNS system project; the inserted row must
     # also have survived the downgrade -> re-upgrade round-trip. The round
-    # trip lands back on the head revision (the criteria migration).
+    # trip lands back on the head revision (the JRB-024 data migration).
     assert prefixes == {"UNS", "RT"}
-    assert revision == "f3b9d7c2a5e1"
+    assert revision == "d9c3f7b1a5e8"
     engine.dispose()
 
 
@@ -183,8 +192,10 @@ def test_full_downgrade_to_base_and_reupgrade(tmp_path: Path, monkeypatch):
 
 
 def test_criteria_table_up_and_down(tmp_path: Path, monkeypatch):
-    """The JRB-021 migration creates the ticketcriterion table; downgrade -1
-    removes it while the labels tables stay in place."""
+    """The JRB-021 migration creates the ticketcriterion table; downgrading to
+    the revision before it removes the table while the labels tables stay in
+    place. Pinned explicitly because the JRB-024 data migration now sits on
+    top, so ``-1`` from head no longer means this migration."""
     db_path = tmp_path / "criteria.db"
     database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -197,7 +208,7 @@ def test_criteria_table_up_and_down(tmp_path: Path, monkeypatch):
     assert expected <= columns
     engine.dispose()
 
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "c4d5e6f7a8b9")
     engine = create_engine(database_url)
     tables = _tables(engine)
     assert "ticketcriterion" not in tables
