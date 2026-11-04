@@ -63,8 +63,17 @@ class TestTicketLifecycle:
 
     def test_groom_ticket(self, page: Page, base_url: str, seeded_projects, make_ticket):
         """Test grooming a ticket (Open -> Groomed) via the transition modal."""
+        import httpx
+
         ticket = make_ticket(status="Open")
         tid = ticket["id"]
+
+        # Story/Bug grooming is gated on at least one criterion (ADR-0025).
+        # Rows are authored while Open; the modal criteria editor itself is
+        # JRB-023 scope, so the test seeds them via the API here.
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            response = api.post(f"/api/v1/tickets/{tid}/criteria", json={"text": "It works"})
+            assert response.status_code == 201, response.text
 
         page.goto(f"{base_url}/ticket/{tid}")
         page.wait_for_load_state("networkidle")
@@ -157,6 +166,16 @@ class TestTicketLifecycle:
         page.goto(f"{base_url}/ticket/{tid}")
         page.wait_for_load_state("networkidle")
 
+        # The Complete guard (ADR-0025) requires every criterion verified
+        # first; the verifier signs them off via the checklist.
+        page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
+        boxes = page.locator("#criteria-checklist input[type='checkbox']")
+        for i in range(boxes.count()):
+            page.check(f"#criteria-checklist .criterion-row >> nth={i} >> input[type='checkbox']")
+        expect(page.locator("#criteria-checklist .criterion-tick")).to_have_count(
+            boxes.count(), timeout=10000
+        )
+
         # Wait for transition buttons, click Complete button (opens modal)
         page.wait_for_selector("#transition-buttons button", state="visible", timeout=10000)
         page.click("button:has-text('Complete')")
@@ -229,6 +248,14 @@ class TestTicketLifecycle:
         ticket = make_ticket(status="Open", title="Full Lifecycle Walk")
         tid = ticket["id"]
 
+        # Story/Bug grooming is gated on at least one criterion (ADR-0025);
+        # rows are authored while Open (modal editor is JRB-023 scope).
+        import httpx
+
+        with httpx.Client(base_url=base_url, timeout=30.0) as api:
+            response = api.post(f"/api/v1/tickets/{tid}/criteria", json={"text": "Walk works"})
+            assert response.status_code == 201, response.text
+
         def buttons() -> object:
             return page.locator("#transition-buttons button")
 
@@ -284,7 +311,11 @@ class TestTicketLifecycle:
         ).to_be_visible(timeout=10000)
         expect(page.locator("#transition-history")).to_contain_text("Ready for Review")
 
-        # --- Ready for Review -> Complete (modal) ---
+        # --- Ready for Review -> Complete (modal; guarded on criteria) ---
+        # The verifier signs the criterion off via the checklist first.
+        page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
+        page.check("#criteria-checklist .criterion-row >> nth=0 >> input[type='checkbox']")
+        expect(page.locator("#criteria-checklist .criterion-tick").first).to_be_visible()
         page.click("button:has-text('Complete')")
         page.wait_for_selector("#complete-form", state="visible", timeout=10000)
         page.fill("#reason", "merged")
