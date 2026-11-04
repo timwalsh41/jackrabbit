@@ -130,6 +130,51 @@ class TestCriteriaStatusGate:
         )
         assert delete.status_code == 409
 
+    async def _story_ready_for_review(self, client_with_seeds: AsyncClient) -> dict:
+        ticket = await self._in_progress_story(client_with_seeds)
+        review = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Ready for Review"},
+        )
+        assert review.status_code == 200
+        return ticket
+
+    async def test_crud_is_rejected_while_ready_for_review(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_ready_for_review(client_with_seeds)
+        assert (await _add(client_with_seeds, ticket["id"], "Late")).status_code == 409
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        locked = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}", json={"text": "Rewrite"}
+        )
+        assert locked.status_code == 409
+        delete = await client_with_seeds.delete(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}"
+        )
+        assert delete.status_code == 409
+
+    async def test_crud_is_rejected_once_complete(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_ready_for_review(client_with_seeds)
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        for row in rows:
+            signed = await client_with_seeds.patch(
+                f"/api/v1/tickets/{ticket['id']}/criteria/{row['id']}",
+                json={"verified": True},
+            )
+            assert signed.status_code == 200
+        done = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "Complete"}
+        )
+        assert done.status_code == 200
+        assert (await _add(client_with_seeds, ticket["id"], "Late")).status_code == 409
+        locked = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}", json={"text": "Rewrite"}
+        )
+        assert locked.status_code == 409
+        delete = await client_with_seeds.delete(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}"
+        )
+        assert delete.status_code == 409
+
     async def test_lock_message_explains_the_round_trip(self, client_with_seeds: AsyncClient):
         ticket = await self._in_progress_story(client_with_seeds)
         response = await _add(client_with_seeds, ticket["id"], "Late")
@@ -301,6 +346,15 @@ class TestCriteriaSignoff:
         )
         assert response.status_code == 200
 
+    async def test_sign_off_is_rejected_while_open(self, client_with_seeds: AsyncClient):
+        ticket = await _story(client_with_seeds)
+        row = (await _add(client_with_seeds, ticket["id"], "It works")).json()
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{row['id']}", json={"verified": True}
+        )
+        assert response.status_code == 409
+        assert "signed off" in response.json()["detail"]
+
     async def test_sign_off_is_rejected_while_groomed(self, client_with_seeds: AsyncClient):
         ticket = await _story(client_with_seeds)
         assert (
@@ -337,6 +391,19 @@ class TestCriteriaSignoff:
             f"/api/v1/tickets/{ticket['id']}/criteria/{cid}", json={"verified": False}
         )
         assert response.status_code == 409
+
+    async def test_sign_off_is_rejected_once_rejected(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_in_progress(client_with_seeds)
+        rejected = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "Rejected"}
+        )
+        assert rejected.status_code == 200
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}", json={"verified": True}
+        )
+        assert response.status_code == 409
+        assert "signed off" in response.json()["detail"]
 
     async def test_sign_off_unknown_criterion_is_404(self, client_with_seeds: AsyncClient):
         ticket = await self._story_in_progress(client_with_seeds)
