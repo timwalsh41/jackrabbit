@@ -48,13 +48,24 @@ async def _transition(client: AsyncClient, ticket_id: int, to_status: str) -> No
 
 async def _advance_to_complete(client: AsyncClient, ticket_id: int) -> None:
     """Step a ticket forward through each status to Complete."""
-    for status in ("Groomed", "In Progress", "Ready for Review", "Complete"):
+    for status in ("Groomed", "In Progress", "Ready for Review"):
         criteria = ["It works"] if status == "Groomed" else None
         payload = {"to_status": status}
         if criteria is not None:
             payload["criteria"] = criteria
         response = await client.post(f"/api/v1/tickets/{ticket_id}/transition", json=payload)
         assert response.status_code == 200, response.text
+    # The Complete guard (ADR-0025) needs every criterion verified first.
+    rows = (await client.get(f"/api/v1/tickets/{ticket_id}/criteria")).json()
+    for row in rows:
+        signed = await client.patch(
+            f"/api/v1/tickets/{ticket_id}/criteria/{row['id']}", json={"verified": True}
+        )
+        assert signed.status_code == 200, signed.text
+    response = await client.post(
+        f"/api/v1/tickets/{ticket_id}/transition", json={"to_status": "Complete"}
+    )
+    assert response.status_code == 200, response.text
 
 
 async def _links_section_html(client: AsyncClient, ticket_id: int) -> str:

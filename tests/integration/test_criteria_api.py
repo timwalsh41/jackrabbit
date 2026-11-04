@@ -1,5 +1,6 @@
-"""Integration tests for the criteria API: CRUD on /tickets/{id}/criteria and
-the criteria list on the Groomed transition payload (JRB-021, ADR-0025)."""
+"""Integration tests for the criteria API: CRUD on /tickets/{id}/criteria,
+the criteria list on the Groomed transition payload, verifier sign-off, and
+the Complete guard (JRB-021/JRB-022, ADR-0025)."""
 
 from httpx import AsyncClient
 
@@ -241,3 +242,264 @@ class TestCriteriaPrecheck:
             f"/api/v1/tickets/{ticket['id']}/transition/can", params={"to_status": "Groomed"}
         )
         assert response.json()["can_transition"] is True
+
+
+class TestCriteriaSignoff:
+    """PATCH /tickets/{id}/criteria/{cid} with {"verified": ...} flips the
+    sign-off state; allowed only while In Progress or Ready for Review."""
+
+    async def _story_in_progress(self, client: AsyncClient) -> dict:
+        ticket = await _story(client)
+        groomed = await _groom(client, ticket["id"], criteria=["It works", "It is tested"])
+        assert groomed.status_code == 200, groomed.text
+        started = await client.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "In Progress"}
+        )
+        assert started.status_code == 200
+        return ticket
+
+    async def test_sign_off_flips_verified_with_timestamp(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_in_progress(client_with_seeds)
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}", json={"verified": True}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["verified"] is True
+        assert body["verified_at"] is not None
+        # The other criterion is untouched.
+        remaining = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        assert remaining[1]["verified"] is False
+
+    async def test_unverify_clears_the_timestamp(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_in_progress(client_with_seeds)
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        cid = rows[0]["id"]
+        assert (
+            await client_with_seeds.patch(
+                f"/api/v1/tickets/{ticket['id']}/criteria/{cid}", json={"verified": True}
+            )
+        ).status_code == 200
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{cid}", json={"verified": False}
+        )
+        assert response.status_code == 200
+        assert response.json()["verified"] is False
+        assert response.json()["verified_at"] is None
+
+    async def test_sign_off_is_allowed_while_ready_for_review(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_in_progress(client_with_seeds)
+        review = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Ready for Review", "pr_url": "https://github.com/o/r/pull/1"},
+        )
+        assert review.status_code == 200
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}", json={"verified": True}
+        )
+        assert response.status_code == 200
+
+    async def test_sign_off_is_rejected_while_groomed(self, client_with_seeds: AsyncClient):
+        ticket = await _story(client_with_seeds)
+        assert (
+            await _groom(client_with_seeds, ticket["id"], criteria=["It works"])
+        ).status_code == 200
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}", json={"verified": True}
+        )
+        assert response.status_code == 409
+        assert "signed off" in response.json()["detail"]
+
+    async def test_sign_off_is_rejected_once_complete(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_in_progress(client_with_seeds)
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        cid = rows[0]["id"]
+        for row in rows:
+            assert (
+                await client_with_seeds.patch(
+                    f"/api/v1/tickets/{ticket['id']}/criteria/{row['id']}",
+                    json={"verified": True},
+                )
+            ).status_code == 200
+        review = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Ready for Review"},
+        )
+        assert review.status_code == 200
+        done = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "Complete"}
+        )
+        assert done.status_code == 200
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{cid}", json={"verified": False}
+        )
+        assert response.status_code == 409
+
+    async def test_sign_off_unknown_criterion_is_404(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_in_progress(client_with_seeds)
+        response = await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/9999", json={"verified": True}
+        )
+        assert response.status_code == 404
+
+
+class TestCompleteGuardApi:
+    """Ready for Review -> Complete fails while any criterion is unverified;
+    Spike and zero-criterion tickets are exempt (ADR-0025)."""
+
+    async def _story_ready_for_review(self, client: AsyncClient, type: str = "Story") -> dict:
+        ticket = await _story(client, type=type)
+        if type in ("Story", "Bug"):
+            groomed = await _groom(client, ticket["id"], criteria=["It works"])
+            assert groomed.status_code == 200, groomed.text
+        else:
+            groomed = await client.post(
+                f"/api/v1/tickets/{ticket['id']}/transition",
+                json={"to_status": "Groomed", "reason": "ready"},
+            )
+            assert groomed.status_code == 200, groomed.text
+        started = await client.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "In Progress"}
+        )
+        assert started.status_code == 200
+        review = await client.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Ready for Review"},
+        )
+        assert review.status_code == 200
+        return ticket
+
+    async def test_complete_fails_while_a_criterion_is_unverified(
+        self, client_with_seeds: AsyncClient
+    ):
+        ticket = await self._story_ready_for_review(client_with_seeds)
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "Complete"}
+        )
+        assert response.status_code == 400
+        assert "verified" in response.json()["detail"]
+        assert (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()[
+            "status"
+        ] == "Ready for Review"
+
+    async def test_precheck_reflects_the_complete_guard(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_ready_for_review(client_with_seeds)
+        response = await client_with_seeds.get(
+            f"/api/v1/tickets/{ticket['id']}/transition/can", params={"to_status": "Complete"}
+        )
+        assert response.json()["can_transition"] is False
+        assert "verified" in response.json()["error_message"]
+
+    async def test_complete_passes_once_all_criteria_are_verified(
+        self, client_with_seeds: AsyncClient
+    ):
+        ticket = await self._story_ready_for_review(client_with_seeds)
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        for row in rows:
+            assert (
+                await client_with_seeds.patch(
+                    f"/api/v1/tickets/{ticket['id']}/criteria/{row['id']}",
+                    json={"verified": True},
+                )
+            ).status_code == 200
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Complete", "reason": "merged"},
+        )
+        assert response.status_code == 200
+        assert (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()[
+            "status"
+        ] == "Complete"
+
+    async def test_spike_completes_without_any_criterion(self, client_with_seeds: AsyncClient):
+        ticket = await self._story_ready_for_review(client_with_seeds, type="Spike")
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Complete", "reason": "report accepted"},
+        )
+        assert response.status_code == 200
+
+    async def test_zero_criterion_ticket_completes(self, client_with_seeds: AsyncClient):
+        """A ticket whose only row was removed while Groomed is exempt."""
+        ticket = await _story(client_with_seeds)
+        assert (
+            await _groom(client_with_seeds, ticket["id"], criteria=["Temporary"])
+        ).status_code == 200
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        delete = await client_with_seeds.delete(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}"
+        )
+        assert delete.status_code == 204
+        started = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "In Progress"}
+        )
+        assert started.status_code == 200
+        review = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Ready for Review"},
+        )
+        assert review.status_code == 200
+        response = await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={"to_status": "Complete", "reason": "merged"},
+        )
+        assert response.status_code == 200
+
+
+class TestCriteriaHistoryInDetail:
+    """Adds, edits, and sign-offs each produce a history entry, exposed on
+    the ticket detail payload with timestamp and criterion text (ADR-0025)."""
+
+    async def _in_progress_story(self, client: AsyncClient) -> dict:
+        ticket = await _story(client)
+        groomed = await _groom(client, ticket["id"], criteria=["It works"])
+        assert groomed.status_code == 200, groomed.text
+        started = await client.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "In Progress"}
+        )
+        assert started.status_code == 200
+        return ticket
+
+    async def test_add_edit_signoff_produce_history_entries(self, client_with_seeds: AsyncClient):
+        ticket = await _story(client_with_seeds)
+        row = (await _add(client_with_seeds, ticket["id"], "It works")).json()
+        await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{row['id']}", json={"text": "Revised"}
+        )
+        await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition",
+            json={
+                "to_status": "Groomed",
+                "approach": "A",
+                "files_to_change": "f",
+                "test_plan": "P",
+                "validation_steps": "V",
+                "criteria": ["Revised"],
+            },
+        )
+        await client_with_seeds.post(
+            f"/api/v1/tickets/{ticket['id']}/transition", json={"to_status": "In Progress"}
+        )
+        # The Groomed replace re-created the rows: sign off the current one.
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        await client_with_seeds.patch(
+            f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}", json={"verified": True}
+        )
+
+        detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        events = [(entry["event"], entry["text"]) for entry in detail["criteria_history"]]
+        assert ("added", "It works") in events
+        assert ("edited", "Revised") in events
+        assert ("added", "Revised") in events
+        assert ("verified", "Revised") in events
+        assert all(entry["at"] for entry in detail["criteria_history"])
+
+    async def test_detail_payload_carries_the_checklist_state(self, client_with_seeds: AsyncClient):
+        ticket = await self._in_progress_story(client_with_seeds)
+        detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        assert [c["text"] for c in detail["criteria"]] == ["It works"]
+        assert detail["criteria"][0]["verified"] is False
+        assert detail["criteria"][0]["verified_at"] is None

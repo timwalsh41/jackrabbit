@@ -22,6 +22,7 @@ from jackrabbit.models import (
 from jackrabbit.schemas import (
     CanTransitionResponse,
     CriterionCreate,
+    CriterionHistoryRead,
     CriterionRead,
     CriterionUpdate,
     LabelCreate,
@@ -645,6 +646,10 @@ def get_ticket(
         project_prefix=result["project_prefix"],
         links=result["links"],
         transitions=result["transitions"],
+        criteria=[CriterionRead.model_validate(row) for row in result["criteria"]],
+        criteria_history=[
+            CriterionHistoryRead.model_validate(entry) for entry in result["criteria_history"]
+        ],
         labels=_label_reads(label_service.labels_for_ticket(ticket_id)),
     )
 
@@ -1091,17 +1096,25 @@ def update_criterion(
     criterion_service: CriterionService = Depends(get_criterion_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> TicketCriterion:
-    """Update a criterion's text and/or ordinal position."""
+    """Update a criterion's text and/or ordinal position, or sign it off.
+
+    A body with ``verified`` is the verifier's sign-off (ADR-0025): allowed
+    only while the ticket is In Progress or Ready for Review. Text/position
+    edits keep the Open/Groomed gate.
+    """
     ticket = ticket_service.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     try:
-        row = criterion_service.update_criterion(
-            ticket,
-            criterion_id,
-            text=criterion_in.text,
-            position=criterion_in.position,
-        )
+        if criterion_in.verified is not None:
+            row = criterion_service.sign_off(ticket, criterion_id, criterion_in.verified)
+        else:
+            row = criterion_service.update_criterion(
+                ticket,
+                criterion_id,
+                text=criterion_in.text,
+                position=criterion_in.position,
+            )
     except CriterionLockedError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:

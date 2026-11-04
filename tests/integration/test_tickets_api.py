@@ -617,7 +617,16 @@ class TestTicketsTransitions:
         data = (await client_with_seeds.get(f"/api/v1/tickets/{ticket_id}")).json()
         assert data["pr_url"] == "https://github.com/test/repo/pull/42"
 
-        # Ready for Review -> Complete (unguarded)
+        # Ready for Review -> Complete: guarded on verified criteria (ADR-0025)
+        response = await _transition(client_with_seeds, ticket_id, "Complete", reason="done")
+        assert response.status_code == 400
+        assert "verified" in response.json()["detail"]
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket_id}/criteria")).json()
+        for row in rows:
+            signed = await client_with_seeds.patch(
+                f"/api/v1/tickets/{ticket_id}/criteria/{row['id']}", json={"verified": True}
+            )
+            assert signed.status_code == 200, signed.text
         response = await _transition(client_with_seeds, ticket_id, "Complete", reason="done")
         assert response.status_code == 200
         data = (await client_with_seeds.get(f"/api/v1/tickets/{ticket_id}")).json()

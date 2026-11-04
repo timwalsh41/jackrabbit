@@ -349,11 +349,14 @@ class TicketRead(TicketBase):
 
 
 class TicketReadWithDetails(TicketRead):
-    """Ticket with links and transitions for detailed view."""
+    """Ticket with links, transitions, criteria and criteria history for the
+    detailed view (ADR-0025)."""
 
     project_prefix: str
     links: list["TicketLinkRead"] = []
     transitions: list[dict] = []
+    criteria: list["CriterionRead"] = []
+    criteria_history: list["CriterionHistoryRead"] = []
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -397,14 +400,29 @@ class CriterionCreate(BaseModel):
 
 
 class CriterionUpdate(BaseModel):
-    """Update a criterion's text and/or move it to a new ordinal position.
+    """Update a criterion's text, move it to a new ordinal position, or flip
+    its verified sign-off state (ADR-0025).
 
-    Both fields are optional; omitted fields are left untouched. Verified
-    state is not settable here (sign-off is the verifier's action).
+    All fields are optional; omitted fields are left untouched. Text/position
+    edits are allowed only while the ticket is Open/Groomed; the ``verified``
+    flip is the independent verifier's sign-off, allowed only while In
+    Progress or Ready for Review. Text/position are ignored when ``verified``
+    is supplied (the sign-off gate would reject the edit in every status
+    where sign-off is allowed, so a combined request can never half-apply).
     """
 
     text: str | None = None
     position: int | None = Field(default=None, ge=0)
+    verified: bool | None = None
+
+
+class CriterionHistoryRead(BaseModel):
+    """A criterion audit entry (add/edit/sign-off) on a ticket (ADR-0025)."""
+
+    id: int
+    event: str
+    text: str
+    at: datetime | None = None
 
 
 class CriterionRead(BaseModel):
