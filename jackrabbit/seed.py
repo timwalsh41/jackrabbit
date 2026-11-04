@@ -16,6 +16,7 @@ data carries genuine audit history instead of a faked status column.
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from typing import cast
 
 from sqlalchemy import text
 from sqlmodel import Session, select
@@ -30,7 +31,13 @@ from jackrabbit.models import (
     TicketStatus,
     TicketType,
 )
-from jackrabbit.services import LinkService, ProjectService, SprintService, TicketService
+from jackrabbit.services import (
+    CriterionService,
+    LinkService,
+    ProjectService,
+    SprintService,
+    TicketService,
+)
 
 # Written into every seeded ticket's description so seeded rows stay
 # recognisable next to hand-created ones.
@@ -383,6 +390,12 @@ class _Seeder:
                     criteria = [_DEMO_CRITERION]
             elif status == TicketStatus.READY_FOR_REVIEW:
                 self.tickets.update_ticket(ticket, pr_url=_PR_URL)
+            elif status == TicketStatus.COMPLETE and ticket.criteria:
+                # The Complete guard (ADR-0025) requires every criterion
+                # verified first; the seeded verifier signs them off here.
+                criterion_service = CriterionService(self.session)
+                for row in criterion_service.list_criteria(ticket):
+                    criterion_service.sign_off(ticket, cast(int, row.id), True)
             self.tickets.transition(
                 ticket, status, reason=f"seeded: now {status.value}", criteria=criteria
             )

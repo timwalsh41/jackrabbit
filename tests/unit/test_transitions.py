@@ -661,6 +661,10 @@ class TestTransition:
         ticket_service.session.add(test_ticket)
         ticket_service.session.commit()
         ticket_service.transition(test_ticket, TicketStatus.READY_FOR_REVIEW, "PR opened")
+        # The Complete guard (ADR-0025) requires every criterion verified first.
+        criterion_service = CriterionService(ticket_service.session)
+        for row in criterion_service.list_criteria(test_ticket):
+            criterion_service.sign_off(test_ticket, row.id, True)
         ticket_service.transition(test_ticket, TicketStatus.COMPLETE, "Merged")
 
         transitions = ticket_service.session.exec(
@@ -719,7 +723,8 @@ class TestAllTransitionCombinations:
             test_ticket.validation_steps = "Steps"
             test_ticket.branch_name = "feature/test"
             test_ticket.pr_url = "https://github.com/org/repo/pull/123"
-        # Ready for Review -> Complete: no automatic guard (manual confirmation)
+        # Ready for Review -> Complete: verify the criteria so the Complete
+        # guard (ADR-0025) passes
         elif from_status == TicketStatus.READY_FOR_REVIEW and to_status == TicketStatus.COMPLETE:
             test_ticket.approach = "Approach"
             test_ticket.files_to_change = "files"
@@ -727,6 +732,9 @@ class TestAllTransitionCombinations:
             test_ticket.validation_steps = "Steps"
             test_ticket.branch_name = "feature/test"
             test_ticket.pr_url = "https://github.com/org/repo/pull/123"
+            criterion_service = CriterionService(ticket_service.session)
+            for row in criterion_service.list_criteria(test_ticket):
+                criterion_service.sign_off(test_ticket, row.id, True)
         # For backward transitions and Rejected transitions, set up with all fields
         else:
             # Set all fields so backward/Rejected transitions work
