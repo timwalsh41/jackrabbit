@@ -31,6 +31,10 @@ The server will start on port 8080 (or the PORT from .env).
 - API: http://localhost:8080/api/v1/
 - API Docs: http://localhost:8080/docs
 
+## Agent Usage
+
+Point your agent at `AGENT-INSTRUCTIONS.md` to orient it to the use of Jackrabbit. Make sure to set the Jackrabbit URL/port appropriately for your setup.
+
 ## CLI Commands
 
 ```bash
