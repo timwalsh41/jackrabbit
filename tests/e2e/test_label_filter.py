@@ -8,6 +8,7 @@ Label names and ticket titles are run-unique: the e2e server keeps its state
 for the whole run, so a fixed name would also match an earlier test's ticket.
 """
 
+import re
 import uuid
 
 import httpx
@@ -243,7 +244,13 @@ class TestLabelFilterSurvivesSortingAndPaging:
         _check_label(page, label_id)
         _apply(page)
 
-        assert f"label_ids={label_id}" in page.url
+        # The URL rewrite is a side effect of the htmx exchange (the form's
+        # hx-push-url): htmx pushes the request URL only after a successful
+        # swap, so the URL is a moment behind the click and, on a failed
+        # exchange, never catches up at all. A single-shot assert cannot tell
+        # those cases apart (CI 41951001175 flaked here: bare /backlog read
+        # right after the submit), so poll until it settles.
+        expect(page).to_have_url(re.compile(rf"label_ids={label_id}\b"))
 
         # The bookmarked URL restores the filter.
         page.goto(page.url)

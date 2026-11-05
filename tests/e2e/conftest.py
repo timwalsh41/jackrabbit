@@ -10,6 +10,7 @@ Options:
 """
 
 import os
+import re
 import socket
 import subprocess
 import time
@@ -470,6 +471,10 @@ def test_server(tmp_path_factory: pytest.TempPathFactory) -> Generator[str, None
     url = f"http://127.0.0.1:{port}"
     data_dir = tmp_path_factory.mktemp("e2e-data")
     log_path = data_dir / "server.log"
+    # Remembered for the failure-artifact hook: the temp dir is wiped with
+    # the run, so the log has to be copied out while tests can still fail.
+    global SERVER_LOG_PATH
+    SERVER_LOG_PATH = log_path
 
     # Inherit the ambient environment, then pin the settings that would
     # otherwise steer the server onto the developer's real database or a
@@ -673,6 +678,59 @@ def network_failures(page: Page) -> list:
     page.on("response", handle_response)
     yield failures
     page.remove_listener("response", handle_response)
+
+
+# ---- failure artifacts (test-results/) ----
+#
+# CI uploads test-results/ on every run, but nothing used to write there
+# (the opt-in screenshot fixture below went unused), so a failed run
+# shipped no evidence: run 41951001175 failed with an empty artifact list.
+# This hook writes, for every failing e2e test, a full-page screenshot of
+# the live page and the tail of the e2e server's log. The log matters
+# most: the per-run DATA_DIR lives under pytest's temp root, so without
+# this a transient server-side error (e.g. the one-off failed filter
+# response that left the URL push undone) is invisible by the time anyone
+# looks at a red run.
+
+SERVER_LOG_PATH: Path | None = None
+
+
+def _artifact_name(nodeid: str) -> str:
+    """Filesystem-safe name for a test's artifact files."""
+    return re.sub(r"[^\w.-]+", "_", nodeid)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call) -> object:
+    """Drop diagnostic artifacts next to every failing e2e test."""
+    report = yield
+    if report.when != "call" or not report.failed:
+        return report
+
+    artifacts = Path("test-results")
+    artifacts.mkdir(parents=True, exist_ok=True)
+    name = _artifact_name(item.nodeid)
+
+    # The page as the failure happened. Best effort: the page fixture may
+    # already be closing, and the server-log dump below must not depend on
+    # the screenshot succeeding.
+    page = item.funcargs.get("page")
+    if page is not None:
+        try:
+            page.screenshot(path=str(artifacts / f"{name}.png"), full_page=True)
+        except Exception:  # noqa: BLE001 - artifact capture never fails a test
+            pass
+
+    # What the server did while the test was failing (tail only: the log is
+    # quiet at WARNING level, so the whole file stays small).
+    if SERVER_LOG_PATH is not None:
+        try:
+            tail = SERVER_LOG_PATH.read_text(errors="replace")[-8000:]
+            (artifacts / f"server-log-{name}.log").write_text(tail, errors="replace")
+        except OSError:  # pragma: no cover - best effort
+            pass
+
+    return report
 
 
 # Screenshot utilities
