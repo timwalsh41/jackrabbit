@@ -5,7 +5,9 @@
  * the trimmed, non-empty row values replace the form's `criteria` parameter:
  * when the rows are unchanged from the server-rendered snapshot the
  * parameter is dropped entirely, so a plain field save neither replaces the
- * rows nor trips the criteria-locked guard for a ticket past Groomed.
+ * rows nor trips the criteria-locked guard for a ticket past Groomed. The
+ * inline replacement form opts in to always sending the list, including when
+ * that list is unchanged or empty.
  */
 (function () {
     "use strict";
@@ -55,6 +57,14 @@
         return row;
     }
 
+    function appendRow(field, rows, shouldFocus) {
+        rows.appendChild(makeRow(field));
+        if (shouldFocus) {
+            var inputs = rows.querySelectorAll("input[name='criteria']");
+            inputs[inputs.length - 1].focus();
+        }
+    }
+
     function initField(field) {
         if (field.getAttribute("data-criteria-ready") === "1") {
             return;
@@ -70,10 +80,15 @@
 
         if (add) {
             add.addEventListener("click", function () {
-                rows.appendChild(makeRow(field));
-                var inputs = rows.querySelectorAll("input[name='criteria']");
-                inputs[inputs.length - 1].focus();
+                appendRow(field, rows, true);
             });
+        }
+
+        if (field.getAttribute("data-criteria-focus-last") === "true") {
+            var existingInputs = rows.querySelectorAll("input[name='criteria']");
+            if (existingInputs.length > 0) {
+                existingInputs[existingInputs.length - 1].focus();
+            }
         }
 
         rows.addEventListener("click", function (event) {
@@ -90,7 +105,8 @@
         form.addEventListener("htmx:configRequest", function (event) {
             var values = currentValues(field);
             var original = originalCriteria(field);
-            if (original !== null && JSON.stringify(original) === JSON.stringify(values)) {
+            var alwaysReplace = form.getAttribute("data-criteria-replace") === "true";
+            if (!alwaysReplace && original !== null && JSON.stringify(original) === JSON.stringify(values)) {
                 // Unchanged from the server-rendered rows: submit nothing, so
                 // the server leaves the existing rows untouched.
                 delete event.detail.parameters.criteria;

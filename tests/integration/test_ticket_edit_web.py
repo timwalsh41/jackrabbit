@@ -149,7 +149,7 @@ class TestEditFormCriteria:
             assert response.status_code == 200, response.text
         return ticket
 
-    async def test_story_edit_form_shows_criteria_asterisk_and_prefilled_rows(
+    async def test_story_edit_form_shows_plain_criteria_label_and_prefilled_rows(
         self, client: httpx.AsyncClient
     ):
         ticket = await self._story_with_criteria(client, ["Write the report"])
@@ -158,7 +158,7 @@ class TestEditFormCriteria:
         html = response.text
         assert "Acceptance criteria" in html
         header = html[html.index("Acceptance criteria") : html.index("Acceptance criteria") + 200]
-        assert 'class="text-red-500"' in header
+        assert 'class="text-red-500"' not in header
         assert "Add criterion" in html
         assert 'value="Write the report"' in html
 

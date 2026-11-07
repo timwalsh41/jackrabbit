@@ -31,7 +31,7 @@ class TestCriterionChecklist:
         page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
 
         boxes = page.locator("#criteria-checklist input[type='checkbox']")
-        assert boxes.count() == 2
+        expect(boxes).to_have_count(2)
         for i in range(boxes.count()):
             assert boxes.nth(i).is_checked() is False
             assert boxes.nth(i).is_disabled() is False
@@ -66,7 +66,7 @@ class TestCriterionChecklist:
         page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
 
         boxes = page.locator("#criteria-checklist input[type='checkbox']")
-        assert boxes.count() == 2
+        expect(boxes).to_have_count(2)
         for i in range(boxes.count()):
             assert boxes.nth(i).is_disabled() is True
 
@@ -102,7 +102,7 @@ class TestCompleteGuardUI:
         # The verifier signs off both criteria via the checklist.
         page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
         boxes = page.locator("#criteria-checklist input[type='checkbox']")
-        assert boxes.count() == 2
+        expect(boxes).to_have_count(2)
         page.check("#criteria-checklist .criterion-row >> nth=0 >> input[type='checkbox']")
         expect(page.locator("#criteria-checklist .criterion-tick").first).to_be_visible()
         page.check("#criteria-checklist .criterion-row >> nth=1 >> input[type='checkbox']")

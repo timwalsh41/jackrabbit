@@ -26,8 +26,9 @@ from jackrabbit.models import (
     TicketStatus,
     TicketType,
 )
-from jackrabbit.schemas import ProjectCreate, ProjectUpdate
+from jackrabbit.schemas import CriteriaReplace, ProjectCreate, ProjectUpdate
 from jackrabbit.services import (
+    CriterionLockedError,
     CriterionService,
     FilterMode,
     LabelService,
@@ -1330,6 +1331,95 @@ async def ticket_create_child_modal(
             "label_suggestions": label_service.list_labels_in_use(),
         },
     )
+
+
+def _criteria_section_response(
+    request: Request, ticket: Ticket, criteria_service: CriterionService
+) -> HTMLResponse:
+    """Render the acceptance-criteria checklist and its state-aware controls."""
+    return templates.TemplateResponse(
+        request,
+        "criteria_section_partial.html",
+        {
+            "ticket": ticket,
+            "criteria": criteria_service.list_criteria(ticket),
+            "criteria_editable": ticket.status in (TicketStatus.OPEN, TicketStatus.GROOMED),
+            "criteria_signoff_allowed": ticket.status
+            in (TicketStatus.IN_PROGRESS, TicketStatus.READY_FOR_REVIEW),
+        },
+    )
+
+
+@router.get("/tickets/{ticket_id}/criteria", response_class=HTMLResponse)
+async def ticket_criteria_section(
+    request: Request,
+    ticket_id: int,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    criteria_service: CriterionService = Depends(get_criterion_service),
+) -> HTMLResponse:
+    """Render the ticket's acceptance-criteria checklist partial."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return _criteria_section_response(request, ticket, criteria_service)
+
+
+@router.get("/tickets/{ticket_id}/criteria/edit", response_class=HTMLResponse)
+async def ticket_criteria_edit_form(
+    request: Request,
+    ticket_id: int,
+    add: bool = Query(False),
+    ticket_service: TicketService = Depends(get_ticket_service),
+    criteria_service: CriterionService = Depends(get_criterion_service),
+) -> HTMLResponse:
+    """Render the inline acceptance-criteria editor for an editable ticket."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    if ticket.status not in (TicketStatus.OPEN, TicketStatus.GROOMED):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Criteria are locked once a ticket is In Progress; cycle back to "
+                "Groomed to edit them"
+            ),
+        )
+
+    original_texts = [row.text for row in criteria_service.list_criteria(ticket)]
+    editor_texts = [*original_texts, ""] if add else original_texts
+    return templates.TemplateResponse(
+        request,
+        "criteria_edit_partial.html",
+        {
+            "ticket": ticket,
+            "criteria_texts": editor_texts,
+            "criteria_focus_last": add,
+            "criteria_editable": True,
+            "criteria_required": False,
+        },
+    )
+
+
+@router.patch("/tickets/{ticket_id}/criteria", response_class=HTMLResponse)
+async def ticket_criteria_update(
+    request: Request,
+    ticket_id: int,
+    criteria_update: CriteriaReplace,
+    ticket_service: TicketService = Depends(get_ticket_service),
+    criteria_service: CriterionService = Depends(get_criterion_service),
+) -> HTMLResponse:
+    """Replace the ticket's full criteria list and return the refreshed section."""
+    ticket = ticket_service.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    try:
+        criteria_service.replace_criteria(ticket, criteria_update.criteria, skip_if_unchanged=True)
+    except CriterionLockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _criteria_section_response(request, ticket, criteria_service)
 
 
 def _fields_section_response(

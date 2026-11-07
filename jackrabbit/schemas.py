@@ -393,6 +393,16 @@ class TicketLinkRead(TicketLinkBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CriteriaReplace(BaseModel):
+    """Replace a ticket's ordered acceptance-criteria list (ADR-0025).
+
+    An empty list is valid while Open/Groomed; the Story/Bug minimum is
+    enforced only by the transition to Groomed.
+    """
+
+    criteria: list[str]
+
+
 class CriterionCreate(BaseModel):
     """A new acceptance criterion row on a ticket (ADR-0025)."""
 

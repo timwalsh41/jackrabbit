@@ -86,7 +86,7 @@
                                       placeholder="Step-by-step validation instructions...">{{ ticket.validation_steps }}</textarea>
                         </div>
 
-                        {% with ticket_type = ticket.type.value, criteria_texts = criteria_texts or [], criteria_editable = criteria_editable %}
+                        {% with ticket_type = ticket.type.value, criteria_texts = criteria_texts or [], criteria_editable = criteria_editable, criteria_required = true %}
                         {% include "criteria_field.html" %}
                         {% endwith %}
 

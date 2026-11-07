@@ -9,16 +9,20 @@
 
    Expected context (set by the route / a wrapping {% with %}):
      ticket_type:       str — the ticket's type value ("Story", "Epic", ...)
-     criteria_texts:    list[str] — the ticket's existing criterion texts
+     criteria_texts:    list[str] — criterion texts shown in the editor
      criteria_editable: bool — False once the ticket has moved past Groomed
                                (rows are locked from In Progress onward)
+     criteria_required: bool — show the red asterisk in the Groomed modal only
+     criteria_focus_last: bool — focus the appended row in the inline Add flow
  #}
 {% set requires_criteria = ticket_type in ['Story', 'Bug'] %}
+{% set show_criteria_required = criteria_required | default(false) %}
 <div class="criteria-field" data-criteria-field
-     data-original-criteria="{{ criteria_texts | map('trim') | list | tojson }}">
+     data-original-criteria="{{ criteria_texts | map('trim') | list | tojson }}"
+     {% if criteria_focus_last | default(false) %}data-criteria-focus-last="true"{% endif %}>
     <div class="flex items-baseline justify-between mb-1">
         <span class="block text-sm font-medium text-gray-700">
-            Acceptance criteria{% if requires_criteria %} <span class="text-red-500">*</span>{% endif %}
+            Acceptance criteria{% if show_criteria_required and requires_criteria %} <span class="text-red-500">*</span>{% endif %}
         </span>
         {% if criteria_editable %}
         <button type="button" data-criteria-add

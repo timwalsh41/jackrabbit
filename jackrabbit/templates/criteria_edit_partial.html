@@ -1,0 +1,18 @@
+<section id="criteria-section" class="pb-4 border-b border-gray-200">
+    <p class="text-xs text-gray-500 mb-2">Editable while Open or Groomed.</p>
+    <form id="criteria-edit-form" data-criteria-replace="true"
+          hx-patch="/tickets/{{ ticket.id }}/criteria"
+          hx-target="#criteria-section" hx-swap="outerHTML"
+          hx-ext="json-enc" hx-headers='{"Content-Type": "application/json"}'>
+        {% with ticket_type = ticket.type.value, criteria_texts = criteria_texts, criteria_editable = criteria_editable, criteria_required = criteria_required, criteria_focus_last = criteria_focus_last %}
+        {% include "criteria_field.html" %}
+        {% endwith %}
+        <div class="flex justify-end gap-2 mt-4">
+            <button type="button" hx-get="/tickets/{{ ticket.id }}/criteria"
+                    hx-target="#criteria-section" hx-swap="outerHTML"
+                    class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+            <button type="submit"
+                    class="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">Save</button>
+        </div>
+    </form>
+</section>

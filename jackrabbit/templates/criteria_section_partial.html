@@ -1,0 +1,40 @@
+<section id="criteria-section" class="pb-4 border-b border-gray-200">
+    <div class="flex items-center justify-between gap-3 mb-2">
+        <h3 class="text-sm font-medium text-gray-900">Acceptance criteria</h3>
+        {% if criteria_editable %}
+        <div class="flex items-center gap-3">
+            <button type="button" hx-get="/tickets/{{ ticket.id }}/criteria/edit"
+                    hx-target="#criteria-section" hx-swap="outerHTML"
+                    class="text-xs font-medium text-indigo-600 hover:text-indigo-500">Edit</button>
+            <button type="button" hx-get="/tickets/{{ ticket.id }}/criteria/edit?add=true"
+                    hx-target="#criteria-section" hx-swap="outerHTML"
+                    class="text-xs font-medium text-indigo-600 hover:text-indigo-500">+ Add</button>
+        </div>
+        {% endif %}
+    </div>
+    <p class="text-xs text-gray-500 mb-2">
+        {% if criteria_editable %}Editable while Open or Groomed.{% else %}Locked from In Progress - cycle back to Groomed to edit.{% endif %}
+    </p>
+    <div id="criteria-error" class="hidden mb-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md" role="alert"></div>
+    <div id="criteria-checklist">
+        {% if criteria %}
+        <ul class="space-y-1">
+            {% for criterion in criteria %}
+            <li class="criterion-row flex items-start gap-3 py-1">
+                <input type="checkbox" id="criterion-check-{{ criterion.id }}"
+                       class="mt-1 h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer"
+                       {% if criterion.verified %}checked{% endif %}
+                       {% if not criteria_signoff_allowed %}disabled{% endif %}
+                       onchange="toggleCriterion({{ ticket.id }}, {{ criterion.id }}, this.checked)">
+                <label for="criterion-check-{{ criterion.id }}" class="text-sm text-gray-700 flex-1">{{ criterion.text }}</label>
+                {% if criterion.verified %}
+                <span class="criterion-tick text-green-600 text-sm whitespace-nowrap">✓ <span class="text-xs text-gray-400" data-criterion-verified-at="{{ criterion.verified_at.isoformat() if criterion.verified_at else '' }}">{{ criterion.verified_at }}</span></span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-gray-500 text-sm">No acceptance criteria yet</p>
+        {% endif %}
+    </div>
+</section>

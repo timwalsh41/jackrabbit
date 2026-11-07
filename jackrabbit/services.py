@@ -1801,7 +1801,11 @@ class CriterionService:
         return True
 
     def replace_criteria(
-        self, ticket: Ticket, texts: Sequence[str], commit: bool = True
+        self,
+        ticket: Ticket,
+        texts: Sequence[str],
+        commit: bool = True,
+        skip_if_unchanged: bool = False,
     ) -> list[TicketCriterion]:
         """Replace the ticket's whole criteria list (ADR-0025).
 
@@ -1809,10 +1813,17 @@ class CriterionService:
         entry leaves the existing rows untouched. With ``commit=False`` the
         change is only staged: the caller commits it together with the
         surrounding transition, or rolls back to discard it. Deletes are
-        flushed before the inserts so a row can reuse a position.
+        flushed before the inserts so a row can reuse a position. When
+        ``skip_if_unchanged`` is True, an identical list keeps its rows and
+        history intact; grooming transitions leave it False to retain their
+        replacement audit behavior.
         """
         cleaned = [self._normalize(text) for text in texts]
         self._ensure_editable(ticket)
+        if skip_if_unchanged:
+            existing_rows = self.list_criteria(ticket)
+            if [row.text for row in existing_rows] == cleaned:
+                return existing_rows
 
         for row in list(ticket.criteria):
             ticket.criteria.remove(row)

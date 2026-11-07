@@ -151,6 +151,28 @@ class TestCriterionCrud:
         rows = criterion_service.list_criteria(open_story)
         assert [row.id for row in rows] == [second.id]
 
+    def test_replace_can_preserve_rows_and_history_when_unchanged(
+        self, criterion_service, session, open_story
+    ):
+        criterion_service.add_criterion(open_story, "It works")
+        criterion_service.add_criterion(open_story, "It is tested")
+        before_rows = criterion_service.list_criteria(open_story)
+        before_history = session.exec(
+            select(TicketCriterionHistory).where(TicketCriterionHistory.ticket_id == open_story.id)
+        ).all()
+
+        after_rows = criterion_service.replace_criteria(
+            open_story,
+            ["It works", "It is tested"],
+            skip_if_unchanged=True,
+        )
+        after_history = session.exec(
+            select(TicketCriterionHistory).where(TicketCriterionHistory.ticket_id == open_story.id)
+        ).all()
+
+        assert [row.id for row in after_rows] == [row.id for row in before_rows]
+        assert [entry.id for entry in after_history] == [entry.id for entry in before_history]
+
 
 class TestCriterionLocking:
     """Rows are editable only while the ticket is Open or Groomed (ADR-0025);
