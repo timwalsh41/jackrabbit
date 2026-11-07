@@ -12,10 +12,14 @@ Jackrabbit offers a lightweight, web-based issue tracking and project/sprint man
 - **Triage roles**: Labels mapped to canonical roles via `/triage/roles` endpoint
 - **Transition metadata**: Branch name, PR URL, and groomed fields recorded during status transitions
 
-## Configuration
+## Usage instructions
 
-- **API base**: `http://localhost:8080/api/v1` (configurable)
-- **Full API docs**: `http://localhost:8080/docs` (OpenAPI 3.1)
+- Accessing the service:
+    - **API base**: `http://localhost:8080/api/v1` (configurable)
+    - **Full API docs**: `http://localhost:8080/docs` (OpenAPI 3.1)
+- Update ticket status appropriately as you proceed through workflow (after grooming, status should be `Groomed`, move ticket to `In Progress` when implementing, to `Ready for Review` when PR is available, and to `Complete` when merged)
+- Triage label mappings are fetched from `GET /api/v1/triage/roles` at setup time. Canonical roles → Jackrabbit label strings.
+- Do not modify sprints (CRUD, move tickets, etc.) without explicit user consent or instruction
 
 ## Groomed fields
 
@@ -26,6 +30,4 @@ Five fields carry the contract for a groomed ticket: `approach`, `files_to_chang
 - **Criteria are signed off per row** — `PATCH /api/v1/tickets/{ticket_id}/criteria/{criterion_id}` with `{"verified": true}`, allowed in `In Progress`/`Ready for Review` — and they **gate `Complete`**: `Ready for Review → Complete` fails while any criterion is unverified (`Spike` and zero-criterion tickets exempt).
 - **Scope**: grooming changes status and these fields **only** — it does not apply triage labels (`triage:needs-triage` and the rest), and branch name and PR URL belong to the `In Progress` and `Ready for Review` transitions, not grooming.
 
-## Triage Label Mapping
 
-Fetched from `GET /api/v1/triage/roles` at setup time. Canonical roles → Jackrabbit label strings.
