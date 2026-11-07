@@ -1,5 +1,7 @@
 # Jackrabbit Issue Tracker
 
+Jackrabbit offers a lightweight, web-based issue tracking and project/sprint management system. This document describes its capabilities and where to find documentation.
+
 ## Capabilities
 
 - **Ticket CRUD**: Create, read, update tickets via API
@@ -13,24 +15,16 @@
 ## Configuration
 
 - **API base**: `http://localhost:8080/api/v1` (configurable)
-- **Project**: Selected during setup
 - **Full API docs**: `http://localhost:8080/docs` (OpenAPI 3.1)
 
-## When a skill says "groom a ticket"
+## Groomed fields
 
-Used by `/groom`. Groomed tickets carry four implementation fields and move to the `Groomed` status so `/implement` can pick them up (`Groomed → In Progress`).
+Five fields carry the contract for a groomed ticket: `approach`, `files_to_change`, `test_plan`, `validation_steps`, and `criteria` — the acceptance criteria, a list of strings saying what *done* means. All five are **required** for `Story` and `Bug` (`criteria` needs at least one entry); `Epic` and `Spike` are exempt.
 
-- **The groomed fields** (Jackrabbit API field names): `approach`, `files_to_change`, `test_plan`, `validation_steps`. They ride on the status transition below, or can be set with `PATCH /api/v1/tickets/{ticket_id}`.
-- **The transition**: `Open → Groomed`, via `POST /api/v1/tickets/{ticket_id}/transition` with `{"to_status": "Groomed", "approach": "...", "files_to_change": "...", "test_plan": "...", "validation_steps": "..."}`. Pre-check with `GET /api/v1/tickets/{ticket_id}/transition/can?to_status=Groomed`.
-- **Resolve a ticket id**: `/groom <number>` is the tracker number; the full id is `<project_prefix>-<number>` (see `GET /api/v1/tickets/by-id/{project_prefix}/{number}`).
-- **Scope**: ticket status and triage labels are independent. Grooming changes status and the four fields **only**; it does **not** apply triage labels (`triage:needs-triage` and the rest), which are `/triage`'s job.
-- **Transition metadata**: branch name and PR URL belong to the `In Progress` and `Ready for Review` transitions, not grooming; leave them blank here.
-
-## Agent Execution Evidence
-
-Record concise implementation and independent verification reports in the ticket description under `## Agent Execution Evidence`, using separate `### Implementation` and `### Independent Verification` subsections. On reruns, replace only your own subsection. Include the commit when known, criteria evidence, changed files, tests and gate results, and residual gaps.
-
-Fetch the latest ticket immediately before writing, using `GET /api/v1/tickets/by-id/{project_prefix}/{number}`; use its numeric `id` as `ticket_id`. Preserve all existing description content and update only `description` with `PATCH /api/v1/tickets/{ticket_id}`. Do not change acceptance criteria, status, labels, or grooming fields while recording evidence. Keep the full structured acceptance report in the run artifact.
+- **When a skill says "groom a ticket"**: fill the fields and move `Open → Groomed` in one call — `POST /api/v1/tickets/{ticket_id}/transition` with `{"to_status": "Groomed", "approach": "...", "files_to_change": "...", "test_plan": "...", "validation_steps": "...", "criteria": ["...", "..."]}`. The guard checks them **in that call** (or set them with `PATCH /api/v1/tickets/{ticket_id}` while still `Open`); pre-check with `GET /api/v1/tickets/{ticket_id}/transition/can?to_status=Groomed`.
+- **Criteria stay editable only in `Open`/`Groomed`** (`/api/v1/tickets/{ticket_id}/criteria` CRUD): a later change needs a round-trip back through `Groomed`.
+- **Criteria are signed off per row** — `PATCH /api/v1/tickets/{ticket_id}/criteria/{criterion_id}` with `{"verified": true}`, allowed in `In Progress`/`Ready for Review` — and they **gate `Complete`**: `Ready for Review → Complete` fails while any criterion is unverified (`Spike` and zero-criterion tickets exempt).
+- **Scope**: grooming changes status and these fields **only** — it does not apply triage labels (`triage:needs-triage` and the rest), and branch name and PR URL belong to the `In Progress` and `Ready for Review` transitions, not grooming.
 
 ## Triage Label Mapping
 
