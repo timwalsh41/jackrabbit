@@ -457,7 +457,7 @@ def list_sprint_transitions(
     """The sprint's transition history, oldest first (JRB-029)."""
     if not service.get_sprint(sprint_id):
         raise HTTPException(status_code=404, detail="Sprint not found")
-    return service.list_transitions(sprint_id)
+    return [SprintTransitionRead.model_validate(row) for row in service.list_transitions(sprint_id)]
 
 
 @router.delete("/sprints/{sprint_id}", status_code=204)

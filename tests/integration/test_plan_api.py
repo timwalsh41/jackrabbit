@@ -25,7 +25,7 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
     active_start = (now - timedelta(days=5)).isoformat()
     active_end = (now + timedelta(days=10)).isoformat()
 
-    # Planned sprint (no actual_start yet)
+    # Not Started sprint (no actual_start yet)
     sprint1 = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
@@ -37,7 +37,7 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
     )
     sprint1_id = sprint1.json()["id"]
 
-    # Active sprint (actual_start set, no actual_finish)
+    # In Progress sprint (started via the persisted status)
     sprint2 = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
@@ -134,7 +134,7 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
 
     # Check sprints are ordered by planned_start
     assert data["sprints"][0]["number"] == 2603  # Past sprint first (earliest start)
-    assert data["sprints"][1]["number"] == 2602  # Active sprint
+    assert data["sprints"][1]["number"] == 2602  # In Progress sprint
     assert data["sprints"][2]["number"] == 2601  # Future sprint
 
     # Check sprint 2603 (Complete)
@@ -143,17 +143,17 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
     assert sprint_2603["total_tickets"] == 1
     assert sprint_2603["ticket_counts"]["Complete"] == 1
 
-    # Check sprint 2602 (Active)
+    # Check sprint 2602 (In Progress)
     sprint_2602 = next(s for s in data["sprints"] if s["number"] == 2602)
-    assert sprint_2602["status"] == "Active"
+    assert sprint_2602["status"] == "In Progress"
     assert sprint_2602["total_tickets"] == 3
     assert sprint_2602["ticket_counts"]["In_Progress"] == 1
     assert sprint_2602["ticket_counts"]["Ready_for_Review"] == 1
     assert sprint_2602["ticket_counts"]["Complete"] == 1
 
-    # Check sprint 2601 (Planned)
+    # Check sprint 2601 (Not Started)
     sprint_2601 = next(s for s in data["sprints"] if s["number"] == 2601)
-    assert sprint_2601["status"] == "Planned"
+    assert sprint_2601["status"] == "Not Started"
     assert sprint_2601["total_tickets"] == 2
     assert sprint_2601["ticket_counts"]["Open"] == 1
     assert sprint_2601["ticket_counts"]["Groomed"] == 1
@@ -242,7 +242,7 @@ async def test_get_plan_sprint_without_dates(client_with_seeds: AsyncClient) -> 
     data = response.json()
 
     assert len(data["sprints"]) == 1
-    assert data["sprints"][0]["status"] == "Planned"  # No dates, has tickets -> Planned
+    assert data["sprints"][0]["status"] == "Not Started"  # Persisted status, not ticket counts
     assert data["sprints"][0]["total_tickets"] == 1
 
 
@@ -285,7 +285,7 @@ async def test_plan_web_page_with_sprints(client_with_seeds: AsyncClient) -> Non
     assert "Sprint Plan" in content
     assert "2601" in content
     assert "Test Sprint" in content
-    assert "Planned" in content
+    assert "Not Started" in content
     assert "1 tickets" in content
     assert "Open" in content
 

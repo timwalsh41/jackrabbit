@@ -18,6 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # own upgrade/downgrade pin this revision explicitly.
 CRITERIA_MIGRATION_REVISION = "f3b9d7c2a5e1"
 
+# The JRB-025 criterion-history migration's parent (d9c3f7b1a5e8): downgrading
+# to it removes only the ticketcriterionhistory table.
+CRITERION_HISTORY_PARENT_REVISION = "d9c3f7b1a5e8"
+
 
 def _alembic_config(database_url: str) -> Config:
     """Alembic config pointed at a specific database."""
@@ -52,6 +56,7 @@ def test_upgrade_creates_all_tables(tmp_path: Path, monkeypatch):
         "ticketlabel",
         "ticketcriterion",
         "ticketcriterionhistory",
+        "sprinttransition",
     } <= tables
     # The head migration renamed ticket_transition -> transition
     assert "ticket_transition" not in tables
@@ -110,10 +115,11 @@ def test_single_parent_partial_unique_indexes(tmp_path: Path, monkeypatch):
 def test_downgrade_to_criteria_schema_then_reupgrade_round_trip(tmp_path: Path, monkeypatch):
     """Downgrading to the criteria schema migration and back up round-trips.
 
-    The head step is the criterion-history migration; downgrading to the
-    JRB-021 schema revision undoes it and the JRB-024 data migration (whose
-    downgrade is a no-op — checkbox text cannot be reconstructed from rows),
-    while the criterion, label and single-parent bits stay in place."""
+    The head step is now the JRB-029 sprint lifecycle migration; downgrading
+    to the JRB-021 schema revision undoes it, the criterion-history migration
+    and the JRB-024 data migration (whose downgrade is a no-op — checkbox
+    text cannot be reconstructed from rows), while the criterion, label and
+    single-parent bits stay in place."""
     db_path = tmp_path / "roundtrip.db"
     database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -161,9 +167,10 @@ def test_downgrade_to_criteria_schema_then_reupgrade_round_trip(tmp_path: Path, 
         revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     # The 0001 migration seeds the UNS system project; the inserted row must
     # also have survived the downgrade -> re-upgrade round-trip. The round
-    # trip lands back on the head revision (the criterion-history migration).
+    # trip lands back on the head revision (the JRB-029 sprint lifecycle
+    # migration).
     assert prefixes == {"UNS", "RT"}
-    assert revision == "a8c1e5f7b3d9"
+    assert revision == "e7a2b4c6d8f0"
     engine.dispose()
 
 
@@ -199,8 +206,8 @@ def test_full_downgrade_to_base_and_reupgrade(tmp_path: Path, monkeypatch):
 def test_criteria_table_up_and_down(tmp_path: Path, monkeypatch):
     """The JRB-021 migration creates the ticketcriterion table; downgrading to
     its parent removes the table while the labels tables stay in place. The
-    head is now the criterion-history migration, so ``-1`` from head removes
-    only that table; the criteria schema revision is pinned explicitly."""
+    head is now the JRB-029 sprint lifecycle migration, so the criterion-
+    history revision and its parent are pinned explicitly."""
     db_path = tmp_path / "criteria.db"
     database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -215,8 +222,9 @@ def test_criteria_table_up_and_down(tmp_path: Path, monkeypatch):
     assert {"id", "ticket_id", "event", "text", "at"} <= history_columns
     engine.dispose()
 
-    # One step down from head: only the criterion-history table goes.
-    command.downgrade(cfg, "-1")
+    # Down to the criterion-history migration's parent: only the
+    # criterion-history table goes.
+    command.downgrade(cfg, CRITERION_HISTORY_PARENT_REVISION)
     engine = create_engine(database_url)
     tables = _tables(engine)
     assert "ticketcriterion" in tables
