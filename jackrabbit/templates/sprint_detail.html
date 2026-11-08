@@ -19,37 +19,14 @@
                 {% else %}bg-gray-100 text-gray-800{% endif %}">
                 {{ status }}
             </span>
-            {% if status == 'Not Started' %}
-            <form hx-post="/sprints/{{ sprint.id }}/transition?view=board"
-                  hx-target="#sprint-detail-content"
-                  hx-swap="outerHTML"
-                  class="inline">
-                <input type="hidden" name="to_status" value="In Progress">
-                <button type="submit" class="btn btn-sm bg-green-600 text-white hover:bg-green-700">
-                    Start Sprint
-                </button>
-            </form>
-            {% elif status == 'In Progress' %}
-            <form hx-post="/sprints/{{ sprint.id }}/transition?view=board"
-                  hx-target="#sprint-detail-content"
-                  hx-swap="outerHTML"
-                  class="inline">
-                <input type="hidden" name="to_status" value="Complete">
-                <button type="submit" class="btn btn-sm bg-green-600 text-white hover:bg-green-700">
-                    Complete Sprint
-                </button>
-            </form>
-            {% elif status == 'Complete' %}
-            <form hx-post="/sprints/{{ sprint.id }}/transition?view=board"
-                  hx-target="#sprint-detail-content"
-                  hx-swap="outerHTML"
-                  class="inline">
-                <input type="hidden" name="to_status" value="In Progress">
-                <button type="submit" class="btn btn-sm bg-blue-600 text-white hover:bg-blue-700">
-                    Reopen Sprint
-                </button>
-            </form>
-            {% endif %}
+            {#- Shared Start/Complete/Reopen fragment; board-specific context below. -#}
+            {% set view = 'board' %}
+            {% set target = '#sprint-detail-content' %}
+            {% set labels = {'start': 'Start Sprint', 'complete': 'Complete Sprint', 'reopen': 'Reopen Sprint'} %}
+            {% set classes = {'start': 'btn btn-sm bg-green-600 text-white hover:bg-green-700',
+                              'complete': 'btn btn-sm bg-green-600 text-white hover:bg-green-700',
+                              'reopen': 'btn btn-sm bg-blue-600 text-white hover:bg-blue-700'} %}
+            {% include "sprint_transition_actions.html" %}
             <a href="/sprints/{{ sprint.id }}/edit"
                class="text-indigo-600 hover:text-indigo-900 text-sm"
                hx-get="/sprints/{{ sprint.id }}/edit"
