@@ -1,10 +1,17 @@
-"""Unit tests for SprintService: numbering, status derivation, ticket assignment."""
+"""Unit tests for SprintService: numbering, persisted lifecycle status and
+manual transitions (JRB-029, ADR-0026), ticket assignment."""
 
 from datetime import date, datetime, time, timedelta
 
 import pytest
-from jackrabbit.models import Project, TicketStatus
-from jackrabbit.services import ProjectService, SprintService, TicketService
+from jackrabbit.models import Project, SprintStatus, TicketStatus
+from jackrabbit.services import (
+    ProjectService,
+    SprintCompletionBlockedError,
+    SprintService,
+    SprintTransitionError,
+    TicketService,
+)
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine
 
@@ -101,54 +108,42 @@ class TestCreateSprintAutoAssign:
         assert sprint_service.create_sprint().number == 3001
 
 
-class TestSprintStatusDerived:
-    """Status is derived from actual dates (ticket 06):
+class TestSprintStatusPersisted:
+    """Status is a persisted column, never derived from the dates (JRB-029).
 
-    - no actual_start -> Planned
-    - actual_start set, no actual_finish -> Active
-    - actual_finish set -> Complete
+    Only a transition moves it; the actual dates no longer imply anything.
     """
 
-    def test_no_actual_start_is_planned(self, sprint_service):
+    def test_new_sprint_defaults_to_not_started(self, sprint_service):
         sprint = sprint_service.create_sprint(number=2601)
+        assert sprint.status == SprintStatus.NOT_STARTED
         result = sprint_service.get_sprint_with_tickets(sprint.id)
-        assert result["status"] == "Planned"
+        assert result["status"] == SprintStatus.NOT_STARTED
 
-    def test_planned_dates_alone_do_not_start_sprint(self, sprint_service):
-        sprint = sprint_service.create_sprint(
-            number=2601, planned_start=day_offset(-10), planned_end=day_offset(10)
+    def test_status_is_not_re_derived_from_dates_on_read(self, sprint_service):
+        """Reading a sprint never derives status from its dates: a sprint
+        transitioned past Complete and reopened keeps its persisted status
+        even though its actual_finish is cleared (the old derivation would
+        call that Active from actual_start alone)."""
+        sprint = sprint_service.create_sprint(number=2601, status=SprintStatus.IN_PROGRESS)
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        reopened = sprint_service.get_sprint(sprint.id)
+        assert reopened.actual_finish is None
+        assert reopened.status == SprintStatus.IN_PROGRESS
+
+    def test_create_backfills_status_from_actual_dates(self, sprint_service):
+        """Create-only dates seed the status with the migration's backfill rule."""
+        started = sprint_service.create_sprint(number=2601, actual_start=day_offset(-5))
+        assert started.status == SprintStatus.IN_PROGRESS
+        finished = sprint_service.create_sprint(
+            number=2602, actual_start=day_offset(-20), actual_finish=day_offset(-10)
         )
-        result = sprint_service.get_sprint_with_tickets(sprint.id)
-        assert result["status"] == "Planned"
+        assert finished.status == SprintStatus.COMPLETE
 
-    def test_actual_start_without_finish_is_active(self, sprint_service):
-        sprint = sprint_service.create_sprint(number=2601, actual_start=day_offset(-5))
-        result = sprint_service.get_sprint_with_tickets(sprint.id)
-        assert result["status"] == "Active"
-
-    def test_actual_finish_is_complete(self, sprint_service):
-        sprint = sprint_service.create_sprint(
-            number=2601, actual_start=day_offset(-20), actual_finish=day_offset(-10)
-        )
-        result = sprint_service.get_sprint_with_tickets(sprint.id)
-        assert result["status"] == "Complete"
-
-    def test_actual_finish_alone_is_complete(self, sprint_service):
-        sprint = sprint_service.create_sprint(number=2601, actual_finish=day_offset(-1))
-        result = sprint_service.get_sprint_with_tickets(sprint.id)
-        assert result["status"] == "Complete"
-
-    def test_tickets_do_not_drive_status(self, sprint_service, ticket_service, project):
-        """All tickets Complete does NOT make the sprint Complete (actual_finish does)."""
-        sprint = sprint_service.create_sprint(number=2601, actual_start=day_offset(-5))
-        ticket_service.create_ticket(
-            project_id=project.id,
-            title="Done one",
-            status=TicketStatus.COMPLETE,
-            sprint_id=sprint.id,
-        )
-        result = sprint_service.get_sprint_with_tickets(sprint.id)
-        assert result["status"] == "Active"
+    def test_create_with_explicit_status(self, sprint_service):
+        sprint = sprint_service.create_sprint(number=2601, status=SprintStatus.IN_PROGRESS)
+        assert sprint.status == SprintStatus.IN_PROGRESS
 
     def test_missing_sprint_returns_none(self, sprint_service):
         assert sprint_service.get_sprint_with_tickets(9999) is None
@@ -167,7 +162,7 @@ class TestSprintStatusDerived:
             project_id=project.id, title="Open one", sprint_id=sprint.id, status=TicketStatus.OPEN
         )
         result = sprint_service.get_sprint_with_tickets_by_status(sprint.id)
-        assert result["status"] == "Planned"
+        assert result["status"] == SprintStatus.NOT_STARTED
         assert len(result["tickets_by_status"]["Open"]) == 1
         assert len(result["tickets_by_status"]["Complete"]) == 0
 
@@ -209,6 +204,173 @@ class TestSprintStatusDerived:
         sprint = sprint_service.create_sprint(number=2601)
         result = sprint_service.get_sprint_with_tickets(sprint.id)
         assert all(g == [] for g in result["tickets_by_status"].values())
+
+
+class TestSprintTransitionLegality:
+    """Only the three lifecycle moves are legal; everything else is refused
+    with the sprint left unchanged (JRB-029, criterion 2)."""
+
+    LEGAL = {
+        (SprintStatus.NOT_STARTED, SprintStatus.IN_PROGRESS),
+        (SprintStatus.IN_PROGRESS, SprintStatus.COMPLETE),
+        (SprintStatus.COMPLETE, SprintStatus.IN_PROGRESS),
+    }
+    ALL = set(SprintStatus)
+
+    @pytest.mark.parametrize("from_status", list(ALL))
+    @pytest.mark.parametrize("to_status", list(ALL))
+    def test_transition_matrix(self, sprint_service, from_status, to_status):
+        if (from_status, to_status) in self.LEGAL:
+            pytest.skip("legal move covered by TestSprintTransitionEffects")
+
+        sprint = sprint_service.create_sprint(number=2601, status=from_status)
+        with pytest.raises(SprintTransitionError):
+            sprint_service.transition(sprint.id, to_status)
+        # Refused moves leave the sprint unchanged
+        unchanged = sprint_service.get_sprint(sprint.id)
+        assert unchanged.status == from_status
+
+    def test_transition_missing_sprint_raises(self, sprint_service):
+        with pytest.raises(ValueError, match="not found"):
+            sprint_service.transition(9999, SprintStatus.IN_PROGRESS)
+
+
+class TestSprintTransitionEffects:
+    """Accepted transitions write the dates and append history (criterion 3, 6)."""
+
+    def test_start_sets_actual_start_overwriting_existing(
+        self, sprint_service, ticket_service, project
+    ):
+        # Explicit NOT_STARTED with a stale date: only create may seed dates,
+        # so the overwrite case needs the explicit status to bypass backfill.
+        sprint = sprint_service.create_sprint(
+            number=2601, actual_start=day_offset(-30), status=SprintStatus.NOT_STARTED
+        )
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS, reason="kick off")
+        started = sprint_service.get_sprint(sprint.id)
+        assert started.status == SprintStatus.IN_PROGRESS
+        assert started.actual_start == datetime.combine(date.today(), time(0, 0))
+
+    def test_complete_sets_actual_finish_overwriting_existing(self, sprint_service):
+        stale_finish = day_offset(-10)
+        sprint = sprint_service.create_sprint(
+            number=2601,
+            actual_start=day_offset(-30),
+            actual_finish=stale_finish,
+            status=SprintStatus.IN_PROGRESS,
+        )
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        finished = sprint_service.get_sprint(sprint.id)
+        assert finished.status == SprintStatus.COMPLETE
+        assert finished.actual_finish == datetime.combine(date.today(), time(0, 0))
+        assert finished.actual_finish != stale_finish
+
+    def test_reopen_clears_finish_keeps_start(self, sprint_service):
+        original_start = day_offset(-30)
+        sprint = sprint_service.create_sprint(
+            number=2601, actual_start=original_start, status=SprintStatus.IN_PROGRESS
+        )
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        reopened = sprint_service.get_sprint(sprint.id)
+        assert reopened.status == SprintStatus.IN_PROGRESS
+        assert reopened.actual_finish is None
+        assert reopened.actual_start == original_start
+
+    def test_every_accepted_transition_appends_one_history_row(self, sprint_service):
+        sprint = sprint_service.create_sprint(number=2601)
+        before = len(sprint_service.list_transitions(sprint.id))
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS, reason="start")
+        history = sprint_service.list_transitions(sprint.id)
+        assert len(history) == before + 1
+        row = history[-1]
+        assert row.from_status == SprintStatus.NOT_STARTED
+        assert row.to_status == SprintStatus.IN_PROGRESS
+        assert row.reason == "start"
+        assert row.at is not None
+
+    def test_history_starts_empty_for_backfilled_sprint(self, sprint_service):
+        sprint = sprint_service.create_sprint(
+            number=2601, actual_start=day_offset(-20), actual_finish=day_offset(-10)
+        )
+        assert sprint.status == SprintStatus.COMPLETE
+        assert sprint_service.list_transitions(sprint.id) == []
+
+    def test_transitions_ordered_oldest_first(self, sprint_service):
+        sprint = sprint_service.create_sprint(number=2601)
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS, reason="a")
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE, reason="b")
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS, reason="c")
+        history = sprint_service.list_transitions(sprint.id)
+        assert [h.reason for h in history] == ["a", "b", "c"]
+        assert [h.to_status for h in history] == [
+            SprintStatus.IN_PROGRESS,
+            SprintStatus.COMPLETE,
+            SprintStatus.IN_PROGRESS,
+        ]
+
+
+class TestSprintCompletionGuard:
+    """Completion is refused while Open/Groomed/In Progress/Ready for Review
+    tickets remain - the refusal names them; Complete/Rejected do not block
+    (JRB-029, criterion 5)."""
+
+    BLOCKING_STATUSES = [
+        TicketStatus.OPEN,
+        TicketStatus.GROOMED,
+        TicketStatus.IN_PROGRESS,
+        TicketStatus.READY_FOR_REVIEW,
+    ]
+
+    @pytest.mark.parametrize("ticket_status", BLOCKING_STATUSES)
+    def test_blocking_ticket_refuses_completion(
+        self, sprint_service, ticket_service, project, ticket_status
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket_service.create_ticket(
+            project_id=project.id, title="Blocker", sprint_id=sprint.id, status=ticket_status
+        )
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        with pytest.raises(SprintCompletionBlockedError, match="Blocker"):
+            sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        # The sprint stays In Progress
+        assert sprint_service.get_sprint(sprint.id).status == SprintStatus.IN_PROGRESS
+
+    def test_refusal_names_the_blocking_tickets(self, sprint_service, ticket_service, project):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket_service.create_ticket(project_id=project.id, title="One open", sprint_id=sprint.id)
+        ticket_service.create_ticket(
+            project_id=project.id,
+            title="One groomed",
+            sprint_id=sprint.id,
+            status=TicketStatus.GROOMED,
+        )
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        with pytest.raises(SprintCompletionBlockedError, match="2 ticket") as excinfo:
+            sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        assert "One open" in str(excinfo.value)
+        assert "One groomed" in str(excinfo.value)
+
+    @pytest.mark.parametrize("terminal", [TicketStatus.COMPLETE, TicketStatus.REJECTED])
+    def test_terminal_tickets_do_not_block_completion(
+        self, sprint_service, ticket_service, project, terminal
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket_service.create_ticket(
+            project_id=project.id,
+            title="Terminal one",
+            sprint_id=sprint.id,
+            status=terminal,
+        )
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        assert sprint_service.get_sprint(sprint.id).status == SprintStatus.COMPLETE
+
+    def test_empty_sprint_can_be_completed(self, sprint_service):
+        sprint = sprint_service.create_sprint(number=2601)
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        assert sprint_service.get_sprint(sprint.id).status == SprintStatus.COMPLETE
 
 
 class TestAssignTicketToSprint:
@@ -317,17 +479,16 @@ class TestSprintCrud:
         assert updated.name == "Renamed"
         assert updated.planned_start == day_offset(1)
 
-    def test_update_sprint_actual_dates_and_duration(self, sprint_service):
+    def test_update_sprint_no_longer_writes_actual_dates(self, sprint_service):
+        """The actual dates are transition-owned: update_sprint cannot touch
+        them, and the persisted status stays whatever the transitions made it
+        (JRB-029, criterion 4)."""
         sprint = sprint_service.create_sprint(number=2601)
-        updated = sprint_service.update_sprint(
-            sprint.id,
-            planned_duration_days=10,
-            actual_start=day_offset(-5),
-            actual_finish=day_offset(5),
-        )
+        updated = sprint_service.update_sprint(sprint.id, planned_duration_days=10)
         assert updated.planned_duration_days == 10
-        assert updated.actual_start == day_offset(-5)
-        assert updated.actual_finish == day_offset(5)
+        assert updated.actual_start is None
+        assert updated.actual_finish is None
+        assert updated.status == SprintStatus.NOT_STARTED
 
     def test_update_missing_sprint_returns_none(self, sprint_service):
         assert sprint_service.update_sprint(9999, name="Nope") is None

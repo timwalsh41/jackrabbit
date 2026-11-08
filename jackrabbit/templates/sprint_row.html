@@ -1,3 +1,7 @@
+{#- One Sprints-list row. Expects `sprint`, `tickets`, `status` (and optional
+    `error`, set when a lifecycle transition was refused) in the context.
+    Rendered directly by GET /sprints (via sprint_list_partial.html) and
+    re-rendered by POST /sprints/{id}/transition after Start/Complete/Reopen. -#}
 <tr class="hover:bg-gray-50" id="sprint-row-{{ sprint.id }}">
     <td class="px-6 py-4 whitespace-nowrap">
         <span class="font-mono text-sm font-medium text-gray-900">{{ sprint.number }}</span>
@@ -7,27 +11,32 @@
         {% if sprint.description %}
         <p class="text-xs text-gray-500 truncate max-w-xs">{{ sprint.description }}</p>
         {% endif %}
+        {% if error %}
+        <p class="mt-1 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1" role="alert">
+            {{ error }}
+        </p>
+        {% endif %}
     </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-            <div class="text-sm text-gray-700">
-                <div>
-                    <span class="text-gray-400 text-xs">Planned:</span>
-                    {% if sprint.planned_start %}{{ sprint.planned_start.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
-                    {% if sprint.planned_start or sprint.planned_end %} to {% endif %}
-                    {% if sprint.planned_end %}{{ sprint.planned_end.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
-                </div>
-                <div>
-                    <span class="text-gray-400 text-xs">Actual:</span>
-                    {% if sprint.actual_start %}{{ sprint.actual_start.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
-                    {% if sprint.actual_start or sprint.actual_finish %} to {% endif %}
-                    {% if sprint.actual_finish %}{{ sprint.actual_finish.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
-                </div>
+    <td class="px-6 py-4 whitespace-nowrap">
+        <div class="text-sm text-gray-700">
+            <div>
+                <span class="text-gray-400 text-xs">Planned:</span>
+                {% if sprint.planned_start %}{{ sprint.planned_start.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+                {% if sprint.planned_start or sprint.planned_end %} to {% endif %}
+                {% if sprint.planned_end %}{{ sprint.planned_end.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
             </div>
-        </td>
+            <div>
+                <span class="text-gray-400 text-xs">Actual:</span>
+                {% if sprint.actual_start %}{{ sprint.actual_start.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+                {% if sprint.actual_start or sprint.actual_finish %} to {% endif %}
+                {% if sprint.actual_finish %}{{ sprint.actual_finish.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+            </div>
+        </div>
+    </td>
     <td class="px-6 py-4 whitespace-nowrap">
         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-            {% if status == 'Planned' %}bg-gray-100 text-gray-800
-            {% elif status == 'Active' %}bg-blue-100 text-blue-800
+            {% if status == 'Not Started' %}bg-gray-100 text-gray-800
+            {% elif status == 'In Progress' %}bg-blue-100 text-blue-800
             {% elif status == 'Complete' %}bg-green-100 text-green-800
             {% else %}bg-gray-100 text-gray-800{% endif %}">
             {{ status }}
@@ -37,6 +46,31 @@
         {{ tickets|length }}
     </td>
     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+        {% if status == 'Not Started' %}
+        <form hx-post="/sprints/{{ sprint.id }}/transition?view=row"
+              hx-target="#sprint-row-{{ sprint.id }}"
+              hx-swap="outerHTML"
+              class="inline">
+            <input type="hidden" name="to_status" value="In Progress">
+            <button type="submit" class="text-green-600 hover:text-green-900">Start</button>
+        </form>
+        {% elif status == 'In Progress' %}
+        <form hx-post="/sprints/{{ sprint.id }}/transition?view=row"
+              hx-target="#sprint-row-{{ sprint.id }}"
+              hx-swap="outerHTML"
+              class="inline">
+            <input type="hidden" name="to_status" value="Complete">
+            <button type="submit" class="text-green-600 hover:text-green-900">Complete</button>
+        </form>
+        {% elif status == 'Complete' %}
+        <form hx-post="/sprints/{{ sprint.id }}/transition?view=row"
+              hx-target="#sprint-row-{{ sprint.id }}"
+              hx-swap="outerHTML"
+              class="inline">
+            <input type="hidden" name="to_status" value="In Progress">
+            <button type="submit" class="text-blue-600 hover:text-blue-900">Reopen</button>
+        </form>
+        {% endif %}
         <a href="/sprints/{{ sprint.id }}/detail" class="text-indigo-600 hover:text-indigo-900">
             Board
         </a>

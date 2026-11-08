@@ -1,5 +1,6 @@
 """FastAPI API routes for Jackrabbit."""
 
+from datetime import datetime
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -40,6 +41,9 @@ from jackrabbit.schemas import (
     SprintRead,
     SprintReadWithTickets,
     SprintReadWithTicketsByStatus,
+    SprintTransitionRead,
+    SprintTransitionRequest,
+    SprintTransitionResponse,
     SprintUpdate,
     TicketCreate,
     TicketLinkCreate,
@@ -61,7 +65,9 @@ from jackrabbit.services import (
     LinkService,
     ParentLinkConflictError,
     ProjectService,
+    SprintCompletionBlockedError,
     SprintService,
+    SprintTransitionError,
     TicketService,
     TriageService,
 )
@@ -391,6 +397,8 @@ def update_sprint(
     sprint_in: SprintUpdate,
     service: SprintService = Depends(get_sprint_service),
 ) -> Sprint:
+    # SprintUpdate carries no actual_start/actual_finish: the dates are
+    # transition-owned (JRB-029), only POST /transition writes them.
     sprint = service.update_sprint(
         sprint_id=sprint_id,
         name=sprint_in.name,
@@ -398,12 +406,58 @@ def update_sprint(
         planned_start=sprint_in.planned_start,
         planned_end=sprint_in.planned_end,
         planned_duration_days=sprint_in.planned_duration_days,
-        actual_start=sprint_in.actual_start,
-        actual_finish=sprint_in.actual_finish,
     )
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return sprint
+
+
+@router.post("/sprints/{sprint_id}/transition", response_model=SprintTransitionResponse)
+def transition_sprint(
+    sprint_id: int,
+    request: SprintTransitionRequest,
+    service: SprintService = Depends(get_sprint_service),
+) -> SprintTransitionResponse:
+    """Manually move a sprint through its lifecycle (JRB-029, ADR-0026).
+
+    Only Not Started -> In Progress, In Progress -> Complete and
+    Complete -> In Progress are legal; an illegal move answers 400, a
+    completion blocked by unfinished tickets answers 409 with the blocking
+    tickets named in the detail.
+    """
+    sprint = service.get_sprint(sprint_id)
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    from_status = sprint.status
+    try:
+        sprint = service.transition(sprint_id, request.to_status, request.reason)
+    except SprintCompletionBlockedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except SprintTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return SprintTransitionResponse(
+        sprint_id=sprint_id,
+        from_status=from_status,
+        to_status=request.to_status,
+        reason=request.reason,
+        at=cast(datetime, sprint.updated_at),
+    )
+
+
+@router.get(
+    "/sprints/{sprint_id}/transitions",
+    response_model=list[SprintTransitionRead],
+)
+def list_sprint_transitions(
+    sprint_id: int,
+    service: SprintService = Depends(get_sprint_service),
+) -> list[SprintTransitionRead]:
+    """The sprint's transition history, oldest first (JRB-029)."""
+    if not service.get_sprint(sprint_id):
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    return service.list_transitions(sprint_id)
 
 
 @router.delete("/sprints/{sprint_id}", status_code=204)

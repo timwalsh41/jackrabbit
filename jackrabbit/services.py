@@ -20,6 +20,8 @@ from jackrabbit.models import (
     Priority,
     Project,
     Sprint,
+    SprintStatus,
+    SprintTransition,
     Ticket,
     TicketCriterion,
     TicketCriterionHistory,
@@ -42,6 +44,57 @@ def utc_now() -> datetime:
 
 class ConflictError(ValueError):
     """Raised when an operation conflicts with existing state (maps to HTTP 409)."""
+
+
+class SprintTransitionError(ValueError):
+    """An illegal sprint lifecycle transition was requested (maps to HTTP 400).
+
+    Only the three moves in SprintService.LEGAL_TRANSITIONS are legal
+    (JRB-029, ADR-0026); anything else leaves the sprint unchanged.
+    """
+
+
+class SprintCompletionBlockedError(SprintTransitionError):
+    """A sprint cannot be completed while open tickets remain (HTTP 409).
+
+    Raised when the sprint still holds tickets in Open, Groomed, In Progress
+    or Ready for Review; the message names the blocking tickets. Complete and
+    Rejected tickets do not block. The sprint stays In Progress.
+    """
+
+
+# The only legal sprint lifecycle moves (JRB-029, ADR-0026). Anything not in
+# this map raises SprintTransitionError and leaves the sprint unchanged.
+LEGAL_SPRINT_TRANSITIONS: frozenset[tuple[SprintStatus, SprintStatus]] = frozenset(
+    {
+        (SprintStatus.NOT_STARTED, SprintStatus.IN_PROGRESS),
+        (SprintStatus.IN_PROGRESS, SprintStatus.COMPLETE),
+        (SprintStatus.COMPLETE, SprintStatus.IN_PROGRESS),
+    }
+)
+
+
+def backfill_sprint_status(
+    actual_start: datetime | None, actual_finish: datetime | None
+) -> SprintStatus:
+    """Infer the pre-JRB-029 status from actual dates (the migration's rule).
+
+    Used to backfill sprints that predate the persisted status column, and by
+    ``create_sprint`` when no explicit status is supplied.
+    """
+    if actual_finish is not None:
+        return SprintStatus.COMPLETE
+    if actual_start is not None:
+        return SprintStatus.IN_PROGRESS
+    return SprintStatus.NOT_STARTED
+
+
+def _ticket_ref(ticket: Ticket, project: Project | None) -> str:
+    """Human-readable ticket reference for guard messages: ``WEB-001 'Title'``."""
+    prefix = project.prefix if project else ""
+    if prefix:
+        return f"{prefix}-{ticket.number:03d} '{ticket.title}'"
+    return f"'{ticket.title}'"
 
 
 class CriterionLockedError(ValueError):
@@ -1005,9 +1058,21 @@ class SprintService:
         planned_duration_days: int | None = None,
         actual_start: datetime | None = None,
         actual_finish: datetime | None = None,
+        status: SprintStatus | None = None,
     ) -> Sprint:
+        """Create a sprint with an explicit or date-backfilled status.
+
+        ``status`` keeps the persisted column the single source of truth
+        (JRB-029, ADR-0026): when it is omitted it is backfilled from the
+        actual dates the same way the migration backfills pre-existing
+        sprints (actual_finish -> Complete, actual_start -> In Progress,
+        otherwise Not Started). Create is the only place dates may seed a
+        status; from then on only :meth:`transition` writes them.
+        """
         if number is None:
             number = self.get_next_sprint_number()
+        if status is None:
+            status = backfill_sprint_status(actual_start, actual_finish)
         sprint = Sprint(
             number=number,
             name=name,
@@ -1017,6 +1082,7 @@ class SprintService:
             planned_duration_days=planned_duration_days,
             actual_start=actual_start,
             actual_finish=actual_finish,
+            status=status,
         )
         self.session.add(sprint)
         self.session.commit()
@@ -1036,14 +1102,15 @@ class SprintService:
         return list(self.session.exec(query).all())
 
     def get_sprint_with_tickets(self, sprint_id: int) -> dict | None:
-        """Get sprint with tickets (flat and grouped by status) and derived status."""
+        """Get sprint with tickets (flat and grouped by status) and its status."""
         sprint = self.get_sprint(sprint_id)
         if not sprint:
             return None
 
         tickets = list(self.session.exec(select(Ticket).where(Ticket.sprint_id == sprint_id)).all())
 
-        status = self._derive_status(sprint, tickets)
+        # The persisted column is the single source of truth (JRB-029)
+        status = SprintStatus(sprint.status)
 
         # Group tickets by status (ticket 07): every status key present
         tickets_by_status: dict[str, list[Ticket]] = {status.value: [] for status in TicketStatus}
@@ -1057,18 +1124,96 @@ class SprintService:
             "status": status,
         }
 
-    def _derive_status(self, sprint: Sprint, tickets: list[Ticket]) -> str:
-        """Derive sprint status from actual dates (spec: planned vs reality tracking).
+    def transition(
+        self,
+        sprint_id: int,
+        to_status: SprintStatus,
+        reason: str | None = None,
+    ) -> Sprint:
+        """Perform a manual sprint lifecycle transition (JRB-029, ADR-0026).
 
-        - Planned: no actual_start yet
-        - Active: actual_start set, actual_finish not set
-        - Complete: actual_finish set
+        Validates the move against the legal map, applies the completion
+        guard, writes the actual dates and appends the history row in a
+        single commit. The sprint is left unchanged on refusal.
+
+        Raises SprintTransitionError for an illegal move (HTTP 400) and
+        SprintCompletionBlockedError for a guarded completion (HTTP 409).
         """
-        if sprint.actual_finish is not None:
-            return "Complete"
-        if sprint.actual_start is not None:
-            return "Active"
-        return "Planned"
+        sprint = self.get_sprint(sprint_id)
+        if not sprint:
+            raise ValueError(f"Sprint {sprint_id} not found")
+
+        # Coerce: the String-typed column loads plain str values from the DB
+        from_status = SprintStatus(sprint.status)
+        if (from_status, to_status) not in LEGAL_SPRINT_TRANSITIONS:
+            raise SprintTransitionError(
+                f"Cannot transition sprint from {from_status.value} to {to_status.value}"
+            )
+
+        # Completion guard: Open, Groomed, In Progress and Ready for Review
+        # tickets block; Complete and Rejected ones do not. The message names
+        # the blocking tickets so the user knows what to finish first.
+        if to_status == SprintStatus.COMPLETE:
+            blocking = list(
+                self.session.exec(
+                    select(Ticket).where(
+                        Ticket.sprint_id == sprint_id,
+                        Ticket.status.in_(  # type: ignore[attr-defined]
+                            [
+                                TicketStatus.OPEN,
+                                TicketStatus.GROOMED,
+                                TicketStatus.IN_PROGRESS,
+                                TicketStatus.READY_FOR_REVIEW,
+                            ]
+                        ),
+                    )
+                ).all()
+            )
+            if blocking:
+                refs = []
+                for ticket in blocking:
+                    project = self.session.get(Project, ticket.project_id)
+                    refs.append(_ticket_ref(ticket, project))
+                raise SprintCompletionBlockedError(
+                    f"Cannot complete sprint: {len(blocking)} ticket(s) not finished: "
+                    f"{', '.join(refs)}"
+                )
+
+        # Dates are transition-owned (JRB-029): Start stamps the actual start,
+        # Complete stamps the actual finish (both overwrite), Reopen clears
+        # the finish and keeps the original start.
+        today = datetime.combine(date.today(), time(0, 0))
+        if from_status == SprintStatus.NOT_STARTED and to_status == SprintStatus.IN_PROGRESS:
+            sprint.actual_start = today
+        elif from_status == SprintStatus.IN_PROGRESS and to_status == SprintStatus.COMPLETE:
+            sprint.actual_finish = today
+        elif from_status == SprintStatus.COMPLETE and to_status == SprintStatus.IN_PROGRESS:
+            sprint.actual_finish = None
+
+        sprint.status = to_status
+        sprint.updated_at = utc_now()
+
+        history = SprintTransition(
+            sprint_id=sprint_id,
+            from_status=from_status,
+            to_status=to_status,
+            reason=reason,
+        )
+        self.session.add(sprint)
+        self.session.add(history)
+        self.session.commit()
+        self.session.refresh(sprint)
+        return sprint
+
+    def list_transitions(self, sprint_id: int) -> list[SprintTransition]:
+        """Return the sprint's transition history, oldest first."""
+        return list(
+            self.session.exec(
+                select(SprintTransition)
+                .where(SprintTransition.sprint_id == sprint_id)  # type: ignore[attr-defined]
+                .order_by(SprintTransition.id.asc())  # type: ignore[union-attr,attr-defined]
+            ).all()
+        )
 
     def update_sprint(
         self,
@@ -1078,8 +1223,6 @@ class SprintService:
         planned_start: datetime | None = None,
         planned_end: datetime | None = None,
         planned_duration_days: int | None = None,
-        actual_start: datetime | None = None,
-        actual_finish: datetime | None = None,
     ) -> Sprint | None:
         sprint = self.get_sprint(sprint_id)
         if not sprint:
@@ -1094,10 +1237,9 @@ class SprintService:
             sprint.planned_end = planned_end
         if planned_duration_days is not None:
             sprint.planned_duration_days = planned_duration_days
-        if actual_start is not None:
-            sprint.actual_start = actual_start
-        if actual_finish is not None:
-            sprint.actual_finish = actual_finish
+        # actual_start/actual_finish are deliberately not updatable here: the
+        # dates are transition-owned, only SprintService.transition writes
+        # them (JRB-029).
         sprint.updated_at = utc_now()
         self.session.add(sprint)
         self.session.commit()
@@ -1169,7 +1311,8 @@ class SprintService:
         for ticket in tickets:
             tickets_by_status[ticket.status.value].append(ticket)
 
-        sprint_status = self._derive_status(sprint, tickets)
+        # The persisted status column is the single source of truth (JRB-029)
+        sprint_status = SprintStatus(sprint.status)
 
         return {
             "sprint": sprint,
@@ -1259,8 +1402,8 @@ class SprintService:
             for ticket in tickets:
                 ticket_counts[ticket.status.value] += 1
 
-            # Derive sprint status
-            status = self._derive_status(sprint, tickets)
+            # The persisted status column is the single source of truth (JRB-029)
+            status = SprintStatus(sprint.status)
 
             # Calculate timeline position if dates available
             left_pct = 0.0
