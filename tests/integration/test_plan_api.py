@@ -50,7 +50,10 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
     )
     sprint2_id = sprint2.json()["id"]
 
-    # Completed sprint (actual_finish set)
+    # Completed sprint: created with actual dates (backfilled to Complete),
+    # then reopened so its ticket can be seeded, and completed again via the
+    # legal transitions (JRB-029, JRB-030: a completed sprint takes no new
+    # tickets).
     sprint3 = await client_with_seeds.post(
         "/api/v1/sprints",
         json={
@@ -63,6 +66,10 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
         },
     )
     sprint3_id = sprint3.json()["id"]
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint3_id}/transition", json={"to_status": "In Progress"}
+    )
+    assert response.status_code == 200, response.text
 
     # Create tickets with different statuses (WEB project is ID 2)
     await client_with_seeds.post(
@@ -116,6 +123,11 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
             "status": "Complete",
         },
     )
+    # Complete the reopened sprint now that its ticket is seeded.
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint3_id}/transition", json={"to_status": "Complete"}
+    )
+    assert response.status_code == 200, response.text
 
     # Unsprinted tickets
     await client_with_seeds.post(

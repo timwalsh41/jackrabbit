@@ -395,6 +395,44 @@ class TestSprintAssignmentPartial:
         detail = (await client.get(f"/api/v1/tickets/{ticket['id']}")).json()
         assert detail["sprint_id"] is None
 
+    async def test_dropdown_excludes_completed_sprint(self, client: httpx.AsyncClient, test_db):
+        """JRB-030: the assign selector offers only assignable sprints."""
+        from jackrabbit.models import SprintStatus
+
+        sprint_service = SprintService(test_db)
+        open_sprint = sprint_service.create_sprint(number=2601, name="Open")
+        completed = sprint_service.create_sprint(number=2602, name="Done")
+        sprint_service.transition(completed.id, SprintStatus.IN_PROGRESS)
+        sprint_service.transition(completed.id, SprintStatus.COMPLETE)
+
+        ticket = await create_ticket(client)
+        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        assert response.status_code == 200
+        assert f'value="{open_sprint.id}"' in response.text
+        assert f'value="{completed.id}"' not in response.text
+
+    async def test_assign_to_completed_sprint_refused_with_reason(
+        self, client: httpx.AsyncClient, test_db
+    ):
+        """JRB-030: the detail-view assign form refuses a completed sprint."""
+        from jackrabbit.models import SprintStatus
+
+        sprint_service = SprintService(test_db)
+        completed = sprint_service.create_sprint(number=2602, name="Done")
+        sprint_service.transition(completed.id, SprintStatus.IN_PROGRESS)
+        sprint_service.transition(completed.id, SprintStatus.COMPLETE)
+
+        ticket = await create_ticket(client)
+        response = await client.post(
+            f"/tickets/{ticket['id']}/assign-sprint",
+            content=f"sprint_id={completed.id}",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 409
+        assert "Complete" in response.text
+        detail = (await client.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        assert detail["sprint_id"] is None
+
     async def test_assign_with_invalid_sprint(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
         response = await client.post(

@@ -63,6 +63,17 @@ class SprintCompletionBlockedError(SprintTransitionError):
     """
 
 
+class SprintNotAssignableError(ValueError):
+    """A completed sprint cannot take on new tickets (maps to HTTP 409).
+
+    Raised by every ticket-to-sprint assignment path - the assign endpoint
+    and service, ticket creation and ticket editing - when the target
+    sprint's persisted status is Complete (JRB-030). Existing assignments
+    are left alone: only new assignments are refused, and unassignment
+    stays allowed.
+    """
+
+
 # The only legal sprint lifecycle moves (JRB-029, ADR-0026). Anything not in
 # this map raises SprintTransitionError and leaves the sprint unchanged.
 LEGAL_SPRINT_TRANSITIONS: frozenset[tuple[SprintStatus, SprintStatus]] = frozenset(
@@ -278,6 +289,14 @@ class TicketService:
         status: TicketStatus = TicketStatus.OPEN,
         links: Sequence[tuple[LinkType, int]] = (),
     ) -> Ticket:
+        # A new ticket cannot be born into a completed sprint (JRB-030); the
+        # refusal happens before anything is written.
+        if sprint_id is not None:
+            sprint_service = SprintService(self.session)
+            sprint = sprint_service.get_sprint(sprint_id)
+            if sprint is not None:
+                sprint_service.assert_sprint_assignable(sprint)
+
         # Get next ticket number for project
         max_num = self.session.exec(
             select(func.max(Ticket.number)).where(Ticket.project_id == project_id)
@@ -438,6 +457,16 @@ class TicketService:
         return ticket
 
     def update_ticket(self, ticket: Ticket, **kwargs: Any) -> Ticket:
+        # Editing a ticket into a completed sprint is refused (JRB-030). The
+        # ticket's existing assignment - even to a sprint that later
+        # completed - and an unassigning None are both allowed.
+        new_sprint_id = kwargs.get("sprint_id")
+        if new_sprint_id is not None and new_sprint_id != ticket.sprint_id:
+            sprint_service = SprintService(self.session)
+            sprint = sprint_service.get_sprint(new_sprint_id)
+            if sprint is not None:
+                sprint_service.assert_sprint_assignable(sprint)
+
         for field, value in kwargs.items():
             setattr(ticket, field, value)
         ticket.updated_at = utc_now()
@@ -1101,6 +1130,33 @@ class SprintService:
         query = select(Sprint).order_by(Sprint.number.desc())  # type: ignore[attr-defined]
         return list(self.session.exec(query).all())
 
+    def is_sprint_assignable(self, sprint: Sprint) -> bool:
+        """A sprint accepts new tickets while its persisted status is not
+        Complete (JRB-030). The status column is the single source of truth;
+        dates are never consulted."""
+        return SprintStatus(sprint.status) != SprintStatus.COMPLETE
+
+    def assert_sprint_assignable(self, sprint: Sprint) -> None:
+        """Refuse putting a ticket into a completed sprint (JRB-030).
+
+        The single source of the assignable rule: the assign service,
+        ticket creation and ticket editing all ask this before writing a
+        sprint_id. The message explains why the sprint is refused.
+        """
+        if not self.is_sprint_assignable(sprint):
+            raise SprintNotAssignableError(
+                f"Sprint {sprint.number} is Complete and cannot take new tickets"
+            )
+
+    def assignable_sprints(self) -> list[Sprint]:
+        """Sprints that may take new tickets: status is not Complete (JRB-030).
+
+        Newest first (same ordering as :meth:`list_sprints`); drives the
+        backlog Move to Sprint menu, the ticket detail selector and the
+        edit form's sprint dropdown.
+        """
+        return [sprint for sprint in self.list_sprints() if self.is_sprint_assignable(sprint)]
+
     def get_sprint_with_tickets(self, sprint_id: int) -> dict | None:
         """Get sprint with tickets (flat and grouped by status) and its status."""
         sprint = self.get_sprint(sprint_id)
@@ -1264,6 +1320,12 @@ class SprintService:
         ticket = self.session.get(Ticket, ticket_id)
         if not ticket:
             raise ValueError(f"Ticket {ticket_id} not found")
+
+        # A completed sprint takes no new tickets (JRB-030). A ticket already
+        # assigned to this sprint is left alone: only new assignments are
+        # refused, and unassignment stays allowed.
+        if ticket.sprint_id != sprint_id:
+            self.assert_sprint_assignable(sprint)
 
         if ticket.sprint_id is not None and ticket.sprint_id != sprint_id:
             raise ConflictError(f"Ticket is already assigned to sprint {ticket.sprint_id}")

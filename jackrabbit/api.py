@@ -66,6 +66,7 @@ from jackrabbit.services import (
     ParentLinkConflictError,
     ProjectService,
     SprintCompletionBlockedError,
+    SprintNotAssignableError,
     SprintService,
     SprintTransitionError,
     TicketService,
@@ -322,7 +323,9 @@ def _ticket_row_response(request: Request, ticket_id: int, session: Session) -> 
     from jackrabbit.web import templates
 
     ticket = TicketService(session).get_ticket(ticket_id)
-    sprints = SprintService(session).list_sprints()
+    # Only assignable sprints are offered in the row's Move to Sprint menu
+    # (JRB-030); the backlog filter panel gets the full list separately.
+    sprints = SprintService(session).assignable_sprints()
     label_service = LabelService(session)
     labels_by_ticket = (
         {cast(int, ticket.id): label_service.labels_for_ticket(ticket_id)} if ticket else {}
@@ -332,7 +335,7 @@ def _ticket_row_response(request: Request, ticket_id: int, session: Session) -> 
         "ticket_row.html",
         {
             "ticket": ticket,
-            "sprints": sprints,
+            "assignable_sprints": sprints,
             "labels_by_ticket": labels_by_ticket,
         },
     )
@@ -360,7 +363,9 @@ def assign_ticket_to_sprint(
             "ticket_id": ticket.id,
             "sprint_id": sprint_id,
         }
-    except ConflictError as e:
+    except (ConflictError, SprintNotAssignableError) as e:
+        # 409: the ticket is elsewhere, or the sprint is Complete and cannot
+        # take new tickets (JRB-030).
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -500,6 +505,9 @@ def create_ticket(
             status=ticket_in.status,
             links=[(link.link_type, link.target_id) for link in ticket_in.links],
         )
+    except SprintNotAssignableError as e:
+        # A completed sprint takes no new tickets (JRB-030).
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -563,6 +571,9 @@ def create_child_ticket(
             sprint_id=child_in.sprint_id,
             status=child_in.status,
         )
+    except SprintNotAssignableError as e:
+        # A completed sprint takes no new tickets (JRB-030).
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -769,7 +780,12 @@ def update_ticket(
     # PATCH that sets approach/files/test/validation and Groomed together, or
     # pr_url + Ready for Review).
     if update_data:
-        ticket = service.update_ticket(ticket, **update_data)
+        try:
+            ticket = service.update_ticket(ticket, **update_data)
+        except SprintNotAssignableError as e:
+            # Editing a ticket into a completed sprint is refused (JRB-030);
+            # the ticket is unchanged in the DB.
+            raise HTTPException(status_code=409, detail=str(e)) from e
 
     if new_criteria is not None:
         try:
@@ -808,13 +824,13 @@ def update_ticket(
         target = request.headers.get("HX-Target") or ""
         if target.startswith("ticket-row-"):
             # Modal edit: swap the updated ticket row back in place.
-            sprints = SprintService(service.session).list_sprints()
+            sprints = SprintService(service.session).assignable_sprints()
             return templates.TemplateResponse(
                 request,
                 "ticket_row.html",
                 {
                     "ticket": ticket,
-                    "sprints": sprints,
+                    "assignable_sprints": sprints,
                     "labels_by_ticket": {
                         cast(int, ticket.id): label_service.labels_for_ticket(ticket_id)
                     },
