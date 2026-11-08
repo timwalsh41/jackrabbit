@@ -203,39 +203,96 @@ class TestSprintWorkflow:
         page.click(f"#sprint-row-{sprint_id} a:has-text('Edit')")
         page.wait_for_selector("#sprint-modal #sprint-form", state="visible", timeout=10000)
 
-    def test_actual_start_makes_sprint_active(
+    def test_start_sprint_from_board(self, page: Page, base_url: str, seeded_projects, make_sprint):
+        """Start Sprint on the board flips the persisted status to In Progress
+        and records the history row (JRB-029)."""
+        sprint = make_sprint()
+        page.goto(f"{base_url}/sprint/{sprint['id']}")
+        page.wait_for_load_state("networkidle")
+        expect(page.locator("#sprint-detail-content")).to_contain_text("Not Started")
+
+        page.click("button:has-text('Start Sprint')")
+        expect(page.locator("#sprint-detail-content")).to_contain_text("In Progress", timeout=10000)
+        # The next action (Complete Sprint) replaces Start; history shows the move
+        expect(page.locator("#sprint-detail-content")).to_contain_text("Complete Sprint")
+        expect(page.locator("#sprint-detail-content")).to_contain_text("Sprint History")
+        expect(page.locator("#sprint-detail-content")).to_contain_text("Not Started → In Progress")
+
+    def test_complete_then_reopen_sprint_from_board(
         self, page: Page, base_url: str, seeded_projects, make_sprint
     ):
-        """Setting actual_start via the sprint edit modal derives status=Active."""
+        """Complete Sprint stamps the finish and Reopen clears it (JRB-029)."""
         sprint = make_sprint()
-        self._open_sprint_edit_modal(page, base_url, sprint["id"])
+        import httpx
 
-        page.fill("input[name='actual_start']", "2026-01-05")
-        page.click("#sprint-form button:has-text('Save Changes')")
-        # Modal closes and the list refreshes with the derived status
-        page.wait_for_function(
-            "document.getElementById('sprint-modal').innerText.trim() === ''",
-            timeout=10000,
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            client.post(
+                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+            )
+
+        page.goto(f"{base_url}/sprint/{sprint['id']}")
+        page.wait_for_load_state("networkidle")
+        page.click("button:has-text('Complete Sprint')")
+        expect(page.locator("#sprint-detail-content")).to_contain_text("Complete", timeout=10000)
+        expect(page.locator("#sprint-detail-content")).to_contain_text("Reopen Sprint")
+
+        page.click("button:has-text('Reopen Sprint')")
+        expect(page.locator("#sprint-detail-content")).to_contain_text("In Progress", timeout=10000)
+
+    def test_blocked_completion_shows_why(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, make_sprint
+    ):
+        """A blocked completion leaves the sprint In Progress and names the
+        blocking tickets (JRB-029)."""
+        sprint = make_sprint()
+        ticket = make_ticket(title="Blocking E2E Ticket")
+        import httpx
+
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+            client.post(
+                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+            )
+
+        page.goto(f"{base_url}/sprint/{sprint['id']}")
+        page.wait_for_load_state("networkidle")
+        page.click("button:has-text('Complete Sprint')")
+        expect(page.locator("#sprint-detail-content [role='alert']")).to_contain_text(
+            "Blocking E2E Ticket", timeout=10000
         )
-        row = page.locator(f"#sprint-row-{sprint['id']}")
-        expect(row).to_contain_text("Active", timeout=10000)
+        # The sprint stays In Progress
+        expect(page.locator("#sprint-detail-content")).to_contain_text("In Progress")
 
-    def test_actual_finish_makes_sprint_complete(
+    def test_start_complete_from_sprints_list_row(
         self, page: Page, base_url: str, seeded_projects, make_sprint
     ):
-        """Setting actual_finish via the sprint edit modal derives status=Complete."""
+        """The Sprints list row offers Start/Complete/Reopen (JRB-029)."""
         sprint = make_sprint()
-        self._open_sprint_edit_modal(page, base_url, sprint["id"])
-
-        page.fill("input[name='actual_start']", "2026-01-05")
-        page.fill("input[name='actual_finish']", "2026-01-19")
-        page.click("#sprint-form button:has-text('Save Changes')")
-        page.wait_for_function(
-            "document.getElementById('sprint-modal').innerText.trim() === ''",
-            timeout=10000,
-        )
+        page.goto(f"{base_url}/sprints")
+        page.wait_for_load_state("networkidle")
         row = page.locator(f"#sprint-row-{sprint['id']}")
+        expect(row).to_contain_text("Not Started")
+
+        row.locator("button:has-text('Start')").click()
+        expect(row).to_contain_text("In Progress", timeout=10000)
+        expect(row.locator("button:has-text('Complete')")).to_be_visible()
+
+        row.locator("button:has-text('Complete')").click()
         expect(row).to_contain_text("Complete", timeout=10000)
+        expect(row.locator("button:has-text('Reopen')")).to_be_visible()
+
+        row.locator("button:has-text('Reopen')").click()
+        expect(row).to_contain_text("In Progress", timeout=10000)
+
+    def test_actual_dates_are_read_only_in_sprint_form(
+        self, page: Page, base_url: str, seeded_projects, make_sprint
+    ):
+        """The actual date inputs are disabled in the sprint edit form (JRB-029)."""
+        sprint = make_sprint()
+        self._open_sprint_edit_modal(page, base_url, sprint["id"])
+
+        assert page.locator("#sprint-modal input[name='actual_start']").is_disabled()
+        assert page.locator("#sprint-modal input[name='actual_finish']").is_disabled()
 
 
 if __name__ == "__main__":

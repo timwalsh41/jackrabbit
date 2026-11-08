@@ -18,7 +18,10 @@
 : A named container for tickets identified by a short prefix (e.g., `MSC`, `WEB`, `UNS`). First-class entity with metadata (name, description, color). `UNS` (Unsorted) is a system project that cannot be deleted.
 
 **Sprint**
-: A time-boxed (or open-ended) container of tickets. Identified by a serial number with year prefix (`2601`, `2602`... continuing past 52). Has optional planned/actual dates. A ticket belongs to at most one sprint.
+: A time-boxed (or open-ended) container of tickets. Identified by a serial number with year prefix (`2601`, `2602`... continuing past 52). Has optional planned/actual dates and a persisted lifecycle status (ADR-0026): `Not Started`, `In Progress` or `Complete`, moved only by manual transitions (Start, Complete, Reopen); the transitions write the actual dates and are recorded in the sprint's history. A ticket belongs to at most one sprint.
+
+**Sprint Transition**
+: A manual lifecycle move of a sprint (ADR-0026). Legal moves are `Not Started → In Progress` (Start), `In Progress → Complete` (Complete; refused while the sprint holds Open, Groomed, In Progress or Ready for Review tickets) and `Complete → In Progress` (Reopen). Every accepted transition appends a history row shown on the sprint board.
 
 **Link**
 : A typed relationship between two tickets. Types: `parent`/`child` (epic→story), `blocks`/`blocked_by` (dependencies), `relates_to` (bidirectional association).

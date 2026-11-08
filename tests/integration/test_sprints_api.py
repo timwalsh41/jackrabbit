@@ -116,10 +116,11 @@ async def test_create_sprint_duplicate_number_returns_409(
     assert response.status_code == 409
 
 
-async def test_patch_sprint_sets_actual_dates_and_duration(
+async def test_patch_sprint_sets_duration_and_ignores_actual_dates(
     client_with_seeds: AsyncClient,
 ) -> None:
-    """PATCH can set planned_duration_days, actual_start and actual_finish."""
+    """PATCH can set planned_duration_days but no longer accepts the actual
+    dates: they are transition-owned (JRB-029)."""
     await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"})
     response = await client_with_seeds.patch(
         "/api/v1/sprints/1",
@@ -132,8 +133,10 @@ async def test_patch_sprint_sets_actual_dates_and_duration(
     assert response.status_code == 200
     data = response.json()
     assert data["planned_duration_days"] == 10
-    assert data["actual_start"] == "2026-02-02T00:00:00"
-    assert data["actual_finish"] == "2026-02-12T00:00:00"
+    # The dates were not written: only a transition owns them
+    assert data["actual_start"] is None
+    assert data["actual_finish"] is None
+    assert data["status"] == "Not Started"
 
 
 async def test_get_sprint(
@@ -150,7 +153,7 @@ async def test_get_sprint(
     assert data["name"] == "Sprint 1"
     assert "tickets" in data
     assert data["tickets"] == []
-    assert data["status"] == "Planned"
+    assert data["status"] == "Not Started"
 
 
 async def test_get_sprint_with_tickets(
@@ -327,10 +330,10 @@ async def test_get_next_sprint_number(
     assert data["number"] == 2602
 
 
-async def test_sprint_status_derivation_planned(
+async def test_sprint_status_persisted_not_started(
     client_with_seeds: AsyncClient,
 ) -> None:
-    """Test sprint status derivation - Planned (no actual_start, even with planned dates)."""
+    """A new sprint carries the persisted Not Started status (JRB-029)."""
     future_start = (datetime.now(UTC) + timedelta(days=10)).isoformat()
     future_end = (datetime.now(UTC) + timedelta(days=20)).isoformat()
 
@@ -348,13 +351,13 @@ async def test_sprint_status_derivation_planned(
     response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "Planned"
+    assert data["status"] == "Not Started"
 
 
-async def test_sprint_status_derivation_active(
+async def test_sprint_status_backfilled_in_progress_on_create(
     client_with_seeds: AsyncClient,
 ) -> None:
-    """Test sprint status derivation - Active (actual_start set, no actual_finish)."""
+    """Create-only actual dates backfill the persisted status (JRB-029)."""
     past_start = (datetime.now(UTC) - timedelta(days=5)).isoformat()
 
     response = await client_with_seeds.post(
@@ -370,13 +373,13 @@ async def test_sprint_status_derivation_active(
     response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "Active"
+    assert data["status"] == "In Progress"
 
 
-async def test_sprint_status_derivation_complete_by_actual_finish(
+async def test_sprint_status_backfilled_complete_on_create(
     client_with_seeds: AsyncClient,
 ) -> None:
-    """Test sprint status derivation - Complete (actual_finish set)."""
+    """Create-only actual_finish backfills the persisted Complete status."""
     past_start = (datetime.now(UTC) - timedelta(days=20)).isoformat()
     past_finish = (datetime.now(UTC) - timedelta(days=10)).isoformat()
 
@@ -400,7 +403,7 @@ async def test_sprint_status_derivation_complete_by_actual_finish(
 async def test_sprint_status_tickets_do_not_drive(
     client_with_seeds: AsyncClient,
 ) -> None:
-    """All tickets Complete does NOT make the sprint Complete without actual_finish."""
+    """All tickets Complete does NOT move the persisted sprint status (JRB-029)."""
     future_start = (datetime.now(UTC) + timedelta(days=10)).isoformat()
     future_end = (datetime.now(UTC) + timedelta(days=20)).isoformat()
 
@@ -429,29 +432,37 @@ async def test_sprint_status_tickets_do_not_drive(
     assert response.status_code == 200
     data = response.json()
     # Even though all tickets are complete, no actual_finish -> not Complete
-    assert data["status"] == "Planned"
+    assert data["status"] == "Not Started"
 
 
-async def test_sprint_status_derivation_complete_via_patch(
+async def test_sprint_status_completes_via_transition(
     client_with_seeds: AsyncClient,
 ) -> None:
-    """Finishing a sprint: PATCH actual_finish flips status Active -> Complete."""
-    past_start = (datetime.now(UTC) - timedelta(days=5)).isoformat()
-
+    """Finishing a sprint: the Complete transition sets the persisted status
+    and stamps the actual finish date (JRB-029)."""
     response = await client_with_seeds.post(
-        "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1", "actual_start": past_start}
+        "/api/v1/sprints", json={"number": 2601, "name": "Sprint 1"}
     )
     sprint_id = response.json()["id"]
-    status_response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
-    assert status_response.json()["status"] == "Active"
 
-    past_finish = (datetime.now(UTC) - timedelta(days=1)).isoformat()
-    response = await client_with_seeds.patch(
-        f"/api/v1/sprints/{sprint_id}", json={"actual_finish": past_finish}
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint_id}/transition", json={"to_status": "In Progress"}
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
+    assert response.json()["from_status"] == "Not Started"
+    assert response.json()["to_status"] == "In Progress"
+
+    status_response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
+    assert status_response.json()["status"] == "In Progress"
+    assert status_response.json()["actual_start"] is not None
+
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint_id}/transition", json={"to_status": "Complete"}
+    )
+    assert response.status_code == 200, response.text
     status_response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_id}")
     assert status_response.json()["status"] == "Complete"
+    assert status_response.json()["actual_finish"] is not None
 
 
 async def test_assign_ticket_to_sprint(
@@ -712,3 +723,157 @@ async def test_assign_ticket_plain_request_still_json(
     )
     assert response.status_code == 200
     assert response.json()["message"] == "Ticket assigned to sprint"
+
+
+async def _make_sprint(client: AsyncClient, **payload) -> dict:
+    response = await client.post("/api/v1/sprints", json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _make_sprint_ticket(
+    client: AsyncClient, sprint_id: int, title: str, status: str = "Open"
+) -> dict:
+    response = await client.post(
+        "/api/v1/tickets",
+        json={"project_id": 2, "title": title, "sprint_id": sprint_id, "status": status},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def test_transition_endpoints_full_lifecycle(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Start, Complete and Reopen via the transition endpoint (JRB-029)."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Lifecycle")
+    sid = sprint["id"]
+
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sid}/transition", json={"to_status": "In Progress", "reason": "kick off"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sprint_id"] == sid
+    assert body["from_status"] == "Not Started"
+    assert body["to_status"] == "In Progress"
+    assert body["reason"] == "kick off"
+
+    await client_with_seeds.post(
+        f"/api/v1/sprints/{sid}/transition", json={"to_status": "Complete"}
+    )
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sid}/transition", json={"to_status": "In Progress", "reason": "rework"}
+    )
+    assert response.status_code == 200
+    assert response.json()["from_status"] == "Complete"
+
+    data = (await client_with_seeds.get(f"/api/v1/sprints/{sid}")).json()
+    assert data["status"] == "In Progress"
+    # Reopen cleared the finish but kept the original start
+    assert data["actual_finish"] is None
+    assert data["actual_start"] is not None
+
+
+async def test_transition_illegal_move_returns_400(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Not Started -> Complete skips In Progress and is refused with 400."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Illegal")
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+    )
+    assert response.status_code == 400
+    assert "Cannot transition" in response.json()["detail"]
+
+    # Same-status is also refused
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Not Started"}
+    )
+    assert response.status_code == 400
+
+
+async def test_transition_blocked_completion_returns_409(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Completion with unfinished tickets answers 409 and names them."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Blocked")
+    await _make_sprint_ticket(client_with_seeds, sprint["id"], "Still Open")
+    await _make_sprint_ticket(client_with_seeds, sprint["id"], "Still Groomed", status="Groomed")
+
+    await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+    )
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "Still Open" in detail
+    assert "Still Groomed" in detail
+
+    # The sprint stays In Progress
+    data = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['id']}")).json()
+    assert data["status"] == "In Progress"
+
+
+async def test_transition_complete_and_rejected_tickets_do_not_block(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Only Open/Groomed/In Progress/Ready for Review tickets guard completion."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Terminal")
+    await _make_sprint_ticket(client_with_seeds, sprint["id"], "Done ticket", status="Complete")
+    await _make_sprint_ticket(client_with_seeds, sprint["id"], "Rejected ticket", status="Rejected")
+
+    await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+    )
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+    )
+    assert response.status_code == 200
+
+
+async def test_transition_missing_sprint_returns_404(
+    client_with_seeds: AsyncClient,
+) -> None:
+    response = await client_with_seeds.post(
+        "/api/v1/sprints/9999/transition", json={"to_status": "In Progress"}
+    )
+    assert response.status_code == 404
+
+
+async def test_sprint_transitions_history_endpoint(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """GET /api/v1/sprints/{id}/transitions returns the recorded history."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="History")
+    sid = sprint["id"]
+    await client_with_seeds.post(
+        f"/api/v1/sprints/{sid}/transition", json={"to_status": "In Progress", "reason": "start"}
+    )
+    await client_with_seeds.post(
+        f"/api/v1/sprints/{sid}/transition", json={"to_status": "Complete"}
+    )
+
+    response = await client_with_seeds.get(f"/api/v1/sprints/{sid}/transitions")
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 2
+    assert rows[0]["from_status"] == "Not Started"
+    assert rows[0]["to_status"] == "In Progress"
+    assert rows[0]["reason"] == "start"
+    assert rows[0]["at"]
+    assert rows[1]["to_status"] == "Complete"
+    # A fresh sprint has an empty history (backfill creates no rows)
+    fresh = await _make_sprint(client_with_seeds, number=2602, name="No history")
+    response = await client_with_seeds.get(f"/api/v1/sprints/{fresh['id']}/transitions")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_sprint_transitions_missing_sprint_returns_404(
+    client_with_seeds: AsyncClient,
+) -> None:
+    response = await client_with_seeds.get("/api/v1/sprints/9999/transitions")
+    assert response.status_code == 404
