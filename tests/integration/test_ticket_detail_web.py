@@ -379,6 +379,61 @@ class TestSprintAssignmentPartial:
         assert f"/sprints/{sprint['id']}/detail" in response.text
         assert "unassign-sprint" in response.text
 
+    async def test_assigned_section_shows_sprint_status(self, client: httpx.AsyncClient, test_db):
+        """JRB-026: sprint status reads the same on the ticket detail page.
+
+        The sprint section shows the sprint's persisted lifecycle status
+        next to the link, exactly as the Sprints list and the board do.
+        """
+        from jackrabbit.models import SprintStatus
+
+        sprint_service = SprintService(test_db)
+        sprint = sprint_service.create_sprint(number=2601, name="Sprint 2601")
+        ticket = await create_ticket(
+            client,
+            approach="Do it",
+            files_to_change="src/x.py",
+            test_plan="Run tests",
+            validation_steps="All green",
+        )
+        await client.post(f"/api/v1/tickets/{ticket['id']}/criteria", json={"text": "Done"})
+        await client.post(
+            f"/tickets/{ticket['id']}/assign-sprint",
+            content=f"sprint_id={sprint.id}",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+
+        # Before the sprint starts the section shows its Not Started status.
+        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        assert response.status_code == 200
+        assert "Not Started" in response.text
+
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        assert response.status_code == 200
+        assert "In Progress" in response.text
+
+        # Finish the ticket so the sprint's guarded completion can proceed.
+        for status in ("Groomed", "In Progress", "Ready for Review", "Complete"):
+            if status == "Ready for Review":
+                # Sign off the criterion so the Complete guard can pass.
+                rows = (await client.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+                verified = await client.patch(
+                    f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}",
+                    json={"verified": True},
+                )
+                assert verified.status_code == 200, verified.text
+            done = await client.post(
+                f"/api/v1/tickets/{ticket['id']}/transition",
+                json={"to_status": status, "reason": "Finished before sprint close"},
+            )
+            assert done.status_code == 200, done.text
+
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        assert response.status_code == 200
+        assert "Complete" in response.text
+
     async def test_unassign_sprint_via_htmx_partial(self, client: httpx.AsyncClient, sprint: dict):
         ticket = await create_ticket(client)
         await client.post(
