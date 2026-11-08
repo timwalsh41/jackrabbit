@@ -361,7 +361,7 @@ class TestSprintAssignmentPartial:
             },
         )
         assert response.status_code == 200
-        assert f"/sprint/{sprint['id']}" in response.text
+        assert f"/sprints/{sprint['id']}/detail" in response.text
         # Persisted
         detail = (await client.get(f"/api/v1/tickets/{ticket['id']}")).json()
         assert detail["sprint_id"] == sprint["id"]
@@ -376,7 +376,7 @@ class TestSprintAssignmentPartial:
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
         response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
-        assert f"/sprint/{sprint['id']}" in response.text
+        assert f"/sprints/{sprint['id']}/detail" in response.text
         assert "unassign-sprint" in response.text
 
     async def test_unassign_sprint_via_htmx_partial(self, client: httpx.AsyncClient, sprint: dict):

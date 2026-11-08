@@ -1,4 +1,6 @@
-"""Integration tests for the Sprint web pages (list, new form, edit form)."""
+"""Integration tests for the Sprint web pages (list, board, new form, edit form)."""
+
+from pathlib import Path
 
 from httpx import AsyncClient
 
@@ -31,6 +33,63 @@ async def test_sprint_list_page_shows_planned_and_actual_dates(
     assert "2026-01-06" in content  # actual start
     assert "Active" in content  # derived from actual_start
     assert 'href="/sprints/1/edit"' in content
+
+
+async def test_sprint_detail_renders_board(client_with_seeds: AsyncClient) -> None:
+    """JRB-031: GET /sprints/{id}/detail is the canonical URL for the sprint board."""
+    sprint = await _create_sprint(client_with_seeds, number=2601, name="Board Sprint")
+
+    response = await client_with_seeds.get(f"/sprints/{sprint['id']}/detail")
+    assert response.status_code == 200
+    content = response.text
+    assert "Board Sprint" in content
+    for column in ["Open", "Groomed", "In Progress", "Ready for Review", "Complete", "Rejected"]:
+        assert column in content
+
+
+async def test_legacy_sprint_url_redirects_to_canonical(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """JRB-031: GET /sprint/{id} redirects to the canonical /sprints/{id}/detail."""
+    sprint = await _create_sprint(client_with_seeds, number=2602, name="Legacy URL")
+
+    response = await client_with_seeds.get(f"/sprint/{sprint['id']}", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == f"/sprints/{sprint['id']}/detail"
+
+
+async def test_legacy_sprint_url_follows_redirect_to_board(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Following the legacy /sprint/{id} redirect lands on the sprint board."""
+    sprint = await _create_sprint(client_with_seeds, number=2603, name="Followed")
+
+    response = await client_with_seeds.get(f"/sprint/{sprint['id']}", follow_redirects=True)
+    assert response.status_code == 200
+    assert "Followed" in response.text
+
+
+async def test_legacy_sprint_url_404_for_missing(client_with_seeds: AsyncClient) -> None:
+    """The legacy redirect route still 404s for a sprint that does not exist."""
+    response = await client_with_seeds.get("/sprint/999", follow_redirects=False)
+    assert response.status_code == 404
+
+
+async def test_sprint_list_row_has_board_link(client_with_seeds: AsyncClient) -> None:
+    """JRB-031: each Sprints list row links Board to the canonical board URL."""
+    sprint = await _create_sprint(client_with_seeds, number=2604, name="Linked")
+
+    response = await client_with_seeds.get("/sprints")
+    assert response.status_code == 200
+    content = response.text
+    assert f'href="/sprints/{sprint["id"]}/detail"' in content
+    assert "Board" in content
+
+
+async def test_sprint_html_stub_template_deleted() -> None:
+    """JRB-031: the unused sprint.html stub board is deleted and no route renders it."""
+    template = Path(__file__).parents[2] / "jackrabbit" / "templates" / "sprint.html"
+    assert not template.exists()
 
 
 async def test_new_sprint_form_uses_hx_post(
