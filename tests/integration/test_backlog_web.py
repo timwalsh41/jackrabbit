@@ -338,6 +338,42 @@ class TestBacklogPage:
         assert "Critical outage" not in r.text
 
 
+class TestMoveToSprintRefusalSurfacing:
+    """JRB-026: a completed sprint refuses new work from the backlog, and
+    the refusal is visible — the row carries an inline error banner the
+    Move to Sprint button fills with the endpoint's 409 detail."""
+
+    async def test_row_renders_inline_error_target(self, client, backlog_tickets):
+        r = await _get(client, "/backlog")
+        assert r.status_code == 200
+        # The unassigned row's Move to Sprint menu posts to the assign
+        # endpoint and surfaces its failure detail in an inline banner.
+        assert f'id="sprint-move-error-{backlog_tickets["high"].id}"' in r.text
+        assert "hx-on::after-request" in r.text
+
+    async def test_completed_sprint_refusal_returns_409_detail(
+        self, client, test_db, backlog_tickets
+    ):
+        """The refusal the banner must surface: 409 with a reason."""
+        from jackrabbit.models import SprintStatus
+        from jackrabbit.services import SprintService
+
+        sprint_service = SprintService(test_db)
+        sprint = backlog_tickets["sprint"]
+        # Empty the sprint so its guarded completion can proceed.
+        ticket_service = TicketService(test_db)
+        ticket_service.update_ticket(backlog_tickets["medium"], sprint_id=None)
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+
+        response = await client.post(
+            f"/api/v1/sprints/{sprint.id}/tickets/{backlog_tickets['high'].id}",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 409
+        assert "Complete" in response.json()["detail"]
+
+
 class TestBacklogCriteriaStateFilter:
     """The backlog's criteria-state filter (JRB-020, user story 17):
     criteria_state=unverified lists the tickets carrying at least one

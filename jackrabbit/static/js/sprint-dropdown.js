@@ -31,6 +31,12 @@ document.addEventListener('click', function(event) {
             if (isHidden) {
                 dropdown.classList.remove('hidden');
                 btn.setAttribute('aria-expanded', 'true');
+                // A fresh open discards a stale refusal message (JRB-026).
+                const error = document.getElementById('sprint-move-error-' + ticketId);
+                if (error) {
+                    error.classList.add('hidden');
+                    error.textContent = '';
+                }
             } else {
                 dropdown.classList.add('hidden');
                 btn.setAttribute('aria-expanded', 'false');
