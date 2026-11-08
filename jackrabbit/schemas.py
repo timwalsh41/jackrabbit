@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 from jackrabbit.models import (
     LinkType,
     Priority,
+    SprintStatus,
     TicketStatus,
     TicketType,
 )
@@ -157,14 +158,20 @@ class SprintBase(_EmptyStringToNoneMixin):
     planned_start: datetime | None = None
     planned_end: datetime | None = None
     planned_duration_days: int | None = None
-    actual_start: datetime | None = None
-    actual_finish: datetime | None = None
+    # NOTE: actual_start/actual_finish are deliberately not part of the base:
+    # the dates are transition-owned (JRB-029). They appear on SprintCreate
+    # (create-only, backfilled into the persisted status) and on SprintRead.
 
 
 class SprintCreate(SprintBase):
     # number is optional on create: when omitted the API auto-assigns
     # MAX(number)+1 starting at 2601; clients may override it explicitly.
     number: int | None = None  # type: ignore[assignment]
+    # Create-only actual dates. They seed the persisted status via the
+    # migration's backfill rule; after creation only a sprint transition
+    # writes them (JRB-029).
+    actual_start: datetime | None = None
+    actual_finish: datetime | None = None
 
     @field_validator("number", mode="before")
     @classmethod
@@ -177,6 +184,9 @@ class SprintCreate(SprintBase):
 
 class SprintRead(SprintBase):
     id: int
+    actual_start: datetime | None = None
+    actual_finish: datetime | None = None
+    status: SprintStatus = SprintStatus.NOT_STARTED
     created_at: datetime
     updated_at: datetime
 
@@ -189,20 +199,51 @@ class SprintUpdate(_EmptyStringToNoneMixin):
     planned_start: datetime | None = None
     planned_end: datetime | None = None
     planned_duration_days: int | None = None
-    actual_start: datetime | None = None
-    actual_finish: datetime | None = None
+    # actual_start/actual_finish removed (JRB-029): the dates are
+    # transition-owned, PATCH can no longer write them.
 
 
 class SprintReadWithTickets(SprintRead):
     tickets: list["TicketRead"] = []
     # Nested tickets grouped by status (ticket 07); all six status keys present
     tickets_by_status: dict[str, list["TicketRead"]] = {}
-    status: str = "Planned"  # Planned, Active, Complete
+    # Overrides SprintRead's plain sprint status with the board-level field:
+    # it is kept for backwards compatibility and always equals sprint.status
+    # (JRB-029: the persisted column is the single source of truth).
+    status: SprintStatus = SprintStatus.NOT_STARTED
 
 
 class SprintReadWithTicketsByStatus(SprintRead):
     tickets_by_status: dict[str, list["TicketRead"]] = {}
-    status: str = "Planned"  # Planned, Active, Complete
+    status: SprintStatus = SprintStatus.NOT_STARTED
+
+
+class SprintTransitionRequest(BaseModel):
+    """Body of POST /api/v1/sprints/{id}/transition (JRB-029)."""
+
+    to_status: SprintStatus
+    reason: str | None = None
+
+
+class SprintTransitionRead(BaseModel):
+    """One recorded sprint transition in the history (JRB-029)."""
+
+    id: int
+    sprint_id: int
+    from_status: SprintStatus | None = None
+    to_status: SprintStatus
+    reason: str | None = None
+    at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SprintTransitionResponse(BaseModel):
+    sprint_id: int
+    from_status: SprintStatus | None
+    to_status: SprintStatus
+    reason: str | None
+    at: datetime
 
 
 class TicketBase(BaseModel):
@@ -516,7 +557,7 @@ class PlanSprintResponse(BaseModel):
     actual_finish: datetime | None = None
     ticket_counts: PlanSprintTicketCounts
     total_tickets: int
-    status: str
+    status: SprintStatus
 
     model_config = ConfigDict(from_attributes=True)
 

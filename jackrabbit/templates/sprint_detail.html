@@ -3,7 +3,7 @@
 {% block title %}Jackrabbit - Sprint {{ sprint.number }}: {{ sprint.name }}{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
+<div class="space-y-6" id="sprint-detail-content">
     <div class="flex justify-between items-center">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">Sprint {{ sprint.number }}: {{ sprint.name }}</h1>
@@ -13,12 +13,43 @@
         </div>
         <div class="flex items-center gap-4">
             <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium
-                {% if status == 'Planned' %}bg-gray-100 text-gray-800
-                {% elif status == 'Active' %}bg-blue-100 text-blue-800
+                {% if status == 'Not Started' %}bg-gray-100 text-gray-800
+                {% elif status == 'In Progress' %}bg-blue-100 text-blue-800
                 {% elif status == 'Complete' %}bg-green-100 text-green-800
                 {% else %}bg-gray-100 text-gray-800{% endif %}">
                 {{ status }}
             </span>
+            {% if status == 'Not Started' %}
+            <form hx-post="/sprints/{{ sprint.id }}/transition?view=board"
+                  hx-target="#sprint-detail-content"
+                  hx-swap="outerHTML"
+                  class="inline">
+                <input type="hidden" name="to_status" value="In Progress">
+                <button type="submit" class="btn btn-sm bg-green-600 text-white hover:bg-green-700">
+                    Start Sprint
+                </button>
+            </form>
+            {% elif status == 'In Progress' %}
+            <form hx-post="/sprints/{{ sprint.id }}/transition?view=board"
+                  hx-target="#sprint-detail-content"
+                  hx-swap="outerHTML"
+                  class="inline">
+                <input type="hidden" name="to_status" value="Complete">
+                <button type="submit" class="btn btn-sm bg-green-600 text-white hover:bg-green-700">
+                    Complete Sprint
+                </button>
+            </form>
+            {% elif status == 'Complete' %}
+            <form hx-post="/sprints/{{ sprint.id }}/transition?view=board"
+                  hx-target="#sprint-detail-content"
+                  hx-swap="outerHTML"
+                  class="inline">
+                <input type="hidden" name="to_status" value="In Progress">
+                <button type="submit" class="btn btn-sm bg-blue-600 text-white hover:bg-blue-700">
+                    Reopen Sprint
+                </button>
+            </form>
+            {% endif %}
             <a href="/sprints/{{ sprint.id }}/edit"
                class="text-indigo-600 hover:text-indigo-900 text-sm"
                hx-get="/sprints/{{ sprint.id }}/edit"
@@ -29,6 +60,12 @@
             <a href="/sprints" class="text-gray-500 hover:text-gray-700 text-sm">← All Sprints</a>
         </div>
     </div>
+
+    {% if error %}
+    <div class="px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
 
     <!-- Sprint Dates -->
     {% if sprint.planned_start or sprint.planned_end %}
@@ -123,6 +160,28 @@
             </div>
         </div>
         {% endfor %}
+    </div>
+
+    <!-- Sprint Transition History (JRB-029) -->
+    <div class="bg-white border border-gray-200 rounded-lg p-4">
+        <h3 class="text-sm font-medium text-gray-900 mb-3">Sprint History</h3>
+        {% if transitions %}
+        <div class="space-y-2">
+            {% for t in transitions %}
+            <div class="flex items-start gap-3 p-2 bg-gray-50 rounded-lg">
+                <span class="text-xs font-medium text-gray-500 min-w-[140px]">
+                    {% if t.from_status %}{{ t.from_status }} → {{ t.to_status }}{% else %}→ {{ t.to_status }}{% endif %}
+                </span>
+                <div class="flex-1">
+                    {% if t.reason %}<p class="text-sm text-gray-600">{{ t.reason }}</p>{% endif %}
+                    <p class="text-xs text-gray-400">{{ t.at.strftime('%Y-%m-%d %H:%M') }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-gray-500 text-sm">No sprint transitions yet</p>
+        {% endif %}
     </div>
 </div>
 

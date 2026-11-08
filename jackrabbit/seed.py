@@ -26,6 +26,7 @@ from jackrabbit.models import (
     Priority,
     Project,
     Sprint,
+    SprintStatus,
     Ticket,
     TicketLink,
     TicketStatus,
@@ -330,6 +331,8 @@ class _Seeder:
             name = SPRINT_NAMES[index]
             sprint = existing.get(name)
             if sprint is None:
+                # Sprints carry an explicit persisted status (JRB-029): the
+                # current sprint is started, the others are Not Started.
                 sprint = self.sprints.create_sprint(
                     name=name,
                     description=f"{DEMO_NOTE}: sprint used for local exploration",
@@ -337,6 +340,9 @@ class _Seeder:
                     planned_end=_day_offset(end),
                     planned_duration_days=end - start,
                     actual_start=_day_offset(actual) if actual is not None else None,
+                    status=SprintStatus.IN_PROGRESS
+                    if actual is not None
+                    else SprintStatus.NOT_STARTED,
                 )
                 self.result.sprints.append(sprint.number)
             self._sprint_by_index[index] = sprint

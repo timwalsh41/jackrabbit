@@ -30,6 +30,18 @@ class TicketStatus(StrEnum):
     REJECTED = "Rejected"
 
 
+class SprintStatus(StrEnum):
+    """Persisted sprint lifecycle states (JRB-029, ADR-0026).
+
+    The column on Sprint is the single source of truth: status is never
+    derived from the actual dates, which only transitions write.
+    """
+
+    NOT_STARTED = "Not Started"
+    IN_PROGRESS = "In Progress"
+    COMPLETE = "Complete"
+
+
 class LinkType(StrEnum):
     PARENT = "parent"
     CHILD = "child"
@@ -81,10 +93,44 @@ class Sprint(SQLModel, table=True):
     planned_duration_days: int | None = None
     actual_start: NaiveDatetime | None = None
     actual_finish: NaiveDatetime | None = None
+    # Persisted lifecycle state (JRB-029, ADR-0026); only SprintService.transition
+    # moves it. sa_type keeps SQLModel from mapping the StrEnum to sa.Enum, which
+    # would store member names instead of the human-readable values (same choice
+    # as TicketCriterionHistory.event).
+    status: SprintStatus = Field(default=SprintStatus.NOT_STARTED, sa_type=String)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
     tickets: list["Ticket"] = Relationship(back_populates="sprint")
+    # Audit trail of the sprint's manual transitions (JRB-029, ADR-0026).
+    # Eagerly loaded so rendering the board or a list row does not trigger a
+    # query per sprint; deleting the sprint removes its history rows with it.
+    transitions: list["SprintTransition"] = Relationship(
+        back_populates="sprint",
+        cascade_delete=True,
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
+
+
+class SprintTransition(SQLModel, table=True):
+    """Audit entry for a manual sprint lifecycle transition (JRB-029, ADR-0026).
+
+    Mirrors the ticket Transition shape: one row per accepted transition,
+    carrying from/to status, the timestamp and an optional note. Rows are
+    only ever appended; sprints that predate the change start with an empty
+    history (the backfill migration creates no synthetic rows).
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    sprint_id: int = Field(foreign_key="sprint.id", index=True)
+    # Stored as the enum's value ("Not Started" etc.) in plain VARCHAR
+    # columns, matching Sprint.status (see the sa_type note above).
+    from_status: SprintStatus | None = Field(default=None, sa_type=String)
+    to_status: SprintStatus = Field(sa_type=String)
+    reason: str | None = None
+    at: datetime = Field(default_factory=utc_now)
+
+    sprint: Sprint = Relationship(back_populates="transitions")
 
 
 class Ticket(SQLModel, table=True):

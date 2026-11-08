@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from jackrabbit.database import get_session
 from jackrabbit.labels import parse_label_ids, parse_label_match
@@ -21,6 +21,7 @@ from jackrabbit.models import (
     Priority,
     Project,
     Sprint,
+    SprintStatus,
     Ticket,
     TicketLink,
     TicketStatus,
@@ -35,6 +36,7 @@ from jackrabbit.services import (
     LinkService,
     ProjectService,
     SprintService,
+    SprintTransitionError,
     TicketService,
 )
 
@@ -258,6 +260,76 @@ async def sprint_detail(
             "sprint": sprint,
             "tickets_by_status": tickets_by_status,
             "status": status,
+            "transitions": sprint_service.list_transitions(sprint_id),
+            "error": None,
+        },
+    )
+
+
+@router.post("/sprints/{sprint_id}/transition", response_class=HTMLResponse)
+async def sprint_transition(
+    request: Request,
+    sprint_id: int,
+    view: str = Query("board"),
+    sprint_service: SprintService = Depends(get_sprint_service),
+) -> HTMLResponse:
+    """HTMX endpoint for the Start/Complete/Reopen sprint actions (JRB-029).
+
+    Accepts the urlencoded form the buttons post (``to_status`` and an
+    optional ``reason``). On success (and on a refusal) the refreshed board
+    or list row is re-rendered, so a blocked completion leaves the sprint In
+    Progress and shows why: the refusal message names the blocking tickets.
+    ``view=row`` re-renders the single Sprints-list row; anything else
+    re-renders the sprint board.
+    """
+    sprint = sprint_service.get_sprint(sprint_id)
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+
+    form = await request.form()
+    raw_status = str(form.get("to_status", ""))
+    try:
+        to_status = SprintStatus(raw_status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Unknown sprint status: {raw_status}") from e
+    reason = str(form.get("reason", "")).strip() or None
+
+    error: str | None = None
+    try:
+        sprint_service.transition(sprint_id, to_status, reason)
+    except SprintTransitionError as e:
+        # Illegal move or guarded completion: the sprint is unchanged and the
+        # refusal is shown inline on the re-rendered board/row.
+        error = str(e)
+
+    if view == "row":
+        tickets = list(
+            sprint_service.session.exec(select(Ticket).where(Ticket.sprint_id == sprint_id)).all()
+        )
+        refreshed = sprint_service.get_sprint(sprint_id)
+        return templates.TemplateResponse(
+            request,
+            "sprint_row.html",
+            {
+                "sprint": refreshed,
+                "tickets": tickets,
+                "status": cast(Sprint, refreshed).status,
+                "error": error,
+            },
+        )
+
+    result = sprint_service.get_sprint_with_tickets_by_status(sprint_id)
+    if not result:  # pragma: no cover - sprint exists (checked above)
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    return templates.TemplateResponse(
+        request,
+        "sprint_detail.html",
+        {
+            "sprint": result["sprint"],
+            "tickets_by_status": result["tickets_by_status"],
+            "status": result["status"],
+            "transitions": sprint_service.list_transitions(sprint_id),
+            "error": error,
         },
     )
 

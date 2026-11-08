@@ -90,8 +90,10 @@
                            id="actual_start"
                            name="actual_start"
                            value="{{ sprint.actual_start.strftime('%Y-%m-%d') if sprint and sprint.actual_start else '' }}"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                    <p class="mt-1 text-sm text-gray-500">Setting this marks the sprint Active.</p>
+                           readonly
+                           disabled
+                           class="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-100 text-gray-500 cursor-not-allowed">
+                    <p class="mt-1 text-sm text-gray-500">Read-only: set by the Start Sprint transition.</p>
                 </div>
 
                 <div>
@@ -100,8 +102,10 @@
                            id="actual_finish"
                            name="actual_finish"
                            value="{{ sprint.actual_finish.strftime('%Y-%m-%d') if sprint and sprint.actual_finish else '' }}"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                    <p class="mt-1 text-sm text-gray-500">Setting this marks the sprint Complete.</p>
+                           readonly
+                           disabled
+                           class="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-100 text-gray-500 cursor-not-allowed">
+                    <p class="mt-1 text-sm text-gray-500">Read-only: set by the Complete Sprint transition.</p>
                 </div>
             </div>
 
