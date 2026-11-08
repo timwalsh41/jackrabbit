@@ -197,6 +197,67 @@ class TestSprintWorkflow:
         expect(groomed_col).to_contain_text("Status Move Ticket", timeout=10000)
         assert "Status Move Ticket" not in open_col.inner_text()
 
+    def test_completed_sprint_not_offered_in_backlog_menu(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, make_sprint
+    ):
+        """JRB-030: the Move to Sprint menu offers only assignable sprints."""
+        sprint = make_sprint()
+        ticket = make_ticket(title="Menu Exclusion Ticket")
+        tid = ticket["id"]
+
+        import httpx
+
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            client.post(
+                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+            )
+            client.post(
+                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+            )
+
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector(f"#ticket-row-{tid}", state="visible", timeout=10000)
+        page.click(f"#move-to-sprint-{tid}")
+        dropdown = page.locator(f"#move-to-sprint-dropdown-{tid}")
+        expect(dropdown).to_be_visible(timeout=10000)
+        assert dropdown.locator(f"button:has-text('{sprint['number']}')").count() == 0
+
+    def test_assign_to_completed_sprint_from_detail_refused(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, make_sprint
+    ):
+        """JRB-030: assigning from the detail view to a sprint that completed
+        in the meantime is refused and the refusal explains why."""
+        sprint = make_sprint()
+        ticket = make_ticket(title="Stale Sprint Ticket")
+        tid = ticket["id"]
+
+        import httpx
+
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            # In Progress so the detail page offers it at render time...
+            client.post(
+                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+            )
+
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        page.select_option(f"#assign-sprint-select-{tid}", str(sprint["id"]))
+
+        # ...then the sprint completes elsewhere while the page is open.
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
+            client.post(
+                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+            )
+
+        page.click("#sprint-section button[type='submit']")
+        expect(page.locator("#transition-error")).to_contain_text("Complete", timeout=10000)
+
+        # The ticket stays unassigned.
+        page.goto(f"{base_url}/ticket/{tid}")
+        page.wait_for_load_state("networkidle")
+        expect(page.locator("#sprint-section")).to_contain_text("Unassigned", timeout=10000)
+
     def _open_sprint_edit_modal(self, page: Page, base_url: str, sprint_id: int) -> None:
         page.goto(f"{base_url}/sprints")
         page.wait_for_load_state("networkidle")
