@@ -8,6 +8,7 @@ from jackrabbit.models import Project, SprintStatus, TicketStatus
 from jackrabbit.services import (
     ProjectService,
     SprintCompletionBlockedError,
+    SprintNotAssignableError,
     SprintService,
     SprintTransitionError,
     TicketService,
@@ -435,6 +436,146 @@ class TestUnassignTicketFromSprint:
         sprint = sprint_service.create_sprint(number=2601)
         with pytest.raises(ValueError, match="not found"):
             sprint_service.unassign_ticket_from_sprint(sprint.id, 9999)
+
+
+class TestSprintAssignability:
+    """A sprint is assignable while its persisted status is not Complete (JRB-030).
+
+    The rule lives in SprintService; every assignment path asks it. Tickets
+    already assigned keep their sprint when it completes and can still be
+    unassigned from it.
+    """
+
+    def _complete(self, sprint_service: SprintService, sprint) -> None:
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+
+    def test_assignable_sprints_exclude_completed(self, sprint_service):
+        not_started = sprint_service.create_sprint(number=2601, name="Future")
+        in_progress = sprint_service.create_sprint(number=2602, name="Current")
+        sprint_service.transition(in_progress.id, SprintStatus.IN_PROGRESS)
+        completed = sprint_service.create_sprint(number=2603, name="Done")
+        self._complete(sprint_service, completed)
+
+        numbers = [s.number for s in sprint_service.assignable_sprints()]
+        assert numbers == [in_progress.number, not_started.number]
+        assert completed.number not in numbers
+
+    def test_assign_to_not_started_sprint_allowed(self, sprint_service, ticket_service, project):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket = ticket_service.create_ticket(project_id=project.id, title="Movable")
+        assert sprint_service.assign_ticket_to_sprint(sprint.id, ticket.id).sprint_id == sprint.id
+
+    def test_assign_to_in_progress_sprint_allowed(self, sprint_service, ticket_service, project):
+        sprint = sprint_service.create_sprint(number=2601)
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        ticket = ticket_service.create_ticket(project_id=project.id, title="Movable")
+        assert sprint_service.assign_ticket_to_sprint(sprint.id, ticket.id).sprint_id == sprint.id
+
+    def test_assign_to_completed_sprint_refused(self, sprint_service, ticket_service, project):
+        sprint = sprint_service.create_sprint(number=2601, name="Done")
+        self._complete(sprint_service, sprint)
+        ticket = ticket_service.create_ticket(project_id=project.id, title="Late")
+
+        with pytest.raises(SprintNotAssignableError, match="Complete and cannot take new tickets"):
+            sprint_service.assign_ticket_to_sprint(sprint.id, ticket.id)
+        # The refusal leaves the ticket unchanged.
+        assert ticket_service.get_ticket(ticket.id).sprint_id is None
+
+    def test_ticket_keeps_assignment_after_sprint_completes(
+        self, sprint_service, ticket_service, project
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        # A finished ticket does not block the sprint completion (JRB-029).
+        ticket = ticket_service.create_ticket(
+            project_id=project.id,
+            title="Already In",
+            sprint_id=sprint.id,
+            status=TicketStatus.COMPLETE,
+        )
+        self._complete(sprint_service, sprint)
+
+        assert ticket_service.get_ticket(ticket.id).sprint_id == sprint.id
+        # Re-assigning the ticket to its own (completed) sprint stays a no-op.
+        assigned = sprint_service.assign_ticket_to_sprint(sprint.id, ticket.id)
+        assert assigned.sprint_id == sprint.id
+
+    def test_unassign_from_completed_sprint_allowed(self, sprint_service, ticket_service, project):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket = ticket_service.create_ticket(
+            project_id=project.id,
+            title="Movable",
+            sprint_id=sprint.id,
+            status=TicketStatus.COMPLETE,
+        )
+        self._complete(sprint_service, sprint)
+
+        unassigned = sprint_service.unassign_ticket_from_sprint(sprint.id, ticket.id)
+        assert unassigned.sprint_id is None
+
+    def test_create_ticket_with_completed_sprint_refused(
+        self, sprint_service, ticket_service, project
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        self._complete(sprint_service, sprint)
+
+        with pytest.raises(SprintNotAssignableError, match="Complete and cannot take new tickets"):
+            ticket_service.create_ticket(
+                project_id=project.id, title="New In Done", sprint_id=sprint.id
+            )
+        # Nothing was created: the next number is untouched.
+        assert ticket_service.create_ticket(project_id=project.id, title="After").number == 1
+
+    def test_create_ticket_with_open_sprint_allowed(self, sprint_service, ticket_service, project):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket = ticket_service.create_ticket(
+            project_id=project.id, title="Movable", sprint_id=sprint.id
+        )
+        assert ticket.sprint_id == sprint.id
+
+    def test_update_ticket_into_completed_sprint_refused(
+        self, sprint_service, ticket_service, project
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        other = sprint_service.create_sprint(number=2602)
+        ticket = ticket_service.create_ticket(
+            project_id=project.id, title="Movable", sprint_id=sprint.id
+        )
+        self._complete(sprint_service, other)
+
+        with pytest.raises(SprintNotAssignableError, match="Complete and cannot take new tickets"):
+            ticket_service.update_ticket(ticket, sprint_id=other.id)
+        assert ticket_service.get_ticket(ticket.id).sprint_id == sprint.id
+
+    def test_update_ticket_keeping_its_completed_sprint_allowed(
+        self, sprint_service, ticket_service, project
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket = ticket_service.create_ticket(
+            project_id=project.id,
+            title="Movable",
+            sprint_id=sprint.id,
+            status=TicketStatus.COMPLETE,
+        )
+        self._complete(sprint_service, sprint)
+
+        updated = ticket_service.update_ticket(ticket, title="Renamed")
+        assert updated.sprint_id == sprint.id
+
+    def test_update_ticket_unassign_from_completed_sprint_allowed(
+        self, sprint_service, ticket_service, project
+    ):
+        sprint = sprint_service.create_sprint(number=2601)
+        ticket = ticket_service.create_ticket(
+            project_id=project.id,
+            title="Movable",
+            sprint_id=sprint.id,
+            status=TicketStatus.COMPLETE,
+        )
+        self._complete(sprint_service, sprint)
+
+        updated = ticket_service.update_ticket(ticket, sprint_id=None)
+        assert updated.sprint_id is None
 
 
 class TestSprintCrud:

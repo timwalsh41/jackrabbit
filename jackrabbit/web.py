@@ -35,6 +35,7 @@ from jackrabbit.services import (
     LabelService,
     LinkService,
     ProjectService,
+    SprintNotAssignableError,
     SprintService,
     SprintTransitionError,
     TicketService,
@@ -183,7 +184,14 @@ async def ticket_edit(
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     projects = project_service.list_projects()
-    sprints = sprint_service.list_sprints()
+    # The edit form's sprint dropdown offers only assignable sprints (JRB-030);
+    # the ticket's current sprint stays listed even when it is Complete, so
+    # saving the form does not silently unassign the ticket.
+    sprints = sprint_service.assignable_sprints()
+    if ticket.sprint_id is not None:
+        current = sprint_service.get_sprint(ticket.sprint_id)
+        if current is not None and not sprint_service.is_sprint_assignable(current):
+            sprints = [current, *sprints]
     current_labels = label_service.labels_for_ticket(ticket_id)
     label_suggestions = label_service.list_labels_in_use()
 
@@ -752,6 +760,9 @@ def _build_backlog_context(
         "total_pages": total_pages,
         "projects": projects,
         "sprints": sprints,
+        # The row-level Move to Sprint menu offers only assignable sprints
+        # (JRB-030); the filter panel keeps the full list.
+        "assignable_sprints": sprint_service.assignable_sprints(),
         "labels_in_use": labels_in_use,
         "labels_by_ticket": labels_by_ticket,
         "uns_project_id": uns_project.id if uns_project else None,
@@ -1610,7 +1621,7 @@ async def ticket_sprint_section(
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     sprint = sprint_service.get_sprint(ticket.sprint_id) if ticket.sprint_id else None
-    sprints = [] if sprint else sprint_service.list_sprints()
+    sprints = [] if sprint else sprint_service.assignable_sprints()
     return _sprint_section_response(request, ticket, sprint, sprints)
 
 
@@ -1641,6 +1652,9 @@ async def ticket_assign_sprint(
 
     try:
         sprint_service.assign_ticket_to_sprint(sprint_id, ticket_id)
+    except SprintNotAssignableError as e:
+        # A completed sprint takes no new tickets (JRB-030).
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1666,4 +1680,4 @@ async def ticket_unassign_sprint(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
-    return _sprint_section_response(request, ticket, None, sprint_service.list_sprints())
+    return _sprint_section_response(request, ticket, None, sprint_service.assignable_sprints())

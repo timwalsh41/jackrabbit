@@ -877,3 +877,152 @@ async def test_sprint_transitions_missing_sprint_returns_404(
 ) -> None:
     response = await client_with_seeds.get("/api/v1/sprints/9999/transitions")
     assert response.status_code == 404
+
+
+# --- JRB-030: sprint assignment rules for completed sprints -----------------
+
+
+async def _complete_sprint(client: AsyncClient, sprint_id: int) -> None:
+    """Move a sprint to Complete through the legal transition path."""
+    for to_status in ("In Progress", "Complete"):
+        response = await client.post(
+            f"/api/v1/sprints/{sprint_id}/transition", json={"to_status": to_status}
+        )
+        assert response.status_code == 200, response.text
+
+
+async def test_assign_to_completed_sprint_refused_with_reason(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """The assign endpoint refuses a completed sprint and explains why (JRB-030)."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Done")
+    await _complete_sprint(client_with_seeds, sprint["id"])
+    ticket = (
+        await client_with_seeds.post("/api/v1/tickets", json={"project_id": 1, "title": "Late"})
+    ).json()
+
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+    )
+    assert response.status_code == 409
+    assert "Complete" in response.json()["detail"]
+    # The refusal leaves the ticket unassigned.
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert detail["sprint_id"] is None
+
+
+async def test_assign_to_not_started_and_in_progress_sprints_accepted(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Sprints that are not Complete stay assignable (JRB-030)."""
+    not_started = await _make_sprint(client_with_seeds, number=2601, name="Future")
+    in_progress = await _make_sprint(client_with_seeds, number=2602, name="Current")
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{in_progress['id']}/transition", json={"to_status": "In Progress"}
+    )
+    assert response.status_code == 200
+
+    for sprint in (not_started, in_progress):
+        ticket = (
+            await client_with_seeds.post(
+                "/api/v1/tickets", json={"project_id": 1, "title": f"For {sprint['name']}"}
+            )
+        ).json()
+        response = await client_with_seeds.post(
+            f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+        )
+        assert response.status_code == 200
+
+
+async def test_ticket_stays_assigned_after_sprint_completes(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """An existing assignment survives the sprint completing; unassign works (JRB-030)."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Kept")
+    # A finished ticket does not block the sprint completion (JRB-029).
+    ticket = (
+        await client_with_seeds.post(
+            "/api/v1/tickets",
+            json={"project_id": 1, "title": "Member", "status": "Complete"},
+        )
+    ).json()
+    response = await client_with_seeds.post(
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+    )
+    assert response.status_code == 200
+
+    await _complete_sprint(client_with_seeds, sprint["id"])
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert detail["sprint_id"] == sprint["id"]
+
+    response = await client_with_seeds.delete(
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+    )
+    assert response.status_code == 200
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert detail["sprint_id"] is None
+
+
+async def test_create_ticket_in_completed_sprint_refused(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Ticket creation cannot put a ticket into a completed sprint (JRB-030)."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Done")
+    await _complete_sprint(client_with_seeds, sprint["id"])
+
+    response = await client_with_seeds.post(
+        "/api/v1/tickets",
+        json={"project_id": 1, "title": "Born Late", "sprint_id": sprint["id"]},
+    )
+    assert response.status_code == 409
+    assert "Complete" in response.json()["detail"]
+
+
+async def test_edit_ticket_into_completed_sprint_refused(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Ticket editing cannot move a ticket into a completed sprint (JRB-030)."""
+    open_sprint = await _make_sprint(client_with_seeds, number=2601, name="Open")
+    completed = await _make_sprint(client_with_seeds, number=2602, name="Done")
+    await _complete_sprint(client_with_seeds, completed["id"])
+    ticket = (
+        await client_with_seeds.post(
+            "/api/v1/tickets",
+            json={"project_id": 1, "title": "Movable", "sprint_id": open_sprint["id"]},
+        )
+    ).json()
+
+    response = await client_with_seeds.patch(
+        f"/api/v1/tickets/{ticket['id']}", json={"sprint_id": completed["id"]}
+    )
+    assert response.status_code == 409
+    assert "Complete" in response.json()["detail"]
+    # The ticket keeps its existing sprint.
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert detail["sprint_id"] == open_sprint["id"]
+
+
+async def test_edit_ticket_keeping_completed_sprint_allowed(
+    client_with_seeds: AsyncClient,
+) -> None:
+    """Editing other fields keeps an assignment to a sprint that completed (JRB-030)."""
+    sprint = await _make_sprint(client_with_seeds, number=2601, name="Kept")
+    ticket = (
+        await client_with_seeds.post(
+            "/api/v1/tickets",
+            json={
+                "project_id": 1,
+                "title": "Movable",
+                "sprint_id": sprint["id"],
+                "status": "Complete",
+            },
+        )
+    ).json()
+    await _complete_sprint(client_with_seeds, sprint["id"])
+
+    response = await client_with_seeds.patch(
+        f"/api/v1/tickets/{ticket['id']}", json={"title": "Renamed"}
+    )
+    assert response.status_code == 200
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert detail["sprint_id"] == sprint["id"]

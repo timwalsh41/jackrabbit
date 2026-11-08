@@ -900,3 +900,49 @@ class TestBacklogLayoutWidth:
         r = await _get(client, "/backlog")
         assert r.status_code == 200
         assert "overflow-x-auto" in r.text
+
+
+# --- JRB-030: sprint assignment rules for completed sprints -----------------
+
+
+class TestMoveToSprintMenu:
+    """The Move to Sprint menu offers only assignable sprints (JRB-030)."""
+
+    @pytest.fixture
+    async def completed_sprint(self, test_db, client_with_seeds):
+        from jackrabbit.models import SprintStatus
+        from jackrabbit.services import SprintService
+
+        sprint_service = SprintService(test_db)
+        sprint = sprint_service.create_sprint(number=2602, name="Done Sprint")
+        sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
+        sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
+        return {"id": sprint.id, "number": sprint.number}
+
+    async def test_menu_excludes_completed_sprint(
+        self, client_with_seeds, backlog_tickets, completed_sprint
+    ):
+        open_sprint = backlog_tickets["sprint"]
+        unassigned_ticket = backlog_tickets["high"]
+        r = await _get(client_with_seeds, "/backlog")
+        assert r.status_code == 200
+        # The unassigned row offers the open sprint...
+        assert f"/api/v1/sprints/{open_sprint.id}/tickets/{unassigned_ticket.id}" in r.text
+        # ...but not the completed one.
+        assert (
+            f"/api/v1/sprints/{completed_sprint['id']}/tickets/{unassigned_ticket.id}" not in r.text
+        )
+
+    async def test_menu_shows_disabled_entry_when_no_open_sprints(
+        self, client_with_seeds, test_db, seeded_projects, completed_sprint
+    ):
+        from jackrabbit.services import TicketService
+
+        by_prefix = {p.prefix: p for p in seeded_projects}
+        ticket = TicketService(test_db).create_ticket(
+            project_id=by_prefix["UNS"].id, title="Menuless"
+        )
+        r = await _get(client_with_seeds, "/backlog")
+        assert r.status_code == 200
+        assert "No open sprints available" in r.text
+        assert f"/api/v1/sprints/{completed_sprint['id']}/tickets/{ticket.id}" not in r.text
