@@ -6,6 +6,15 @@
            class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
             Sprint {{ sprint.number }}{% if sprint.name %} — {{ sprint.name }}{% endif %}
         </a>
+        {# Sprint lifecycle status (JRB-026): reads the same as on the
+           Sprints list and the board — the persisted status column. #}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+            {% if sprint.status == 'Not Started' %}bg-gray-100 text-gray-800
+            {% elif sprint.status == 'In Progress' %}bg-blue-100 text-blue-800
+            {% elif sprint.status == 'Complete' %}bg-green-100 text-green-800
+            {% else %}bg-gray-100 text-gray-800{% endif %}">
+            {{ sprint.status }}
+        </span>
         <form hx-post="/tickets/{{ ticket.id }}/unassign-sprint"
               hx-target="#sprint-section"
               hx-swap="outerHTML"
