@@ -1,0 +1,36 @@
+{#- Shared Start/Complete/Reopen sprint transition-action fragment (JRB-029).
+    Single copy of the three-state switch so the Sprints list row and the
+    sprint board post the same to_status for each state (docs/CODING_STANDARDS.md:
+    reusable fragments are Jinja2 partials).
+
+    Expects `sprint` and `status` in the context plus these include-local
+    variables set by the caller:
+      view    "row" (refresh the Sprints-list row) or "board" (refresh the board)
+      target  HTMX hx-target selector the refreshed partial swaps into
+      labels  {"start", "complete", "reopen"} button texts
+      classes {"start", "complete", "reopen"} button CSS classes -#}
+{% if status == 'Not Started' %}
+<form hx-post="/sprints/{{ sprint.id }}/transition?view={{ view }}"
+      hx-target="{{ target }}"
+      hx-swap="outerHTML"
+      class="inline">
+    <input type="hidden" name="to_status" value="In Progress">
+    <button type="submit" class="{{ classes.start }}">{{ labels.start }}</button>
+</form>
+{% elif status == 'In Progress' %}
+<form hx-post="/sprints/{{ sprint.id }}/transition?view={{ view }}"
+      hx-target="{{ target }}"
+      hx-swap="outerHTML"
+      class="inline">
+    <input type="hidden" name="to_status" value="Complete">
+    <button type="submit" class="{{ classes.complete }}">{{ labels.complete }}</button>
+</form>
+{% elif status == 'Complete' %}
+<form hx-post="/sprints/{{ sprint.id }}/transition?view={{ view }}"
+      hx-target="{{ target }}"
+      hx-swap="outerHTML"
+      class="inline">
+    <input type="hidden" name="to_status" value="In Progress">
+    <button type="submit" class="{{ classes.reopen }}">{{ labels.reopen }}</button>
+</form>
+{% endif %}

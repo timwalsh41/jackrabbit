@@ -46,31 +46,14 @@
         {{ tickets|length }}
     </td>
     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-        {% if status == 'Not Started' %}
-        <form hx-post="/sprints/{{ sprint.id }}/transition?view=row"
-              hx-target="#sprint-row-{{ sprint.id }}"
-              hx-swap="outerHTML"
-              class="inline">
-            <input type="hidden" name="to_status" value="In Progress">
-            <button type="submit" class="text-green-600 hover:text-green-900">Start</button>
-        </form>
-        {% elif status == 'In Progress' %}
-        <form hx-post="/sprints/{{ sprint.id }}/transition?view=row"
-              hx-target="#sprint-row-{{ sprint.id }}"
-              hx-swap="outerHTML"
-              class="inline">
-            <input type="hidden" name="to_status" value="Complete">
-            <button type="submit" class="text-green-600 hover:text-green-900">Complete</button>
-        </form>
-        {% elif status == 'Complete' %}
-        <form hx-post="/sprints/{{ sprint.id }}/transition?view=row"
-              hx-target="#sprint-row-{{ sprint.id }}"
-              hx-swap="outerHTML"
-              class="inline">
-            <input type="hidden" name="to_status" value="In Progress">
-            <button type="submit" class="text-blue-600 hover:text-blue-900">Reopen</button>
-        </form>
-        {% endif %}
+        {#- Shared Start/Complete/Reopen fragment; row-specific context below. -#}
+        {% set view = 'row' %}
+        {% set target = '#sprint-row-' ~ sprint.id %}
+        {% set labels = {'start': 'Start', 'complete': 'Complete', 'reopen': 'Reopen'} %}
+        {% set classes = {'start': 'text-green-600 hover:text-green-900',
+                          'complete': 'text-green-600 hover:text-green-900',
+                          'reopen': 'text-blue-600 hover:text-blue-900'} %}
+        {% include "sprint_transition_actions.html" %}
         <a href="/sprints/{{ sprint.id }}/detail" class="text-indigo-600 hover:text-indigo-900">
             Board
         </a>

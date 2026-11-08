@@ -111,6 +111,15 @@ def _label_reads(labels: list[Any]) -> list[LabelRead]:
     return [LabelRead.model_validate(label) for label in labels]
 
 
+def _sprint_not_assignable_conflict(e: SprintNotAssignableError) -> HTTPException:
+    """Shared mapping of SprintNotAssignableError to its HTTP response.
+
+    A completed sprint takes no new tickets from any entry point (JRB-030);
+    every ticket-creation/edit path that can hit the refusal surfaces it as
+    the same 409 detail."""
+    return HTTPException(status_code=409, detail=str(e))
+
+
 def _ticket_read(ticket: Ticket, labels: list[Any]) -> TicketRead:
     """A ticket payload including the labels it carries."""
     read = TicketRead.model_validate(ticket)
@@ -506,8 +515,7 @@ def create_ticket(
             links=[(link.link_type, link.target_id) for link in ticket_in.links],
         )
     except SprintNotAssignableError as e:
-        # A completed sprint takes no new tickets (JRB-030).
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        raise _sprint_not_assignable_conflict(e) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -572,8 +580,7 @@ def create_child_ticket(
             status=child_in.status,
         )
     except SprintNotAssignableError as e:
-        # A completed sprint takes no new tickets (JRB-030).
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        raise _sprint_not_assignable_conflict(e) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -783,9 +790,8 @@ def update_ticket(
         try:
             ticket = service.update_ticket(ticket, **update_data)
         except SprintNotAssignableError as e:
-            # Editing a ticket into a completed sprint is refused (JRB-030);
-            # the ticket is unchanged in the DB.
-            raise HTTPException(status_code=409, detail=str(e)) from e
+            # The refusal leaves the ticket unchanged in the DB (JRB-030).
+            raise _sprint_not_assignable_conflict(e) from e
 
     if new_criteria is not None:
         try:
