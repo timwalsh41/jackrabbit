@@ -20,6 +20,7 @@ Jackrabbit offers a lightweight, web-based issue tracking and project/sprint man
 - Update ticket status appropriately as you proceed through workflow (after grooming, status should be `Groomed`, move ticket to `In Progress` when implementing, to `Ready for Review` when PR is available, and to `Complete` when merged)
 - Triage label mappings are fetched from `GET /api/v1/triage/roles` at setup time. Canonical roles → Jackrabbit label strings.
 - Do not modify sprints (CRUD, move tickets, etc.) without explicit user consent or instruction
+- Always reference the ticket number (epic, story, or bug) in the commit title and PR title
 
 ## Groomed fields
 
