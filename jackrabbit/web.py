@@ -229,24 +229,12 @@ async def sprint_view(
     request: Request,
     sprint_id: int,
     sprint_service: SprintService = Depends(get_sprint_service),
-) -> HTMLResponse:
-    result = sprint_service.get_sprint_with_tickets_by_status(sprint_id)
-    if not result:
+) -> RedirectResponse:
+    """Legacy board URL; redirects to the canonical GET /sprints/{id}/detail."""
+    if not sprint_service.get_sprint_with_tickets_by_status(sprint_id):
         raise HTTPException(status_code=404, detail="Sprint not found")
 
-    sprint = result["sprint"]
-    tickets_by_status = result["tickets_by_status"]
-    status = result["status"]
-
-    return templates.TemplateResponse(
-        request,
-        "sprint_detail.html",
-        {
-            "sprint": sprint,
-            "tickets_by_status": tickets_by_status,
-            "status": status,
-        },
-    )
+    return RedirectResponse(url=f"/sprints/{sprint_id}/detail", status_code=307)
 
 
 @router.get("/sprints/{sprint_id}/detail", response_class=HTMLResponse)

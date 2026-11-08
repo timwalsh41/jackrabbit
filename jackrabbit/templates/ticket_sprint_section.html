@@ -2,7 +2,7 @@
    Swaps itself in place after assign/unassign so no full reload is needed. #}
 <div id="sprint-section" class="flex items-center gap-2 flex-wrap">
     {% if sprint %}
-        <a href="/sprint/{{ sprint.id }}"
+        <a href="/sprints/{{ sprint.id }}/detail"
            class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
             Sprint {{ sprint.number }}{% if sprint.name %} — {{ sprint.name }}{% endif %}
         </a>
