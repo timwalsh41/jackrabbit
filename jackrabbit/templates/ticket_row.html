@@ -149,7 +149,7 @@
                             hx-post="/api/v1/sprints/{{ sprint.id }}/tickets/{{ ticket.id }}"
                             hx-target="#ticket-row-{{ ticket.id }}"
                             hx-swap="outerHTML"
-                            hx-on::after-request="if(event.detail.successful) { document.getElementById('move-to-sprint-dropdown-{{ ticket.id }}').classList.add('hidden'); }">
+                            hx-on::after-request="if(event.detail.successful) { document.getElementById('move-to-sprint-dropdown-{{ ticket.id }}').classList.add('hidden'); } else { var el = document.getElementById('sprint-move-error-{{ ticket.id }}'); var msg = 'Move to sprint failed (' + event.detail.xhr.status + ').'; try { var d = JSON.parse(event.detail.xhr.responseText); if (d && typeof d.detail === 'string') { msg = d.detail; } } catch (e) {} el.textContent = msg; el.classList.remove('hidden'); }">
                         {{ sprint.number }}{% if sprint.name %} - {{ sprint.name }}{% endif %}
                     </button>
                     {% endfor %}
@@ -161,6 +161,12 @@
                     {% endif %}
                 </div>
             </div>
+            {# Refusal banner (JRB-026): a sprint can complete while the page is
+               open, so the assign endpoint answers 409 and this banner shows
+               the response's reason next to the row. #}
+            <p id="sprint-move-error-{{ ticket.id }}"
+               class="hidden text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 max-w-[16rem]"
+               role="alert"></p>
             {% endif %}
             <form hx-delete="/api/v1/tickets/{{ ticket.id }}"
                   hx-target="#ticket-row-{{ ticket.id }}"
