@@ -9,7 +9,9 @@
  * captured when the paste happened (the user may type or move the caret while
  * the upload is in flight). Per-textarea work is serialized: images from one
  * paste keep their paste order, and a second paste made while the first is
- * still uploading inserts after it, at its own captured position. Ordinary
+ * still uploading inserts after it — its paste-time position is shifted by
+ * every markdown inserted since it was captured, in queue order, so
+ * concurrent pastes never land inside an earlier reference. Ordinary
  * text paste passes through untouched. Rejections (unsupported type, too
  * large) surface the server's detail message in the hidden red banner
  * ([data-image-error]) inside the same form.
@@ -67,13 +69,20 @@
         textarea.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
-    // One FIFO chain per textarea (WeakMap): uploads and insertions run in
-    // order, so images from one paste insert in paste order even when the
-    // uploads complete out of sequence, and a paste made while an earlier
-    // one is still in flight lands after it instead of racing it.
+    // Per textarea (WeakMap):
+    // - insertQueues: one FIFO chain; uploads and insertions run in order, so
+    //   images from one paste insert in paste order even when the uploads
+    //   complete out of sequence, and a paste made while an earlier one is
+    //   still in flight lands after it instead of racing it.
+    // - insertedLengths: total markdown length inserted so far. Each paste
+    //   captures this total as its `base`; when its turn comes it inserts at
+    //   its captured offsets plus everything inserted since — including
+    //   insertions queued by earlier pastes — so concurrent pastes keep their
+    //   paste-time positions relative to the final text.
     var insertQueues = new WeakMap();
+    var insertedLengths = new WeakMap();
 
-    function uploadAndInsert(textarea, file, start, end, shift) {
+    function uploadAndInsert(textarea, file, start, end, base) {
         var body = new FormData();
         body.append("file", file, file.name || "paste.png");
         var chain = insertQueues.get(textarea) || Promise.resolve();
@@ -109,10 +118,13 @@
                 if (markdown === null) {
                     return;
                 }
-                // The paste-time selection, shifted by the markdown already
-                // inserted for earlier images of the same paste.
-                insertAtCaret(textarea, markdown, start + shift.value, end + shift.value);
-                shift.value += markdown.length;
+                // The paste-time selection, shifted by all markdown inserted
+                // since the paste was captured (earlier files of the same
+                // paste plus earlier pastes that completed meanwhile).
+                var total = insertedLengths.get(textarea) || 0;
+                var shift = total - base;
+                insertAtCaret(textarea, markdown, start + shift, end + shift);
+                insertedLengths.set(textarea, total + markdown.length);
             });
         // A failed insertion must not leave the chain rejected, or every
         // later paste for this textarea would silently stop working.
@@ -141,13 +153,13 @@
         // where the paste happened, not where the caret ends up.
         var start = typeof target.selectionStart === "number" ? target.selectionStart : 0;
         var end = typeof target.selectionEnd === "number" ? target.selectionEnd : 0;
-        var shift = { value: 0 };
+        var base = insertedLengths.get(target) || 0;
         files.forEach(function (file) {
             if (file.size > MAX_BYTES) {
                 showError(target, "Image is too large. The maximum size is 10 MiB.");
                 return;
             }
-            uploadAndInsert(target, file, start, end, shift);
+            uploadAndInsert(target, file, start, end, base);
         });
     });
 })();
