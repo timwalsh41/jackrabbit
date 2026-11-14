@@ -121,3 +121,76 @@ class TestMarkdownSafety:
         assert """
             not in html
         )
+
+
+class TestMarkdownImages:
+    """Image syntax (JRB-027): only app-hosted image URLs render as <img>.
+
+    Uploaded screenshots live under the app's ``/images/<name>`` route. Any
+    other URL (remote, ``data:``, traversal) must stay literal escaped text so
+    a description cannot inject markup or pull remote image content.
+    """
+
+    def test_app_hosted_image_renders_as_img(self):
+        html = render_markdown("![screenshot](/images/abc123.png)")
+        assert html == '<p><img src="/images/abc123.png" alt="screenshot"></p>'
+
+    def test_image_without_alt_text(self):
+        html = render_markdown("![](/images/def456.webp)")
+        assert html == '<p><img src="/images/def456.webp" alt=""></p>'
+
+    def test_image_allowed_name_characters(self):
+        html = render_markdown("![x](/images/A-b_c.9.jpg)")
+        assert html == '<p><img src="/images/A-b_c.9.jpg" alt="x"></p>'
+
+    def test_image_inline_with_surrounding_text(self):
+        html = render_markdown("before ![shot](/images/x.gif) after")
+        assert html == '<p>before <img src="/images/x.gif" alt="shot"> after</p>'
+
+    def test_image_survives_bold_and_italic_processing(self):
+        """The image is stashed like links, so inline markers inside alt/URL
+        stay inert (no <strong>/<em> inside the emitted tag)."""
+        html = render_markdown("![**alt** _more_](/images/x.png)")
+        assert html == '<p><img src="/images/x.png" alt="**alt** _more_"></p>'
+
+    def test_image_alt_quote_is_attribute_escaped(self):
+        """The description text is escaped with quote=False upstream, so a raw
+        `"` in the alt text must be entity-escaped for the alt attribute."""
+        html = render_markdown('![a"b](/images/x.png)')
+        assert html == '<p><img src="/images/x.png" alt="a&quot;b"></p>'
+
+    @pytest.mark.parametrize(
+        "markup",
+        [
+            "![x](https://evil.example.com/track.png)",
+            "![x](http://evil.example.com/track.png)",
+            "![x](//evil.example.com/track.png)",
+            "![x](data:image/png;base64,AAAA)",
+            "![x](javascript:alert(1))",
+            "![x](../secrets.txt)",
+            "![x](/images/..%2f..%2fjackrabbit.db)",
+            "![x](/images/sub/dir.png)",
+            '![x](/images/x"onerror="alert(1))',
+        ],
+    )
+    def test_unsafe_image_urls_stay_literal_text(self, markup):
+        """Non app-hosted image URLs must not become <img> tags or remote loads."""
+        html = render_markdown(markup)
+        assert "<img" not in html
+        # The markup remains visible as literal text (the description is
+        # escaped with quote=False, so a raw `"` stays raw in literal text).
+        assert markup in html
+
+    def test_unsafe_image_inside_paragraph_with_text(self):
+        html = render_markdown("look ![x](https://evil.example.com/a.png) now")
+        assert "<img" not in html
+        assert "![x](https://evil.example.com/a.png)" in html
+
+    def test_link_syntax_still_renders_after_image_support(self):
+        html = render_markdown("see [docs](https://example.com)")
+        assert '<a href="https://example.com"' in html
+
+    def test_link_that_looks_like_image_stays_a_link(self):
+        html = render_markdown("[not an image](/images/x.png)")
+        assert "<img" not in html
+        assert '<a href="/images/x.png"' in html
