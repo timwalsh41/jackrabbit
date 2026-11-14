@@ -9,9 +9,10 @@
  * captured when the paste happened (the user may type or move the caret while
  * the upload is in flight). Per-textarea work is serialized: images from one
  * paste keep their paste order, and a second paste made while the first is
- * still uploading inserts after it — its paste-time position is shifted by
- * every markdown inserted since it was captured, in queue order, so
- * concurrent pastes never land inside an earlier reference. Ordinary
+ * still uploading inserts after it — its paste-time position is shifted only
+ * by completed insertions that landed at or before its own paste-time start,
+ * so concurrent pastes keep their paste-time positions relative to the final
+ * text without landing inside an earlier reference. Ordinary
  * text paste passes through untouched. Rejections (unsupported type, too
  * large) surface the server's detail message in the hidden red banner
  * ([data-image-error]) inside the same form.
@@ -74,15 +75,20 @@
     //   images from one paste insert in paste order even when the uploads
     //   complete out of sequence, and a paste made while an earlier one is
     //   still in flight lands after it instead of racing it.
-    // - insertedLengths: total markdown length inserted so far. Each paste
-    //   captures this total as its `base`; when its turn comes it inserts at
-    //   its captured offsets plus everything inserted since — including
-    //   insertions queued by earlier pastes — so concurrent pastes keep their
-    //   paste-time positions relative to the final text.
+    // - insertions: every completed insertion as { start, length }, where
+    //   `start` is the position actually used (paste-time position plus any
+    //   shift) and `length` the inserted markdown length. Each paste captures
+    //   the array length at paste time; when its turn comes it shifts only by
+    //   completed insertions recorded since its capture whose start is at or
+    //   before its own paste-time start — insertions that landed before it
+    //   push it forward, insertions that landed after it do not affect it,
+    //   and failed insertions record nothing. Within one paste event (same
+    //   caret), an earlier insertion starting at the same position counts,
+    //   so successive same-position references keep their paste order.
     var insertQueues = new WeakMap();
-    var insertedLengths = new WeakMap();
+    var insertions = new WeakMap();
 
-    function uploadAndInsert(textarea, file, start, end, base) {
+    function uploadAndInsert(textarea, file, start, end, capturedCount) {
         var body = new FormData();
         body.append("file", file, file.name || "paste.png");
         var chain = insertQueues.get(textarea) || Promise.resolve();
@@ -118,13 +124,20 @@
                 if (markdown === null) {
                     return;
                 }
-                // The paste-time selection, shifted by all markdown inserted
-                // since the paste was captured (earlier files of the same
-                // paste plus earlier pastes that completed meanwhile).
-                var total = insertedLengths.get(textarea) || 0;
-                var shift = total - base;
+                // The paste-time selection, pushed forward only by the
+                // completed insertions recorded since this paste was captured
+                // that landed at or before its paste-time start (earlier
+                // files of the same paste share the caret and qualify).
+                var completed = insertions.get(textarea) || [];
+                var shift = 0;
+                for (var i = capturedCount; i < completed.length; i++) {
+                    if (completed[i].start <= start) {
+                        shift += completed[i].length;
+                    }
+                }
                 insertAtCaret(textarea, markdown, start + shift, end + shift);
-                insertedLengths.set(textarea, total + markdown.length);
+                completed.push({ start: start + shift, length: markdown.length });
+                insertions.set(textarea, completed);
             });
         // A failed insertion must not leave the chain rejected, or every
         // later paste for this textarea would silently stop working.
@@ -153,13 +166,13 @@
         // where the paste happened, not where the caret ends up.
         var start = typeof target.selectionStart === "number" ? target.selectionStart : 0;
         var end = typeof target.selectionEnd === "number" ? target.selectionEnd : 0;
-        var base = insertedLengths.get(target) || 0;
+        var capturedCount = (insertions.get(target) || []).length;
         files.forEach(function (file) {
             if (file.size > MAX_BYTES) {
                 showError(target, "Image is too large. The maximum size is 10 MiB.");
                 return;
             }
-            uploadAndInsert(target, file, start, end, base);
+            uploadAndInsert(target, file, start, end, capturedCount);
         });
     });
 })();

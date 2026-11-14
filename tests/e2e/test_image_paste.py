@@ -314,6 +314,70 @@ class TestConcurrentPastes:
         assert final_value == "hello wo" + png_refs[0] + gif_refs[0] + "rld", final_value
         assert page.locator("#ticket-form [data-image-error]").is_hidden()
 
+    def test_second_paste_at_earlier_offset_lands_at_its_paste_position(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """A second paste at an EARLIER caret while the first is still pending.
+
+        The first paste captures caret 8 in "hello world"; the second fires
+        at caret 2 before the first upload completes. The queued second
+        insertion must be shifted only by completed insertions that landed
+        at or before its own paste-time start — the first reference lands at
+        8, after the second's paste position, so it must not push the second
+        reference away from offset 2. (Shifting by every earlier insertion
+        regardless of position would drop the second reference at 8+len,
+        inside/after the first markdown.)
+
+        Different formats (PNG, then GIF) make the references distinguishable:
+        the GIF reference must sit at offset 2 and the PNG reference after the
+        remaining prose, i.e. 'he' + GIF + 'llo wo' + PNG + 'rld'.
+        """
+        ticket = make_ticket(title="Earlier offset paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        png_b64 = base64.b64encode(png).decode()
+        gif_b64 = base64.b64encode(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;").decode()
+        synchronous_value = page.evaluate(
+            """([selector, pngB64, gifB64]) => {
+                const pngBytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+                const gifBytes = Uint8Array.from(atob(gifB64), c => c.charCodeAt(0));
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = "hello world";
+                target.setSelectionRange(8, 8);
+                const dtPng = new DataTransfer();
+                dtPng.items.add(new File([pngBytes], "shot", { type: "image/png" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dtPng, bubbles: true, cancelable: true
+                }));
+                // Caret moves to 2 for the second paste while the PNG upload
+                // is still pending (insertion happens in a later task).
+                target.setSelectionRange(2, 2);
+                const dtGif = new DataTransfer();
+                dtGif.items.add(new File([gifBytes], "shot", { type: "image/gif" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dtGif, bubbles: true, cancelable: true
+                }));
+                return target.value;
+            }""",
+            [selector, png_b64, gif_b64],
+        )
+        # Nothing is inserted synchronously: both uploads are still pending.
+        assert synchronous_value == "hello world"
+
+        _wait_for_image_reference(page, selector, count=2)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        assert len(png_refs) == 1 and len(gif_refs) == 1, final_value
+        # The GIF reference sits at its paste-time offset 2 and the PNG
+        # reference at its own offset 8 — the later-queued PNG insertion
+        # landing after the GIF's position does not shift the GIF.
+        assert final_value == "he" + gif_refs[0] + "llo wo" + png_refs[0] + "rld", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
 
 class TestPasteIntoRowEditModal:
     def test_paste_save_and_render(
