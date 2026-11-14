@@ -19,7 +19,9 @@ from fastapi import Depends
 
 from jackrabbit.config import Settings, get_settings
 
-MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MiB per image
+# 10 MiB per image; mirrored client-side as MAX_BYTES in
+# jackrabbit/static/js/clipboard-images.js — keep the two in sync.
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 UPLOADS_SUBDIR = "uploads"
 
 # Generated-name shape: <uuid hex>.<known extension>. resolve() trusts only

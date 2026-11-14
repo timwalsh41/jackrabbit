@@ -15,6 +15,7 @@ banner) that a real Ctrl+V would.
 """
 
 import base64
+import re
 import struct
 import zlib
 
@@ -92,14 +93,16 @@ def _paste_oversized_file(page: Page, selector: str) -> None:
     )
 
 
-def _wait_for_image_reference(page: Page, selector: str) -> None:
-    """Wait until the textarea carries an inserted markdown image reference."""
+def _wait_for_image_reference(page: Page, selector: str, count: int = 1) -> None:
+    """Wait until the textarea carries `count` inserted markdown references."""
     page.wait_for_function(
-        """(selector) => {
+        """([selector, count]) => {
             const value = document.querySelector(selector).value;
-            return /!\\[image\\]\\(\\/images\\/[0-9a-f]{32}\\.(png|jpg|gif|webp)\\)/.test(value);
+            const matches =
+                value.match(/!\\[image\\]\\(\\/images\\/[0-9a-f]{32}\\.(png|jpg|gif|webp)\\)/g);
+            return matches !== null && matches.length === count;
         }""",
-        arg=selector,
+        arg=[selector, count],
         timeout=10000,
     )
 
@@ -247,6 +250,69 @@ class TestPasteIntoFullPageEditForm:
             }""",
             timeout=10000,
         )
+
+
+class TestConcurrentPastes:
+    def test_second_paste_while_first_pending_lands_after_first(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """A second paste dispatched while the first upload is still in flight.
+
+        Both paste events fire in one synchronous JS task, so the second
+        paste's caret offset is captured before the first insertion happens
+        (the upload round-trip can only complete in a later task). The FIFO
+        queue then inserts the first reference and must shift the queued
+        second insertion by its length, so the second reference lands right
+        after the first — never inside it or at the stale caret offset.
+
+        The two pastes carry different formats (PNG, then GIF), so the
+        inserted references are distinguishable and the paste order (PNG
+        before GIF) is assertable.
+        """
+        ticket = make_ticket(title="Concurrent paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        png_b64 = base64.b64encode(png).decode()
+        gif_b64 = base64.b64encode(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;").decode()
+        # Caret at 8 inside "hello world": without the offset adjustment the
+        # second reference would insert at 8 — inside/at the start of the
+        # markdown the first paste just inserted at 8.
+        synchronous_value = page.evaluate(
+            """([selector, pngB64, gifB64]) => {
+                const pngBytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+                const gifBytes = Uint8Array.from(atob(gifB64), c => c.charCodeAt(0));
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = "hello world";
+                target.setSelectionRange(8, 8);
+                for (const [bytes, mime] of [
+                    [pngBytes, "image/png"], [gifBytes, "image/gif"]
+                ]) {
+                    const dt = new DataTransfer();
+                    dt.items.add(new File([bytes], "shot", { type: mime }));
+                    target.dispatchEvent(new ClipboardEvent("paste", {
+                        clipboardData: dt, bubbles: true, cancelable: true
+                    }));
+                }
+                return target.value;
+            }""",
+            [selector, png_b64, gif_b64],
+        )
+        # Nothing is inserted synchronously: both uploads are still pending.
+        assert synchronous_value == "hello world"
+
+        _wait_for_image_reference(page, selector, count=2)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        assert len(png_refs) == 1 and len(gif_refs) == 1, final_value
+        # The first paste's PNG reference comes first and the second paste's
+        # GIF reference right after it — neither landed at the stale caret
+        # offset inside the other's markdown.
+        assert final_value == "hello wo" + png_refs[0] + gif_refs[0] + "rld", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
 
 
 class TestPasteIntoRowEditModal:
