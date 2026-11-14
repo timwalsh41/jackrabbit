@@ -374,6 +374,127 @@ class TestConcurrentPastes:
         assert final_value == "hello " + png_refs[0] + gif_refs[0] + " again", final_value
         assert page.locator("#ticket-form [data-image-error]").is_hidden()
 
+    def test_second_paste_after_replaced_selection_lands_at_net_shifted_caret(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """A queued paste at a caret AFTER a selection the first paste replaces.
+
+        The first paste replaces the four-character selection [4, 8) ('XXXX')
+        with its reference, shrinking the text by 4. The second paste was
+        queued at caret 12 — after the selection, before trailing prose — and
+        must shift by the NET delta (reference length minus the replaced 4),
+        not by the reference length alone: caret 12 lands at 12 + len1 - 4 =
+        8 + len1, i.e. exactly where caret 12 was, right before 'IJ'.
+        Shifting by the length alone overshoots by 4 and drops the second
+        reference after the trailing prose (masked at end-of-text only by
+        setRangeText clamping, hence the 'IJ' tail).
+
+        Different formats (PNG, then GIF) make the references distinguishable
+        and the paste order assertable.
+        """
+        ticket = make_ticket(title="Net shift paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        png_b64 = base64.b64encode(png).decode()
+        gif_b64 = base64.b64encode(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;").decode()
+        synchronous_value = page.evaluate(
+            """([selector, pngB64, gifB64]) => {
+                const pngBytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+                const gifBytes = Uint8Array.from(atob(gifB64), c => c.charCodeAt(0));
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = "abcdXXXXefghIJ";
+                target.setSelectionRange(4, 8);
+                const dtPng = new DataTransfer();
+                dtPng.items.add(new File([pngBytes], "shot", { type: "image/png" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dtPng, bubbles: true, cancelable: true
+                }));
+                // Caret moves past the selection for the second paste while
+                // the PNG upload is still pending.
+                target.setSelectionRange(12, 12);
+                const dtGif = new DataTransfer();
+                dtGif.items.add(new File([gifBytes], "shot", { type: "image/gif" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dtGif, bubbles: true, cancelable: true
+                }));
+                return target.value;
+            }""",
+            [selector, png_b64, gif_b64],
+        )
+        # Nothing is inserted synchronously: both uploads are still pending.
+        assert synchronous_value == "abcdXXXXefghIJ"
+
+        _wait_for_image_reference(page, selector, count=2)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        assert len(png_refs) == 1 and len(gif_refs) == 1, final_value
+        # The selection was replaced once by the first reference and the
+        # second reference sits exactly at the net-shifted caret position:
+        # right where caret 12 was, before the trailing 'IJ'.
+        assert final_value == "abcd" + png_refs[0] + "efgh" + gif_refs[0] + "IJ", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
+    def test_second_paste_starting_inside_replaced_selection_lands_after_first(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """A queued paste whose caret starts INSIDE the replaced selection.
+
+        Paste 1 replaces [4, 8) ('XXXX') with its reference; paste 2 is queued
+        at caret 6, inside that range. The consumed-selection rule must anchor
+        the second reference immediately after the first one (at the first
+        reference's executed end) — not at the shifted adjusted caret, which
+        would land inside the following prose. Nothing further is deleted:
+        'efgh' survives intact.
+        """
+        ticket = make_ticket(title="Partial overlap paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        png_b64 = base64.b64encode(png).decode()
+        gif_b64 = base64.b64encode(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;").decode()
+        synchronous_value = page.evaluate(
+            """([selector, pngB64, gifB64]) => {
+                const pngBytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+                const gifBytes = Uint8Array.from(atob(gifB64), c => c.charCodeAt(0));
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = "abcdXXXXefgh";
+                target.setSelectionRange(4, 8);
+                const dtPng = new DataTransfer();
+                dtPng.items.add(new File([pngBytes], "shot", { type: "image/png" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dtPng, bubbles: true, cancelable: true
+                }));
+                // Caret moves inside the replaced selection for the second
+                // paste while the PNG upload is still pending.
+                target.setSelectionRange(6, 6);
+                const dtGif = new DataTransfer();
+                dtGif.items.add(new File([gifBytes], "shot", { type: "image/gif" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dtGif, bubbles: true, cancelable: true
+                }));
+                return target.value;
+            }""",
+            [selector, png_b64, gif_b64],
+        )
+        # Nothing is inserted synchronously: both uploads are still pending.
+        assert synchronous_value == "abcdXXXXefgh"
+
+        _wait_for_image_reference(page, selector, count=2)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        assert len(png_refs) == 1 and len(gif_refs) == 1, final_value
+        # The second reference sits right after the first one and nothing
+        # else was deleted — the following prose ('efgh') is intact.
+        assert final_value == "abcd" + png_refs[0] + gif_refs[0] + "efgh", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
     def test_single_paste_over_selection_replaces_it(
         self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
     ):
