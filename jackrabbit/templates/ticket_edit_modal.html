@@ -51,8 +51,10 @@
                         <textarea id="edit_description"
                                   name="description"
                                   rows="4"
+                                  data-description-editor
                                   class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                                   placeholder="Detailed description...">{{ ticket.description or '' }}</textarea>
+                        <div data-image-error role="alert" class="hidden mt-2 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700"></div>
                     </div>
 
                     {% with field_id = "edit-labels" %}

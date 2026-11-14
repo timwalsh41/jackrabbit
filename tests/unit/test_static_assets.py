@@ -73,6 +73,7 @@ class TestStaticAssetsExist:
             ("/static/vendor/htmx.min.js", "htmx"),
             ("/static/vendor/htmx-json-enc.js", "json-enc"),
             ("/static/js/sprint-dropdown.js", "sprint"),
+            ("/static/js/clipboard-images.js", "clipboard"),
             ("/static/img/favicon.svg", "<svg"),
         ],
     )
