@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from jackrabbit.database import get_session
+from jackrabbit.image_storage import ImageNotFoundError, ImageStorage, get_image_storage
 from jackrabbit.labels import parse_label_ids, parse_label_match
 from jackrabbit.markdown import render_markdown
 from jackrabbit.models import (
@@ -1681,3 +1682,28 @@ async def ticket_unassign_sprint(
             raise HTTPException(status_code=400, detail=str(e)) from e
 
     return _sprint_section_response(request, ticket, None, sprint_service.assignable_sprints())
+
+
+# Image serving (JRB-027): stored uploads live under DATA_DIR/uploads, so
+# they need a dedicated route (the /static mount serves the package dir).
+@router.get("/images/{name}")
+def serve_image(
+    name: str,
+    storage: ImageStorage = Depends(get_image_storage),
+) -> FileResponse:
+    """Serve one stored upload image, and only one.
+
+    ``ImageStorage.resolve`` accepts only generated upload names, so this
+    route can never expose files outside the uploads directory (nor arbitrary
+    DATA_DIR files like the SQLite database).
+    """
+    try:
+        path, media_type = storage.resolve(name)
+    except ImageNotFoundError as e:
+        raise HTTPException(status_code=404, detail="Image not found") from e
+    # Generated names are unique forever (UUID), so the content is immutable.
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
