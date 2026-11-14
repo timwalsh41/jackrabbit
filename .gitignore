@@ -28,6 +28,7 @@ data/
 .coverage
 htmlcov/
 .pytest_cache/
+test-results/
 
 # IDE
 .vscode/
