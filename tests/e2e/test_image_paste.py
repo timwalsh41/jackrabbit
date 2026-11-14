@@ -314,6 +314,106 @@ class TestConcurrentPastes:
         assert final_value == "hello wo" + png_refs[0] + gif_refs[0] + "rld", final_value
         assert page.locator("#ticket-form [data-image-error]").is_hidden()
 
+    def test_concurrent_pastes_over_selection_keep_following_text(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """Two pastes over the same NON-EMPTY selection while both pending.
+
+        The first completed insertion replaces the selection ('world') with
+        its reference. The second queued insertion must not replace again:
+        its paste-time range was already consumed by the first insertion, so
+        it collapses to insert-only right after the first reference and the
+        text following the selection (' again') survives untouched.
+
+        The selection sits before trailing prose on purpose: the bug deletes
+        the text that follows the first inserted reference (the stale end
+        offset spans the original selection length), which is invisible when
+        the selection runs to the end of the value. Different formats (PNG,
+        then GIF) make the references distinguishable and the paste order
+        assertable.
+        """
+        ticket = make_ticket(title="Concurrent selection paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        png_b64 = base64.b64encode(png).decode()
+        gif_b64 = base64.b64encode(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;").decode()
+        synchronous_value = page.evaluate(
+            """([selector, pngB64, gifB64]) => {
+                const pngBytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+                const gifBytes = Uint8Array.from(atob(gifB64), c => c.charCodeAt(0));
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = "hello world again";
+                target.setSelectionRange(6, 11);
+                for (const [bytes, mime] of [
+                    [pngBytes, "image/png"], [gifBytes, "image/gif"]
+                ]) {
+                    const dt = new DataTransfer();
+                    dt.items.add(new File([bytes], "shot", { type: mime }));
+                    target.dispatchEvent(new ClipboardEvent("paste", {
+                        clipboardData: dt, bubbles: true, cancelable: true
+                    }));
+                }
+                return target.value;
+            }""",
+            [selector, png_b64, gif_b64],
+        )
+        # Nothing is inserted synchronously: both uploads are still pending.
+        assert synchronous_value == "hello world again"
+
+        _wait_for_image_reference(page, selector, count=2)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        assert len(png_refs) == 1 and len(gif_refs) == 1, final_value
+        # Exactly the selection replaced once by the first reference, the
+        # second reference inserted right after it, and the following prose
+        # (' again') intact — nothing else deleted.
+        assert final_value == "hello " + png_refs[0] + gif_refs[0] + " again", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
+    def test_single_paste_over_selection_replaces_it(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """A lone paste over a non-empty selection still replaces it.
+
+        Guard for the concurrent-paste collapse rule: with no earlier
+        completed insertion consuming the selection, the paste must behave
+        like a normal replace — the selected text is gone, replaced by the
+        reference, and the surrounding text survives.
+        """
+        ticket = make_ticket(title="Selection replace paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        png_b64 = base64.b64encode(png).decode()
+        page.evaluate(
+            """([selector, pngB64]) => {
+                const pngBytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = "hello world again";
+                target.setSelectionRange(6, 11);
+                const dt = new DataTransfer();
+                dt.items.add(new File([pngBytes], "shot", { type: "image/png" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dt, bubbles: true, cancelable: true
+                }));
+                return target.value;
+            }""",
+            [selector, png_b64],
+        )
+
+        _wait_for_image_reference(page, selector, count=1)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        assert len(png_refs) == 1, final_value
+        assert final_value == "hello " + png_refs[0] + " again", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
     def test_second_paste_at_earlier_offset_lands_at_its_paste_position(
         self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
     ):
