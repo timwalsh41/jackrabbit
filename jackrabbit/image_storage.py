@@ -35,6 +35,11 @@ class OversizedImageError(Exception):
     """The uploaded image exceeds MAX_IMAGE_BYTES."""
 
 
+def oversize_detail() -> str:
+    """User-presentable 413 detail, shared by the API read loop and save()."""
+    return f"Image is too large. The maximum size is {MAX_IMAGE_BYTES // (1024 * 1024)} MiB."
+
+
 class ImageNotFoundError(Exception):
     """No stored image matches the requested name."""
 
@@ -81,9 +86,7 @@ class ImageStorage:
     def save(self, data: bytes) -> SavedImage:
         """Validate, store and name one uploaded image."""
         if len(data) > MAX_IMAGE_BYTES:
-            raise OversizedImageError(
-                f"Image is too large. The maximum size is {MAX_IMAGE_BYTES // (1024 * 1024)} MiB."
-            )
+            raise OversizedImageError(oversize_detail())
         fmt = _sniff_format(data)
         self._uploads_dir.mkdir(parents=True, exist_ok=True)
         name = f"{uuid.uuid4().hex}{fmt.extension}"
