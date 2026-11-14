@@ -587,3 +587,17 @@ class TriageRead(BaseModel):
 
     role: str | None = None
     label: LabelRead | None = None
+
+
+class ImageUploadRead(BaseModel):
+    """Result of uploading one pasted image (JRB-027).
+
+    ``url`` is the app-hosted path the paste handler inserts into the
+    description as ``![alt](url)``; the markdown renderer turns only these
+    ``/images/<name>`` references into inline ``<img>`` tags.
+    """
+
+    name: str
+    url: str
+    size: int
+    content_type: str

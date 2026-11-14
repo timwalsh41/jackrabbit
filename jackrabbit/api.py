@@ -3,12 +3,18 @@
 from datetime import datetime
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from jackrabbit.database import get_session
+from jackrabbit.image_storage import (
+    ImageStorage,
+    OversizedImageError,
+    UnsupportedImageError,
+    get_image_storage,
+)
 from jackrabbit.labels import parse_label_ids, parse_label_match
 from jackrabbit.models import (
     Priority,
@@ -26,6 +32,7 @@ from jackrabbit.schemas import (
     CriterionHistoryRead,
     CriterionRead,
     CriterionUpdate,
+    ImageUploadRead,
     LabelCreate,
     LabelRead,
     LabelWithUsage,
@@ -1276,4 +1283,31 @@ def set_ticket_triage(
     return TriageRead(
         role=role.value,
         label=LabelRead.model_validate(label) if label is not None else None,
+    )
+
+
+# Image upload endpoints (JRB-027)
+@router.post("/images", response_model=ImageUploadRead, status_code=201)
+async def upload_image(
+    file: UploadFile = File(...),
+    storage: ImageStorage = Depends(get_image_storage),
+) -> ImageUploadRead:
+    """Store one pasted image under DATA_DIR and return its app-hosted URL.
+
+    The response ``url`` is what the paste handler inserts into the ticket
+    description as ``![alt](url)``; only these ``/images/<name>`` references
+    render as inline images. Uploads are never deleted by the app.
+    """
+    data = await file.read()
+    try:
+        saved = storage.save(data)
+    except OversizedImageError as e:
+        raise HTTPException(status_code=413, detail=str(e)) from e
+    except UnsupportedImageError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ImageUploadRead(
+        name=saved.name,
+        url=saved.url,
+        size=saved.size,
+        content_type=saved.content_type,
     )
