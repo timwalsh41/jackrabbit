@@ -703,6 +703,191 @@ class TestTypingWhilePastePending:
         assert page.locator("#ticket-form [data-image-error]").is_hidden()
 
 
+class TestRebaseThroughUserEdits:
+    """Pending-paste rebasing through user edits, in a single coordinate frame.
+
+    A pending insertion's offsets are always relative to the CURRENT textarea
+    value, so a paste queued after a user edit must order against the earlier
+    paste's ACTUAL (rebased) landing position — never its capture-time
+    position and never stale pre-edit offsets.
+    """
+
+    PNG_URL = "/images/" + "ab" * 16 + ".png"
+    GIF_URL = "/images/" + "cd" * 16 + ".gif"
+
+    def _seed_textarea(self, page: Page, selector: str, value: str, start: int, end: int) -> None:
+        page.evaluate(
+            """([selector, value, start, end]) => {
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = value;
+                target.setSelectionRange(start, end);
+            }""",
+            [selector, value, start, end],
+        )
+
+    def _set_caret(self, page: Page, selector: str, caret: int) -> None:
+        self._seed_textarea(
+            page,
+            selector,
+            page.evaluate(f"document.querySelector('{selector}').value"),
+            caret,
+            caret,
+        )
+
+    def _paste_gif(self, page: Page, selector: str) -> None:
+        _paste_bytes_as_file(
+            page, selector, b"GIF89a\x01\x00\x01\x00\x00\x00\x00;", "two.gif", "image/gif"
+        )
+
+    def _wait_for_held_uploads(self, page: Page, held: list, count: int) -> None:
+        for _ in range(100):
+            if len(held) >= count:
+                return
+            page.wait_for_timeout(100)
+        raise AssertionError(f"only {len(held)} of {count} uploads in flight")
+
+    def _release_upload(self, route, url: str) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"url": url}),
+        )
+
+    def _release_both_uploads(self, page: Page, selector: str, held: list) -> str:
+        self._wait_for_held_uploads(page, held, 1)
+        self._release_upload(held[0], self.PNG_URL)
+        _wait_for_image_reference(page, selector, count=1)
+        self._wait_for_held_uploads(page, held, 2)
+        self._release_upload(held[1], self.GIF_URL)
+        _wait_for_image_reference(page, selector, count=2)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        assert len(png_refs) == 1 and len(gif_refs) == 1, final_value
+        return final_value
+
+    def test_paste_over_selection_replaced_by_one_char_then_second_paste(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """Review sequence (1): the collapse point stays in the CURRENT frame.
+
+        Paste 1 is queued over the selection [5, 10) of 'hello world'. While
+        the upload is pending, the user replaces that selection with one
+        char: the pending insertion has lost the text it was going to
+        replace, so it collapses to insert-only immediately after the
+        replacement char (offset 6 of 'helloXd') — the post-edit end of the
+        replaced range in the current frame, not the stale pre-edit end (10).
+        The second paste is then queued at offset 7 — after the collapse
+        point in the same frame — so when the first reference inserts it
+        shifts by the reference length and lands after the surviving 'd',
+        preserving its paste-time position (end of text) instead of drifting
+        through stale capture-time coordinates.
+        """
+        ticket = make_ticket(title="Collapse in current frame ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        held: list = []
+        page.route("**/api/v1/images", lambda route: held.append(route))
+        self._seed_textarea(page, selector, "hello world", 5, 10)
+        _paste_bytes_as_file(page, selector, png, "shot.png", "image/png")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "hello world"
+
+        # The user replaces the selection [5, 10) with one char while the
+        # upload is pending.
+        page.type(selector, "X")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "helloXd"
+
+        # Second paste queued at offset 7 — after the collapse point (6).
+        self._set_caret(page, selector, 7)
+        self._paste_gif(page, selector)
+
+        final_value = self._release_both_uploads(page, selector, held)
+        # The collapsed first reference sits immediately after the replacement
+        # char ('X'), the surviving 'd' keeps its place, and the second
+        # reference lands after it at the second paste's (shifted) position.
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        assert final_value == "helloX" + png_refs[0] + "d" + gif_refs[0], final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
+    def test_second_paste_queued_before_first_paste_actual_landing(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """Review sequence (2): ordering against the ACTUAL landing spot.
+
+        Paste 1 is captured at caret 5; the user then types 'XX' at that
+        caret, so paste 1's actual landing position becomes 7. Paste 2 is
+        queued at caret 6 — after the capture position (5) but BEFORE the
+        actual landing (7) — so it must stay at its own paste position (6,
+        between the two typed X's) and must NOT be dragged after paste 1's
+        markdown: the two references end up on either side of the second X.
+        """
+        ticket = make_ticket(title="Actual landing order ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        held: list = []
+        page.route("**/api/v1/images", lambda route: held.append(route))
+        self._seed_textarea(page, selector, "hello world", 5, 5)
+        _paste_bytes_as_file(page, selector, png, "shot.png", "image/png")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "hello world"
+
+        page.type(selector, "XX")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "helloXX world"
+
+        # Second paste queued at 6: before paste 1's actual landing (7).
+        self._set_caret(page, selector, 6)
+        self._paste_gif(page, selector)
+
+        final_value = self._release_both_uploads(page, selector, held)
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        # Paste 2 stays at its own paste position (6), so the references
+        # straddle the second typed X — paste 1's markdown after it.
+        assert final_value == "helloX" + gif_refs[0] + "X" + png_refs[0] + " world", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
+    def test_second_paste_after_first_paste_actual_landing_orders_after_it(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """Mirror of the actual-landing test: a paste queued AFTER the first
+        paste's actual landing position must order after the actually-landed
+        markdown. Paste 1 is captured at caret 5, typing 'XX' moves its
+        landing to 7, and paste 2 is queued at caret 8 (after the landing,
+        before the space): it shifts by the first reference's length and
+        lands where caret 8 was, between the space and 'world'.
+        """
+        ticket = make_ticket(title="After landing order ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        held: list = []
+        page.route("**/api/v1/images", lambda route: held.append(route))
+        self._seed_textarea(page, selector, "hello world", 5, 5)
+        _paste_bytes_as_file(page, selector, png, "shot.png", "image/png")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "hello world"
+
+        page.type(selector, "XX")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "helloXX world"
+
+        # Second paste queued at 8: after paste 1's actual landing (7).
+        self._set_caret(page, selector, 8)
+        self._paste_gif(page, selector)
+
+        final_value = self._release_both_uploads(page, selector, held)
+        png_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        gif_refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.gif\)", final_value)
+        # Paste 2 shifted by the first reference's length: it lands where
+        # caret 8 was, between the space and 'world'.
+        assert final_value == "helloXX" + png_refs[0] + " " + gif_refs[0] + "world", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
+
 class TestPasteIntoRowEditModal:
     def test_paste_save_and_render(
         self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
