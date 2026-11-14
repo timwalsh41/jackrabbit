@@ -1,10 +1,11 @@
 """End-to-end coverage for pasting clipboard images into ticket descriptions (JRB-027).
 
 The three description editors (new-ticket modal, full-page edit form, backlog
-row-edit modal) must accept a pasted image, upload it, insert a markdown
-reference at the caret, and ultimately render it as an inline image on the
-ticket detail page. Unsupported images must show a clear error and insert
-nothing; ordinary text paste must keep working.
+row-edit modal) plus the full-page new-ticket form must accept a pasted image,
+upload it, insert a markdown reference at the caret, and ultimately render it
+as an inline image on the ticket detail page. Unsupported and oversized images
+must show a clear error and insert nothing; ordinary text paste must keep
+working.
 
 Playwright has no native clipboard-image API, so the paste is simulated the
 way the browser would deliver it: a ClipboardEvent carrying a DataTransfer
@@ -64,6 +65,30 @@ def _paste_bytes_as_file(page: Page, selector: str, data: bytes, filename: str, 
             target.dispatchEvent(event);
         }""",
         [selector, encoded, filename, mime],
+    )
+
+
+def _paste_oversized_file(page: Page, selector: str) -> None:
+    """Dispatch a paste whose clipboard file exceeds the 10 MiB client limit.
+
+    The payload is built in the browser: shipping 10 MiB through evaluate's
+    base64 bridge would dominate the test. One byte over the limit is enough
+    to trip the client-side size check (which matches the server limit).
+    """
+    page.evaluate(
+        """(selector) => {
+            const file = new File(
+                [new Uint8Array(10 * 1024 * 1024 + 1)], "big.png", { type: "image/png" }
+            );
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            const target = document.querySelector(selector);
+            target.focus();
+            target.dispatchEvent(new ClipboardEvent("paste", {
+                clipboardData: dt, bubbles: true, cancelable: true
+            }));
+        }""",
+        selector,
     )
 
 
@@ -157,6 +182,40 @@ class TestPasteIntoNewTicketModal:
         expect(banner).to_contain_text("Unsupported image type")
         value = page.evaluate(f"document.querySelector('{selector}').value")
         assert "![image](/images/" not in value
+
+    def test_oversized_image_shows_error_and_inserts_nothing(
+        self, page: Page, base_url: str, seeded_projects
+    ):
+        """An image over the 10 MiB limit is rejected before any upload."""
+        page.goto(f"{base_url}/backlog")
+        page.wait_for_load_state("networkidle")
+        page.click("button:has-text('New Ticket'), a:has-text('New Ticket')")
+        page.wait_for_selector("#ticket-modal form", state="visible", timeout=10000)
+
+        selector = NEW_TICKET_SELECTORS["textarea"]
+        _paste_oversized_file(page, selector)
+
+        banner = page.locator("#ticket-modal [data-image-error]")
+        expect(banner).to_be_visible(timeout=10000)
+        expect(banner).to_contain_text("too large")
+        value = page.evaluate(f"document.querySelector('{selector}').value")
+        assert value == ""
+
+
+class TestPasteIntoFullPageNewForm:
+    def test_paste_into_full_page_new_ticket_form(
+        self, page: Page, base_url: str, seeded_projects, png: bytes
+    ):
+        """GET /tickets/new without an HX-Request header renders the full-page
+        form (ticket_form.html) — a fourth description-editor surface that must
+        take the paste like the modal variant of the same form."""
+        page.goto(f"{base_url}/tickets/new")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        _paste_bytes_as_file(page, selector, png, "shot.png", "image/png")
+        _wait_for_image_reference(page, selector)
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
 
 
 class TestPasteIntoFullPageEditForm:
