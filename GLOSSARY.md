@@ -64,6 +64,9 @@
 **Configuration**
 : `.env` file with CLI argument overrides. Keys: `PORT`, `DATA_DIR`, `DATABASE_URL`.
 
+**Uploaded Image**
+: An image pasted into a ticket description (JRB-027). Stored by the app under `DATA_DIR/uploads/` with a generated UUID name; referenced from the description as a `![alt](/images/<name>)` markdown reference, which is the only image URL form the renderer turns into an inline `<img>`. Uploads are retained even when the referencing ticket is deleted.
+
 **Chrome-DevTools-AXI**
 : Tooling for agents to run end-to-end browser tests during development.
 
