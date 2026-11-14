@@ -10,10 +10,11 @@ from sqlmodel import Session
 
 from jackrabbit.database import get_session
 from jackrabbit.image_storage import (
+    MAX_IMAGE_BYTES,
     ImageStorage,
-    OversizedImageError,
     UnsupportedImageError,
     get_image_storage,
+    oversize_detail,
 )
 from jackrabbit.labels import parse_label_ids, parse_label_match
 from jackrabbit.models import (
@@ -1287,6 +1288,12 @@ def set_ticket_triage(
 
 
 # Image upload endpoints (JRB-027)
+
+# Uploads are read in 1 MiB chunks so MAX_IMAGE_BYTES can be enforced without
+# ever holding the whole (possibly oversized) body in memory at once.
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+
+
 @router.post("/images", response_model=ImageUploadRead, status_code=201)
 async def upload_image(
     file: UploadFile = File(...),
@@ -1298,11 +1305,22 @@ async def upload_image(
     description as ``![alt](url)``; only these ``/images/<name>`` references
     render as inline images. Uploads are never deleted by the app.
     """
-    data = await file.read()
+    # Read in bounded chunks so the 10 MiB limit is enforced *during* the
+    # read: an oversized body is aborted with 413 after at most one chunk
+    # beyond the limit instead of being fully buffered first.
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await file.read(UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail=oversize_detail())
+        chunks.append(chunk)
+    data = b"".join(chunks)
     try:
         saved = storage.save(data)
-    except OversizedImageError as e:
-        raise HTTPException(status_code=413, detail=str(e)) from e
     except UnsupportedImageError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return ImageUploadRead(
