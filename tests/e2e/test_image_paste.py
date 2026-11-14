@@ -15,6 +15,7 @@ banner) that a real Ctrl+V would.
 """
 
 import base64
+import json
 import re
 import struct
 import zlib
@@ -597,6 +598,108 @@ class TestConcurrentPastes:
         # reference at its own offset 8 — the later-queued PNG insertion
         # landing after the GIF's position does not shift the GIF.
         assert final_value == "he" + gif_refs[0] + "llo wo" + png_refs[0] + "rld", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
+
+class TestTypingWhilePastePending:
+    def _dispatch_pending_paste(self, page: Page, selector: str, png_b64: str) -> str:
+        """Dispatch one image paste at caret 5 in 'hello world' and hold the
+        upload via the route mock installed by the caller, so the upload is
+        guaranteed still pending when this returns."""
+        return page.evaluate(
+            """([selector, pngB64]) => {
+                const pngBytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+                const target = document.querySelector(selector);
+                target.focus();
+                target.value = "hello world";
+                target.setSelectionRange(5, 5);
+                const dt = new DataTransfer();
+                dt.items.add(new File([pngBytes], "shot", { type: "image/png" }));
+                target.dispatchEvent(new ClipboardEvent("paste", {
+                    clipboardData: dt, bubbles: true, cancelable: true
+                }));
+                return target.value;
+            }""",
+            [selector, png_b64],
+        )
+
+    def _release_upload(self, route) -> None:
+        """Fulfill the held upload with a fabricated app-hosted URL."""
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"url": "/images/" + "ab" * 16 + ".png"}),
+        )
+
+    def test_typing_during_pending_upload_shifts_paste_position(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """Characters typed at the caret while the upload is pending shift the
+        pending reference by exactly the typed text.
+
+        The paste captures caret 5 in 'hello world'; the user then types 'XX'
+        at that caret before the upload resolves. The captured selection must
+        be rebased through the user edit (a net +2), so the reference lands at
+        offset 7 of 'helloXX world' — right after the typed 'XX', replacing
+        nothing. Without user-edit tracking the reference would land at the
+        stale offset 5, splitting the typed text in half.
+        """
+        ticket = make_ticket(title="Typing during paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        # Hold the upload response so the typing below is guaranteed to happen
+        # while the upload is still pending.
+        held: list = []
+        page.route("**/api/v1/images", lambda route: held.append(route))
+        synchronous_value = self._dispatch_pending_paste(
+            page, selector, base64.b64encode(png).decode()
+        )
+        # Nothing is inserted synchronously: the upload is still pending.
+        assert synchronous_value == "hello world"
+
+        # The caret sits at 5; typing shifts everything from there on.
+        page.type(selector, "XX")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "helloXX world"
+
+        self._release_upload(held[0])
+        _wait_for_image_reference(page, selector)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        assert len(refs) == 1, final_value
+        assert final_value == "helloXX" + refs[0] + " world", final_value
+        assert page.locator("#ticket-form [data-image-error]").is_hidden()
+
+    def test_type_then_delete_during_pending_upload_nets_out(
+        self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
+    ):
+        """Typing plus a deletion while the upload is pending rebases by the
+        net delta: two characters typed then one deleted leave a net +1, so
+        the reference lands at offset 6 of 'helloX world'.
+        """
+        ticket = make_ticket(title="Type and delete during paste ticket")
+        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.wait_for_load_state("networkidle")
+
+        selector = "#ticket-form textarea[data-description-editor]"
+        held: list = []
+        page.route("**/api/v1/images", lambda route: held.append(route))
+        synchronous_value = self._dispatch_pending_paste(
+            page, selector, base64.b64encode(png).decode()
+        )
+        assert synchronous_value == "hello world"
+
+        page.type(selector, "XX")
+        page.keyboard.press("Backspace")
+        assert page.evaluate(f"document.querySelector('{selector}').value") == "helloX world"
+
+        self._release_upload(held[0])
+        _wait_for_image_reference(page, selector)
+        final_value = page.evaluate(f"document.querySelector('{selector}').value")
+        refs = re.findall(r"!\[image\]\(/images/[0-9a-f]{32}\.png\)", final_value)
+        assert len(refs) == 1, final_value
+        assert final_value == "helloX" + refs[0] + " world", final_value
         assert page.locator("#ticket-form [data-image-error]").is_hidden()
 
 
