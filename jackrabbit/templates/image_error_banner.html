@@ -1,0 +1,6 @@
+{# Error banner for clipboard-image paste problems (JRB-027).
+
+   Starts hidden; static/js/clipboard-images.js fills and unhides it (scoped
+   to the surrounding form) when a pasted image is rejected. Included by every
+   template that hosts a data-description-editor textarea. #}
+<div data-image-error role="alert" class="hidden mt-2 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700"></div>
