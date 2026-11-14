@@ -5,7 +5,11 @@
  * which are marked with data-description-editor — delegation means no init
  * wiring is needed for htmx-swapped modal content. An image in the clipboard
  * is uploaded to POST /api/v1/images (separate multipart fetch, never the
- * ticket form) and inserted as a markdown reference at the caret. Ordinary
+ * ticket form) and inserted as a markdown reference at the caret position
+ * captured when the paste happened (the user may type or move the caret while
+ * the upload is in flight). Per-textarea work is serialized: images from one
+ * paste keep their paste order, and a second paste made while the first is
+ * still uploading inserts after it, at its own captured position. Ordinary
  * text paste passes through untouched. Rejections (unsupported type, too
  * large) surface the server's detail message in the hidden red banner
  * ([data-image-error]) inside the same form.
@@ -53,14 +57,9 @@
         banner.classList.add("hidden");
     }
 
-    function insertAtCaret(textarea, markdown) {
+    function insertAtCaret(textarea, markdown, start, end) {
         if (typeof textarea.setRangeText === "function") {
-            textarea.setRangeText(
-                markdown,
-                textarea.selectionStart || 0,
-                textarea.selectionEnd || 0,
-                "end"
-            );
+            textarea.setRangeText(markdown, start, end, "end");
         } else {
             textarea.value += markdown;
         }
@@ -68,17 +67,26 @@
         textarea.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
-    function uploadAndInsert(textarea, file) {
+    // One FIFO chain per textarea (WeakMap): uploads and insertions run in
+    // order, so images from one paste insert in paste order even when the
+    // uploads complete out of sequence, and a paste made while an earlier
+    // one is still in flight lands after it instead of racing it.
+    var insertQueues = new WeakMap();
+
+    function uploadAndInsert(textarea, file, start, end, shift) {
         var body = new FormData();
         body.append("file", file, file.name || "paste.png");
-        fetch("/api/v1/images", {
-            method: "POST",
-            body: body,
-            headers: { Accept: "application/json" }
-        })
-            .then(function (response) {
-                return response.json().then(function (data) {
-                    return { ok: response.ok, status: response.status, data: data };
+        var chain = insertQueues.get(textarea) || Promise.resolve();
+        var task = chain
+            .then(function () {
+                return fetch("/api/v1/images", {
+                    method: "POST",
+                    body: body,
+                    headers: { Accept: "application/json" }
+                }).then(function (response) {
+                    return response.json().then(function (data) {
+                        return { ok: response.ok, status: response.status, data: data };
+                    });
                 });
             })
             .then(function (result) {
@@ -88,14 +96,32 @@
                             ? result.data.detail
                             : "Image upload failed (" + result.status + ").";
                     showError(textarea, message);
-                    return;
+                    return null;
                 }
                 clearError(textarea);
-                insertAtCaret(textarea, "![image](" + result.data.url + ")");
+                return "![image](" + result.data.url + ")";
             })
             .catch(function () {
                 showError(textarea, "Image upload failed. Please try again.");
+                return null;
+            })
+            .then(function (markdown) {
+                if (markdown === null) {
+                    return;
+                }
+                // The paste-time selection, shifted by the markdown already
+                // inserted for earlier images of the same paste.
+                insertAtCaret(textarea, markdown, start + shift.value, end + shift.value);
+                shift.value += markdown.length;
             });
+        // A failed insertion must not leave the chain rejected, or every
+        // later paste for this textarea would silently stop working.
+        insertQueues.set(
+            textarea,
+            task.catch(function () {
+                /* insertion errors are non-fatal for later pastes */
+            })
+        );
     }
 
     document.addEventListener("paste", function (event) {
@@ -110,12 +136,18 @@
         }
         event.preventDefault();
         clearError(target);
+        // Capture the selection once, at paste time: the user can type or
+        // move the caret while the upload runs, and the reference must land
+        // where the paste happened, not where the caret ends up.
+        var start = typeof target.selectionStart === "number" ? target.selectionStart : 0;
+        var end = typeof target.selectionEnd === "number" ? target.selectionEnd : 0;
+        var shift = { value: 0 };
         files.forEach(function (file) {
             if (file.size > MAX_BYTES) {
                 showError(target, "Image is too large. The maximum size is 10 MiB.");
                 return;
             }
-            uploadAndInsert(target, file);
+            uploadAndInsert(target, file, start, end, shift);
         });
     });
 })();
