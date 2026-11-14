@@ -11,6 +11,8 @@ Supported syntax (a pragmatic subset for ticket text):
 - Inline code: `` `text` ``
 - Fenced code blocks: triple-backtick fences
 - Links: ``[text](url)`` (``javascript:`` URLs are neutralized)
+- Images: ``![alt](url)`` — only app-hosted ``/images/<name>`` URLs render
+  as ``<img>``; any other URL stays literal escaped text
 - Unordered lists: lines starting with ``- `` or ``* ``
 - Ordered lists: lines starting with ``1. `` (digits + dot)
 - Paragraphs separated by blank lines; single newlines become ``<br>``
@@ -23,6 +25,12 @@ _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
 _CODE_RE = re.compile(r"`([^`\n]+)`")
 _LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
+_IMAGE_RE = re.compile(r"!\[([^\]\n]*)\]\(([^)\s]+)\)")
+# App-hosted image URLs only (JRB-027): uploads are served from /images/<name>
+# with generated names. The character class excludes ``/``, ``..``-traversal
+# sequences are caught because ``.`` runs must not span ``/`` — anything else
+# (remote hosts, data:, quotes) cannot match and stays literal text.
+_APP_IMAGE_URL_RE = re.compile(r"^/images/[A-Za-z0-9._-]+$")
 _LIST_ITEM_RE = re.compile(r"^(?:[-*]|\d+\.)\s+(.*)$")
 
 _DANGEROUS_URL_SCHEMES = ("javascript:", "vbscript:", "data:")
@@ -38,6 +46,8 @@ def _render_inline(text: str) -> str:
         return f"\x00{len(placeholders) - 1}\x00"
 
     text = _CODE_RE.sub(lambda m: _stash(f"<code>{m.group(1)}</code>"), text)
+    # Images before links: ``![alt](url)`` contains a ``[alt](url)`` match.
+    text = _IMAGE_RE.sub(lambda m: _stash_image(m.group(1), m.group(2), placeholders), text)
     text = _LINK_RE.sub(lambda m: _stash_url(m.group(1), m.group(2), placeholders), text)
     text = _BOLD_RE.sub(r"<strong>\1</strong>", text)
     text = _ITALIC_RE.sub(r"<em>\1</em>", text)
@@ -55,6 +65,29 @@ def _stash_url(label: str, url: str, placeholders: list[str]) -> str:
     # href attribute and allow event-handler injection (XSS).
     safe_url = html.escape(url, quote=True)
     return f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+
+
+def _stash_image(alt: str, url: str, placeholders: list[str]) -> str:
+    """Stash an image match, rendering <img> only for app-hosted URLs.
+
+    Like dangerous link schemes, a non-app-hosted image URL is not stripped:
+    the raw (already HTML-escaped) ``![alt](url)`` markup stays visible as
+    literal text, so descriptions cannot inject markup or make the browser
+    fetch remote image content.
+    """
+
+    def _stash(html_span: str) -> str:
+        placeholders.append(html_span)
+        return f"\x00{len(placeholders) - 1}\x00"
+
+    if not _APP_IMAGE_URL_RE.match(url):
+        return _stash(f"![{alt}]({url})")
+    # The page text is only escaped with quote=False upstream, so both the
+    # src and alt attribute values must be quote-escaped here (same reasoning
+    # as _stash_url: a raw `"` would terminate the attribute).
+    safe_url = html.escape(url, quote=True)
+    safe_alt = html.escape(alt, quote=True)
+    return _stash(f'<img src="{safe_url}" alt="{safe_alt}">')
 
 
 def _stash_code_blocks_back(text: str, placeholders: list[str]) -> str:
