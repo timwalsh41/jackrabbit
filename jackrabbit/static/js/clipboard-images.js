@@ -9,10 +9,13 @@
  * captured when the paste happened (the user may type or move the caret while
  * the upload is in flight). Per-textarea work is serialized: images from one
  * paste keep their paste order, and a second paste made while the first is
- * still uploading inserts after it — its paste-time position is shifted only
- * by completed insertions that landed at or before its own paste-time start,
- * so concurrent pastes keep their paste-time positions relative to the final
- * text without landing inside an earlier reference. Ordinary
+ * still uploading has its paste-time position transformed by the completed
+ * insertions recorded since — ones that landed at or before it shift it by
+ * their net text change (inserted minus deleted), and one that consumed
+ * (part of) its paste-time selection collapses it to an insert-only reference
+ * placed right after that insertion — so concurrent pastes keep their
+ * paste-time positions relative to the final text without landing inside an
+ * earlier reference or re-deleting consumed text. Ordinary
  * text paste passes through untouched. Rejections (unsupported type, too
  * large) surface the server's detail message in the hidden red banner
  * ([data-image-error]) inside the same form.
@@ -76,24 +79,60 @@
     //   complete out of sequence, and a paste made while an earlier one is
     //   still in flight lands after it instead of racing it.
     // - insertions: every completed insertion as
-    //   { start, length, pasteStart, pasteEnd }, where `start` is the
-    //   position actually used (paste-time position plus any shift),
-    //   `length` the inserted markdown length, and `pasteStart`/`pasteEnd`
-    //   the paste-time selection as captured. Each paste captures the array
-    //   length at paste time; when its turn comes it shifts only by completed
-    //   insertions recorded since its capture whose start is at or before its
-    //   own paste-time start — insertions that landed before it push it
-    //   forward, insertions that landed after it do not affect it, and failed
-    //   insertions record nothing. Within one paste event (same caret), an
-    //   earlier insertion starting at the same position counts, so successive
-    //   same-position references keep their paste order. A queued insertion
-    //   whose paste-time selection was already consumed by an earlier
-    //   completed insertion (same or overlapping paste-time range recorded
-    //   since its capture) collapses to insert-only at its adjusted start:
-    //   the selection no longer exists to replace, and replacing again would
-    //   delete the text now following the earlier reference.
+    //   { execStart, execEnd, insertedLength, deletedLength, affectsFrom,
+    //   pasteStart, pasteEnd }: the executed range its reference now occupies
+    //   (measured in the text state of its own execution, so already
+    //   including every earlier entry's effect), how much text it inserted
+    //   and deleted (its net text change), `affectsFrom` — the paste-time
+    //   offset from which that net change applies (the end of the replaced
+    //   selection, or the insertion point when nothing was deleted) — and
+    //   the paste-time selection as captured. Failed insertions record
+    //   nothing. Each paste captures the array length at paste time; when
+    //   its turn comes, its paste-time selection is transformed by the
+    //   entries recorded since its capture (see adjustedInsertPosition).
     var insertQueues = new WeakMap();
     var insertions = new WeakMap();
+
+    // Transform a queued insertion's paste-time selection [start, end) into
+    // the current-text positions to use when its turn comes, given the
+    // completed insertions recorded since the paste was captured. Walking the
+    // entries in execution order:
+    // - An entry whose change applies at or before the selection
+    //   (affectsFrom <= start) shifts both offsets by its net text change
+    //   (inserted minus deleted): a plain insertion pushes forward by its
+    //   length, a replacement by its length minus the replaced span. An
+    //   entry that landed after the selection (pasteStart >= end) has no
+    //   effect.
+    // - An entry whose paste-time selection overlaps [start, end) consumed
+    //   (wholly or partly) the selection this paste was going to replace:
+    //   there is nothing left to delete, so the queued insertion collapses
+    //   to insert-only immediately after that entry's executed range. Its
+    //   execEnd already includes every earlier entry's effect, so the
+    //   accumulated shift is not added again; the entry's own net change is
+    //   likewise not applied (anchoring after its executed end already
+    //   accounts for it). Later entries whose change applies at or before
+    //   the collapse point still move it forward, keeping paste order.
+    function adjustedInsertPosition(completed, firstIndex, start, end) {
+        var shift = 0;
+        var collapse = null; // { at: insertion point, origin: paste-time point } once consumed
+        for (var i = firstIndex; i < completed.length; i++) {
+            var entry = completed[i];
+            var overlaps = entry.pasteStart < end && entry.pasteEnd > start;
+            if (collapse !== null) {
+                if (entry.affectsFrom <= collapse.origin) {
+                    collapse.at += entry.insertedLength - entry.deletedLength;
+                }
+            } else if (overlaps) {
+                collapse = { at: entry.execEnd, origin: entry.pasteEnd };
+            } else if (entry.affectsFrom <= start) {
+                shift += entry.insertedLength - entry.deletedLength;
+            }
+        }
+        if (collapse !== null) {
+            return { start: collapse.at, end: collapse.at, collapseOrigin: collapse.origin };
+        }
+        return { start: start + shift, end: end + shift, collapseOrigin: null };
+    }
 
     function uploadAndInsert(textarea, file, start, end, capturedCount) {
         var body = new FormData();
@@ -131,37 +170,18 @@
                 if (markdown === null) {
                     return;
                 }
-                // The paste-time selection, pushed forward only by the
-                // completed insertions recorded since this paste was captured
-                // that landed at or before its paste-time start (earlier
-                // files of the same paste share the caret and qualify).
                 var completed = insertions.get(textarea) || [];
-                var shift = 0;
-                for (var i = capturedCount; i < completed.length; i++) {
-                    if (completed[i].start <= start) {
-                        shift += completed[i].length;
-                    }
-                }
-                var adjustedStart = start + shift;
-                var adjustedEnd = end + shift;
-                // The paste-time selection is gone if an earlier completed
-                // insertion (recorded since this paste was captured) already
-                // consumed a same or overlapping paste-time range — e.g. the
-                // first of two concurrent pastes over the same selection
-                // replaced it. Replace no longer: collapse to insert-only at
-                // the adjusted start so the reference lands right after the
-                // earlier one without deleting the text that follows it. A
-                // lone paste finds no such entry and keeps replace behaviour.
-                for (var j = capturedCount; j < completed.length; j++) {
-                    if (completed[j].pasteStart < end && completed[j].pasteEnd > start) {
-                        adjustedEnd = adjustedStart;
-                        break;
-                    }
-                }
-                insertAtCaret(textarea, markdown, adjustedStart, adjustedEnd);
+                var adjusted = adjustedInsertPosition(completed, capturedCount, start, end);
+                insertAtCaret(textarea, markdown, adjusted.start, adjusted.end);
                 completed.push({
-                    start: adjustedStart,
-                    length: markdown.length,
+                    execStart: adjusted.start,
+                    execEnd: adjusted.start + markdown.length,
+                    insertedLength: markdown.length,
+                    deletedLength: adjusted.end - adjusted.start,
+                    affectsFrom:
+                        adjusted.collapseOrigin !== null
+                            ? adjusted.collapseOrigin
+                            : adjusted.end > adjusted.start ? end : start,
                     pasteStart: start,
                     pasteEnd: end
                 });
