@@ -75,16 +75,23 @@
     //   images from one paste insert in paste order even when the uploads
     //   complete out of sequence, and a paste made while an earlier one is
     //   still in flight lands after it instead of racing it.
-    // - insertions: every completed insertion as { start, length }, where
-    //   `start` is the position actually used (paste-time position plus any
-    //   shift) and `length` the inserted markdown length. Each paste captures
-    //   the array length at paste time; when its turn comes it shifts only by
-    //   completed insertions recorded since its capture whose start is at or
-    //   before its own paste-time start — insertions that landed before it
-    //   push it forward, insertions that landed after it do not affect it,
-    //   and failed insertions record nothing. Within one paste event (same
-    //   caret), an earlier insertion starting at the same position counts,
-    //   so successive same-position references keep their paste order.
+    // - insertions: every completed insertion as
+    //   { start, length, pasteStart, pasteEnd }, where `start` is the
+    //   position actually used (paste-time position plus any shift),
+    //   `length` the inserted markdown length, and `pasteStart`/`pasteEnd`
+    //   the paste-time selection as captured. Each paste captures the array
+    //   length at paste time; when its turn comes it shifts only by completed
+    //   insertions recorded since its capture whose start is at or before its
+    //   own paste-time start — insertions that landed before it push it
+    //   forward, insertions that landed after it do not affect it, and failed
+    //   insertions record nothing. Within one paste event (same caret), an
+    //   earlier insertion starting at the same position counts, so successive
+    //   same-position references keep their paste order. A queued insertion
+    //   whose paste-time selection was already consumed by an earlier
+    //   completed insertion (same or overlapping paste-time range recorded
+    //   since its capture) collapses to insert-only at its adjusted start:
+    //   the selection no longer exists to replace, and replacing again would
+    //   delete the text now following the earlier reference.
     var insertQueues = new WeakMap();
     var insertions = new WeakMap();
 
@@ -135,8 +142,29 @@
                         shift += completed[i].length;
                     }
                 }
-                insertAtCaret(textarea, markdown, start + shift, end + shift);
-                completed.push({ start: start + shift, length: markdown.length });
+                var adjustedStart = start + shift;
+                var adjustedEnd = end + shift;
+                // The paste-time selection is gone if an earlier completed
+                // insertion (recorded since this paste was captured) already
+                // consumed a same or overlapping paste-time range — e.g. the
+                // first of two concurrent pastes over the same selection
+                // replaced it. Replace no longer: collapse to insert-only at
+                // the adjusted start so the reference lands right after the
+                // earlier one without deleting the text that follows it. A
+                // lone paste finds no such entry and keeps replace behaviour.
+                for (var j = capturedCount; j < completed.length; j++) {
+                    if (completed[j].pasteStart < end && completed[j].pasteEnd > start) {
+                        adjustedEnd = adjustedStart;
+                        break;
+                    }
+                }
+                insertAtCaret(textarea, markdown, adjustedStart, adjustedEnd);
+                completed.push({
+                    start: adjustedStart,
+                    length: markdown.length,
+                    pasteStart: start,
+                    pasteEnd: end
+                });
                 insertions.set(textarea, completed);
             });
         // A failed insertion must not leave the chain rejected, or every
