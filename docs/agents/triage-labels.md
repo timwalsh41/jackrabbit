@@ -22,19 +22,21 @@ whatever labels its workflow gives it.
 
 Attach the label by name through the generic labels API (created on demand):
 
-    curl -s -X POST http://localhost:8080/api/v1/tickets/<id>/labels \
+    curl -s -X POST http://localhost:8080/api/v1/tickets/JRB-028/labels \
       -H 'Content-Type: application/json' \
       -d '{"name": "triage:ready-for-agent"}'
 
-Detach with `DELETE /api/v1/tickets/<id>/labels/<label_id>`, or replace the label set
-via ticket update (`PATCH /api/v1/tickets/<id>` with `labels`). There is no
+Detach with `DELETE /api/v1/tickets/<designator>/labels/<label_id>`, or replace the
+label set via ticket update (`PATCH /api/v1/tickets/<designator>` with `labels`).
+Ticket path params take the designator (`JRB-028`), never a bare integer — see
+`docs/agents/issue-tracker.md` (Identifiers). There is no
 dedicated triage endpoint (JRB-032 removed it); this document is the single
 source of truth for the role names.
 
 ## Reading a role
 
-A ticket's labels are part of the ticket payload (`GET /api/v1/tickets/<id>` →
-`labels`) and readable directly via `GET /api/v1/tickets/<id>/labels`. Triage labels
+A ticket's labels are part of the ticket payload (`GET /api/v1/tickets/<designator>` →
+`labels`) and readable directly via `GET /api/v1/tickets/<designator>/labels`. Triage labels
 render as ordinary label chips on the ticket page and in the backlog table.
 
 > At-most-one-role is an mp-skills convention, not enforced by Jackrabbit: the plain
