@@ -80,7 +80,7 @@ class TestMarkdownDescriptionRendering:
         self, page: Page, base_url: str, markdown_ticket
     ):
         """Markdown renders as structured HTML, not as raw text."""
-        page.goto(f"{base_url}/tickets/{markdown_ticket['id']}")
+        page.goto(f"{base_url}/tickets/{markdown_ticket['full_id']}")
         page.wait_for_load_state("networkidle")
 
         # The shell loads /api/v1/tickets/{id} (JSON) over htmx, then the JS card
@@ -124,7 +124,7 @@ class TestMarkdownDescriptionRendering:
         reads COMPUTED STYLES in a real browser, which is the only thing that
         catches the regression the CSS-text grep cannot.
         """
-        page.goto(f"{base_url}/tickets/{markdown_ticket['id']}")
+        page.goto(f"{base_url}/tickets/{markdown_ticket['full_id']}")
         page.wait_for_load_state("networkidle")
 
         prose = page.locator("#ticket-fields-section .prose")
@@ -156,7 +156,7 @@ class TestMarkdownDescriptionRendering:
     ):
         """Raw HTML in a description is escaped: no live <script> and the
         payload text is visible but inert."""
-        page.goto(f"{base_url}/tickets/{markdown_ticket['id']}")
+        page.goto(f"{base_url}/tickets/{markdown_ticket['full_id']}")
         page.wait_for_load_state("networkidle")
 
         prose = page.locator("#ticket-fields-section .prose")

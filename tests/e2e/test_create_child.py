@@ -25,7 +25,7 @@ class TestCreateChild:
     def test_create_child_from_epic_detail(self, page, base_url, seeded_projects, make_ticket):
         epic = make_ticket(title="Epic: Create Child E2E", ticket_type="Epic")
 
-        page.goto(f"{base_url}/tickets/{epic['id']}")
+        page.goto(f"{base_url}/tickets/{epic['full_id']}")
         page.wait_for_load_state("networkidle")
         _load_links_section(page)
 
@@ -46,7 +46,7 @@ class TestCreateChild:
         # Submit (no full page reload: the URL stays on the Epic detail page)
         page.click("#ticket-modal button:has-text('Create Ticket')")
 
-        expect(page).to_have_url(f"{base_url}/tickets/{epic['id']}")
+        expect(page).to_have_url(f"{base_url}/tickets/{epic['full_id']}")
 
         # Modal closes (form removed from #ticket-modal)
         expect(page.locator("#ticket-modal form")).to_have_count(0, timeout=10000)
@@ -76,7 +76,7 @@ class TestCreateChild:
         """
         epic = make_ticket(title="Epic: no-clobber regression", ticket_type="Epic")
 
-        page.goto(f"{base_url}/tickets/{epic['id']}")
+        page.goto(f"{base_url}/tickets/{epic['full_id']}")
         page.wait_for_load_state("networkidle")
         _load_links_section(page)
 
@@ -87,7 +87,7 @@ class TestCreateChild:
         page.click("#ticket-modal button:has-text('Create Ticket')")
 
         # No full-page navigation away from the Epic detail.
-        expect(page).to_have_url(f"{base_url}/tickets/{epic['id']}")
+        expect(page).to_have_url(f"{base_url}/tickets/{epic['full_id']}")
 
         # The modal closed.
         expect(page.locator("#ticket-modal form")).to_have_count(0, timeout=10000)
@@ -111,7 +111,7 @@ class TestCreateChild:
     def test_create_child_button_on_epic_detail(self, page, base_url, seeded_projects, make_ticket):
         """The Create Child button is visible on an Epic detail page."""
         epic = make_ticket(title="Epic button check", ticket_type="Epic")
-        page.goto(f"{base_url}/tickets/{epic['id']}")
+        page.goto(f"{base_url}/tickets/{epic['full_id']}")
         page.wait_for_load_state("networkidle")
         _load_links_section(page)
         expect(page.locator("#links-section button:has-text('Create Child')")).to_have_count(1)
@@ -121,7 +121,7 @@ class TestCreateChild:
     ):
         """Regression: a Story detail page has NO Create Child button."""
         story = make_ticket(title="Story no create-child button", ticket_type="Story")
-        page.goto(f"{base_url}/tickets/{story['id']}")
+        page.goto(f"{base_url}/tickets/{story['full_id']}")
         page.wait_for_load_state("networkidle")
         _load_links_section(page)
         expect(page.locator("#links-section button:has-text('Create Child')")).to_have_count(0)

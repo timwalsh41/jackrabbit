@@ -18,7 +18,7 @@ class TestTicketLifecycle:
         """Verify that the ticket view displays the full ID (e.g., MSC-006)
         and does not fall back to the raw database number (e.g., 'Ticket #6')."""
         ticket = make_ticket(status="Open")
-        tid = ticket["id"]
+        tid = ticket["full_id"]
 
         page.goto(f"{base_url}/tickets/{tid}")
         page.wait_for_load_state("networkidle")
@@ -343,7 +343,7 @@ class TestTicketLifecycle:
         JRB-014: after saving, the browser returns to the ticket detail page
         (not the backlog) and shows the updated title."""
         ticket = make_ticket(title="Edit me via form", status="Open")
-        tid = ticket["id"]
+        tid = ticket["full_id"]
         assert ticket["sprint_id"] is None
 
         page.goto(f"{base_url}/tickets/{tid}/edit")

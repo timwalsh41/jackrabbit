@@ -227,7 +227,7 @@ class TestPasteIntoFullPageEditForm:
         self, page: Page, base_url: str, seeded_projects, make_ticket, png: bytes
     ):
         ticket = make_ticket(title="Full-page paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -235,7 +235,7 @@ class TestPasteIntoFullPageEditForm:
         _wait_for_image_reference(page, selector)
 
         page.click("button:has-text('Save Changes')")
-        page.wait_for_url(f"**/tickets/{ticket['id']}", timeout=15000)
+        page.wait_for_url(f"**/tickets/{ticket['full_id']}", timeout=15000)
 
         prose = page.locator("#ticket-fields-section .prose")
         expect(prose).to_be_visible(timeout=10000)
@@ -271,7 +271,7 @@ class TestConcurrentPastes:
         before GIF) is assertable.
         """
         ticket = make_ticket(title="Concurrent paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -334,7 +334,7 @@ class TestConcurrentPastes:
         assertable.
         """
         ticket = make_ticket(title="Concurrent selection paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -394,7 +394,7 @@ class TestConcurrentPastes:
         and the paste order assertable.
         """
         ticket = make_ticket(title="Net shift paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -452,7 +452,7 @@ class TestConcurrentPastes:
         'efgh' survives intact.
         """
         ticket = make_ticket(title="Partial overlap paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -507,7 +507,7 @@ class TestConcurrentPastes:
         reference, and the surrounding text survives.
         """
         ticket = make_ticket(title="Selection replace paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -555,7 +555,7 @@ class TestConcurrentPastes:
         remaining prose, i.e. 'he' + GIF + 'llo wo' + PNG + 'rld'.
         """
         ticket = make_ticket(title="Earlier offset paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -645,7 +645,7 @@ class TestTypingWhilePastePending:
         stale offset 5, splitting the typed text in half.
         """
         ticket = make_ticket(title="Typing during paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -679,7 +679,7 @@ class TestTypingWhilePastePending:
         the reference lands at offset 6 of 'helloX world'.
         """
         ticket = make_ticket(title="Type and delete during paste ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -785,7 +785,7 @@ class TestRebaseThroughUserEdits:
         through stale capture-time coordinates.
         """
         ticket = make_ticket(title="Collapse in current frame ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -826,7 +826,7 @@ class TestRebaseThroughUserEdits:
         markdown: the two references end up on either side of the second X.
         """
         ticket = make_ticket(title="Actual landing order ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -862,7 +862,7 @@ class TestRebaseThroughUserEdits:
         lands where caret 8 was, between the space and 'world'.
         """
         ticket = make_ticket(title="After landing order ticket")
-        page.goto(f"{base_url}/tickets/{ticket['id']}/edit")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}/edit")
         page.wait_for_load_state("networkidle")
 
         selector = "#ticket-form textarea[data-description-editor]"
@@ -909,7 +909,7 @@ class TestPasteIntoRowEditModal:
         # The modal closes on success; the row swap carries the saved state.
         expect(page.locator("#ticket-edit-form")).not_to_be_visible(timeout=10000)
 
-        page.goto(f"{base_url}/tickets/{ticket['id']}")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}")
         page.wait_for_load_state("networkidle")
         prose = page.locator("#ticket-fields-section .prose")
         expect(prose).to_be_visible(timeout=10000)
@@ -941,7 +941,7 @@ class TestUnsafeImageReferenceDoesNotLoad:
                 },
             ).json()
 
-        page.goto(f"{base_url}/tickets/{ticket['id']}")
+        page.goto(f"{base_url}/tickets/{ticket['full_id']}")
         page.wait_for_load_state("networkidle")
         prose = page.locator("#ticket-fields-section .prose")
         expect(prose).to_be_visible(timeout=10000)

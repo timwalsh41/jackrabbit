@@ -37,7 +37,7 @@ class TestCreateTicketWithLinks:
             page.locator("tr[id^='ticket-row']").filter(has_text="Story created with a parent link")
         ).to_be_visible(timeout=10000)
 
-        page.goto(f"{base_url}/tickets/{epic['id']}")
+        page.goto(f"{base_url}/tickets/{epic['full_id']}")
         page.wait_for_load_state("networkidle")
         expect(page.locator("#links-section")).to_contain_text("Story created with a parent link")
 

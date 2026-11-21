@@ -115,7 +115,7 @@ class TestParentBackLink:
         expect(back_link).to_contain_text(f"UNS-{epic['number']:03d}")
 
         back_link.click()
-        page.wait_for_url(f"**/tickets/{epic['id']}")
+        page.wait_for_url(f"**/tickets/{epic['full_id']}")
         expect(page.locator("#ticket-title")).to_contain_text("Epic: First Parent")
 
     def test_no_parent_renders_no_backlink(self, page: Page, base_url: str, make_ticket):
