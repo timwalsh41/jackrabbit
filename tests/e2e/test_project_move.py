@@ -4,6 +4,8 @@ Self-contained: creates a ticket in a known project, moves it via the Move Proje
 modal, and verifies the new prefix plus the "Formerly" badge.
 """
 
+import re
+
 import httpx
 import pytest
 from playwright.sync_api import Page, expect
@@ -60,11 +62,19 @@ class TestProjectMove:
 
         # Submit
         page.click("#ticket-modal button[type='submit']")
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1500)
 
-        # New ticket ID should show WEB prefix
+        # A move changes the ticket's designator (JRB-038), so the browser must
+        # land on the NEW designator URL — an in-place #ticket-content swap
+        # would leave the page shell (title, actions, backlinks) on the dead
+        # old designator, 404ing on refresh or any stale action.
+        expect(page).to_have_url(re.compile(r"/tickets/WEB-\d+$"), timeout=10000)
+        page.wait_for_load_state("networkidle")
+
+        # New ticket ID should show WEB prefix, and the URL designator is the
+        # one public identifier the page now lives at.
         expect(page.locator(".ticket-id")).to_contain_text("WEB-", timeout=10000)
+        page_designator = page.url.rsplit("/", 1)[-1]
+        expect(page.locator(".ticket-id")).to_contain_text(page_designator)
 
         # "Formerly" badge shows the original ID
         expect(page.locator("text=Formerly").first).to_be_visible(timeout=10000)
@@ -188,8 +198,12 @@ class TestProjectMove:
         page.wait_for_selector("#ticket-modal form", state="visible", timeout=10000)
         page.select_option("select[name='project_id']", str(msc["id"]))
         page.click("#ticket-modal button[type='submit']")
+
+        # Full navigation to the new designator URL (the old one is dead).
+        expect(page).to_have_url(
+            re.compile(rf"/tickets/MSC-{expected_back_number:03d}$"), timeout=10000
+        )
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1500)
 
         # Next available in MSC (numbers never reused -> above the filler)
         expect(page.locator(".ticket-id")).to_contain_text(

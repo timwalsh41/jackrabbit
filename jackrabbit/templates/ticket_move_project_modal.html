@@ -27,8 +27,12 @@
                   hx-swap="none"
                   {# The designator changes on move (JRB-038), so the post-move
                   refresh must address the ticket by its NEW designator from the
-                  move response, not the one this modal was rendered with. #}
-                  hx-on::after-request="if(event.detail.successful) { closeModal(); const resp = JSON.parse(event.detail.xhr.response); htmx.ajax('GET', '/api/v1/tickets/' + resp.new_full_id, {target: '#ticket-content', swap: 'innerHTML'}); }">
+                  move response. The whole page reloads (same pattern as the
+                  other full-reload flows): the SSR shell outside
+                  #ticket-content — title, actions, backlinks — still carries
+                  the OLD designator, and any action on it or a refresh would
+                  404 after the move. #}
+                  hx-on::after-request="if(event.detail.successful) { closeModal(); const resp = JSON.parse(event.detail.xhr.response); window.location.href = '/tickets/' + resp.new_full_id; }">
                 <div>
                     <label for="move-project-select" class="block text-sm font-medium text-gray-700 mb-1">Select New Project</label>
                     <select id="move-project-select" name="project_id" 
