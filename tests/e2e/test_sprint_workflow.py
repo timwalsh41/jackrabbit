@@ -95,7 +95,7 @@ class TestSprintWorkflow:
         import httpx
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            resp = client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+            resp = client.post(f"/api/v1/sprints/{sprint['number']}/tickets/{ticket['full_id']}")
             assert resp.status_code == 200
 
         page.goto(f"{base_url}/ticket/{ticket['id']}")
@@ -119,7 +119,7 @@ class TestSprintWorkflow:
         import httpx
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+            client.post(f"/api/v1/sprints/{sprint['number']}/tickets/{ticket['full_id']}")
 
         page.goto(f"{base_url}/sprints/{sprint['id']}/detail")
         page.wait_for_load_state("networkidle")
@@ -154,8 +154,9 @@ class TestSprintWorkflow:
         sprint = make_sprint()
         ticket = make_ticket(title="Status Move Ticket")
         tid = ticket["id"]
+        tid_full = ticket["full_id"]  # designator for API calls (JRB-038)
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            resp = client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{tid}")
+            resp = client.post(f"/api/v1/sprints/{sprint['number']}/tickets/{tid_full}")
             assert resp.status_code == 200
 
         # Ticket starts in the Open column
@@ -170,7 +171,7 @@ class TestSprintWorkflow:
         # the modal criteria editor is JRB-023 scope, so the row is seeded
         # via the API here.
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
-            resp = api.post(f"/api/v1/tickets/{tid}/criteria", json={"text": "It works"})
+            resp = api.post(f"/api/v1/tickets/{tid_full}/criteria", json={"text": "It works"})
             assert resp.status_code == 201, resp.text
 
         # Groom it through the ticket detail UI
@@ -209,10 +210,10 @@ class TestSprintWorkflow:
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             client.post(
-                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+                f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "In Progress"}
             )
             client.post(
-                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+                f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "Complete"}
             )
 
         page.goto(f"{base_url}/backlog")
@@ -237,7 +238,7 @@ class TestSprintWorkflow:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             # In Progress so the detail page offers it at render time...
             client.post(
-                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+                f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "In Progress"}
             )
 
         page.goto(f"{base_url}/ticket/{tid}")
@@ -247,7 +248,7 @@ class TestSprintWorkflow:
         # ...then the sprint completes elsewhere while the page is open.
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             client.post(
-                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+                f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "Complete"}
             )
 
         page.click("#sprint-section button[type='submit']")
@@ -288,7 +289,7 @@ class TestSprintWorkflow:
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             client.post(
-                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+                f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "In Progress"}
             )
 
         page.goto(f"{base_url}/sprint/{sprint['id']}")
@@ -310,9 +311,9 @@ class TestSprintWorkflow:
         import httpx
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+            client.post(f"/api/v1/sprints/{sprint['number']}/tickets/{ticket['full_id']}")
             client.post(
-                f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+                f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "In Progress"}
             )
 
         page.goto(f"{base_url}/sprint/{sprint['id']}")

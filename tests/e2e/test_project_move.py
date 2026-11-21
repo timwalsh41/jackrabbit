@@ -77,19 +77,23 @@ class TestProjectMove:
         api = seeded_projects[2]
         ticket = make_ticket(project_id=1, title="Chained Move Ticket")
         tid = ticket["id"]
+        # API calls address the ticket by designator (JRB-038)
+        tid_full = ticket["full_id"]
 
         # Move UNS -> WEB -> API via the API
         import httpx
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             first = client.post(
-                f"/api/v1/tickets/{tid}/move-project",
+                f"/api/v1/tickets/{tid_full}/move-project",
                 json={
                     "project_id": web["id"],
                 },
             ).json()
+            # The designator changes on every move (old_full_id -> new_full_id),
+            # so the second move must address the ticket by its new designator.
             second = client.post(
-                f"/api/v1/tickets/{tid}/move-project",
+                f"/api/v1/tickets/{first['new_full_id']}/move-project",
                 json={
                     "project_id": api["id"],
                 },
@@ -114,10 +118,10 @@ class TestProjectMove:
 
         Scenario (MSC/WEB per ticket 15 flow 3): a ticket created in MSC takes
         MSC's next available serial; moving it to WEB renumbers it to WEB's next
-        available serial; a filler ticket then re-occupies the serial the move
-        freed; moving the original back must therefore yield the next
-        available serial in MSC, with ``original_id`` still pointing at the
-        serial it was created with.
+        available serial; a filler ticket then takes a brand-new serial in MSC
+        because numbers are never reused (JRB-037); moving the original back
+        must therefore yield the next available serial in MSC, with
+        ``original_id`` still pointing at the serial it was created with.
 
         Every expectation is derived from the projects' live numbering, so the
         test holds against an empty database and a database already carrying
@@ -146,24 +150,27 @@ class TestProjectMove:
 
             # Move to WEB -> next available number in WEB
             move_resp = client.post(
-                f"/api/v1/tickets/{ticket['id']}/move-project",
+                f"/api/v1/tickets/{ticket['full_id']}/move-project",
                 json={"project_id": web["id"]},
             )
             assert move_resp.status_code == 200, move_resp.text
-            expected_web_number = max(web_numbers, default=0) + 1
-            moved = client.get(f"/api/v1/tickets/{ticket['id']}").json()
-            assert moved["number"] == expected_web_number
+            # The designator changed on the move; address the ticket by the new one.
+            new_ref = move_resp.json()["new_full_id"]
+            moved = client.get(f"/api/v1/tickets/{new_ref}").json()
+            # Under never-reuse (JRB-037) the target serial is a fresh one above
+            # every previously visible WEB number (counter, not MAX+1).
+            expected_web_number = moved["number"]
+            assert expected_web_number > max(web_numbers, default=0)
             assert moved["original_id"] == f"MSC-{expected_msc_number:03d}"
 
-            # Filler ticket re-occupies the serial the move freed (dense renumbering):
-            # the moved ticket held MSC's highest serial, so the filler lands on it.
-            freed_number = expected_msc_number
+            # Numbers are never reused (JRB-037): the moved ticket's serial stays
+            # allocated in MSC, so the filler lands on a brand-new serial above it.
             filler = client.post(
                 "/api/v1/tickets",
                 json={"project_id": msc["id"], "title": "MSC Filler"},
             ).json()
-            assert filler["number"] == freed_number, (
-                "dense renumbering should reuse the freed serial"
+            assert filler["number"] > expected_msc_number, (
+                "number allocation must never reissue a freed serial"
             )
 
             # Snapshot MSC numbering before the move-back so the expected serial
@@ -184,7 +191,7 @@ class TestProjectMove:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)
 
-        # Next available in MSC (the filler holds the freed serial) -> one above it
+        # Next available in MSC (numbers never reused -> above the filler)
         expect(page.locator(".ticket-id")).to_contain_text(
             f"MSC-{expected_back_number:03d}", timeout=10000
         )

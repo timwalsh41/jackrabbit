@@ -52,7 +52,7 @@ class TestCriterionChecklist:
 
         # The sign-off appended a history entry with the criterion text.
         expect(page.locator("#criteria-history")).to_contain_text("Verified")
-        rows = _criteria(base_url, tid)
+        rows = _criteria(base_url, ticket["full_id"])
         assert rows[0]["verified"] is True
         assert rows[0]["verified_at"] is not None
 

@@ -114,7 +114,7 @@ class TestBacklogFilters:
         member = make_ticket(title="Sprint Member Unique")
         outsider = make_ticket(title="Sprint Outsider Unique")
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            resp = client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{member['id']}")
+            resp = client.post(f"/api/v1/sprints/{sprint['number']}/tickets/{member['full_id']}")
             assert resp.status_code == 200
 
         page.goto(f"{base_url}/backlog")
@@ -252,7 +252,9 @@ class TestBacklogFiltersSurviveSortingAndPaging:
         ]
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             for ticket in matching:
-                resp = client.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+                resp = client.post(
+                    f"/api/v1/sprints/{sprint['number']}/tickets/{ticket['full_id']}"
+                )
                 assert resp.status_code == 200
 
         # Matches the free-text search, but differs in every other filter.

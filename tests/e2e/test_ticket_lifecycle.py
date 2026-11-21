@@ -67,12 +67,13 @@ class TestTicketLifecycle:
 
         ticket = make_ticket(status="Open")
         tid = ticket["id"]
+        tid_full = ticket["full_id"]  # designator for API calls (JRB-038)
 
         # Story/Bug grooming is gated on at least one criterion (ADR-0025).
         # Rows are authored while Open; the modal criteria editor itself is
         # JRB-023 scope, so the test seeds them via the API here.
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
-            response = api.post(f"/api/v1/tickets/{tid}/criteria", json={"text": "It works"})
+            response = api.post(f"/api/v1/tickets/{tid_full}/criteria", json={"text": "It works"})
             assert response.status_code == 201, response.text
 
         page.goto(f"{base_url}/ticket/{tid}")
@@ -200,12 +201,13 @@ class TestTicketLifecycle:
 
         ticket = make_ticket(status="Open")
         tid = ticket["id"]
+        tid_full = ticket["full_id"]  # designator for API calls (JRB-038)
 
         # Reject the ticket via API so the restore buttons are direct hx-post buttons
         # (Rejected -> Groomed re-checks the Groomed guard, which fails with no fields).
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
             response = api.post(
-                f"/api/v1/tickets/{tid}/transition",
+                f"/api/v1/tickets/{tid_full}/transition",
                 json={"to_status": "Rejected", "reason": "not needed"},
             )
             assert response.status_code == 200
@@ -247,13 +249,14 @@ class TestTicketLifecycle:
         """
         ticket = make_ticket(status="Open", title="Full Lifecycle Walk")
         tid = ticket["id"]
+        tid_full = ticket["full_id"]  # designator for API calls (JRB-038)
 
         # Story/Bug grooming is gated on at least one criterion (ADR-0025);
         # rows are authored while Open (modal editor is JRB-023 scope).
         import httpx
 
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
-            response = api.post(f"/api/v1/tickets/{tid}/criteria", json={"text": "Walk works"})
+            response = api.post(f"/api/v1/tickets/{tid_full}/criteria", json={"text": "Walk works"})
             assert response.status_code == 201, response.text
 
         def buttons() -> object:
@@ -409,11 +412,11 @@ def test_groom_epic_without_structured_fields_via_api(
     import httpx
 
     epic = make_ticket(ticket_type="Epic", status="Open", title="Epic API groom no-fields")
-    tid = epic["id"]
+    tid_full = epic["full_id"]  # designator for API calls (JRB-038)
 
     with httpx.Client(base_url=base_url, timeout=30.0) as api:
         response = api.post(
-            f"/api/v1/tickets/{tid}/transition",
+            f"/api/v1/tickets/{tid_full}/transition",
             json={"to_status": "Groomed"},
         )
         assert response.status_code == 200
@@ -422,7 +425,7 @@ def test_groom_epic_without_structured_fields_via_api(
         # A Story without the four fields is still rejected (regression).
         story = make_ticket(ticket_type="Story", status="Open", title="Story API groom no-fields")
         response = api.post(
-            f"/api/v1/tickets/{story['id']}/transition",
+            f"/api/v1/tickets/{story['full_id']}/transition",
             json={"to_status": "Groomed"},
         )
         assert response.status_code == 400
@@ -443,6 +446,7 @@ class TestGroomedModalCriteria:
 
         ticket = make_ticket(status="Open")
         tid = ticket["id"]
+        tid_full = ticket["full_id"]  # designator for API calls (JRB-038)
 
         page.goto(f"{base_url}/ticket/{tid}")
         page.wait_for_load_state("networkidle")
@@ -470,7 +474,7 @@ class TestGroomedModalCriteria:
 
         # The rows landed as structured criteria, in order.
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
-            rows = api.get(f"/api/v1/tickets/{tid}/criteria").json()
+            rows = api.get(f"/api/v1/tickets/{tid_full}/criteria").json()
         assert [row["text"] for row in rows] == ["It works", "It is tested"]
 
     def test_existing_criteria_prefilled_and_removable_before_transition(
@@ -481,10 +485,12 @@ class TestGroomedModalCriteria:
         through the Groomed transition payload."""
         import httpx
 
-        tid = make_ticket(status="Open")["id"]
+        made = make_ticket(status="Open")
+        tid = made["id"]
+        tid_full = made["full_id"]  # designator for API calls (JRB-038)
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
             response = api.patch(
-                f"/api/v1/tickets/{tid}",
+                f"/api/v1/tickets/{tid_full}",
                 json={"criteria": ["Keep me", "Remove me"]},
             )
             assert response.status_code == 200, response.text
@@ -517,7 +523,7 @@ class TestGroomedModalCriteria:
         )
 
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
-            remaining = api.get(f"/api/v1/tickets/{tid}/criteria").json()
+            remaining = api.get(f"/api/v1/tickets/{tid_full}/criteria").json()
         assert [row["text"] for row in remaining] == ["Keep me"]
 
 

@@ -31,10 +31,10 @@ def _label_id(base_url: str, name: str) -> int:
     raise AssertionError(f"label {name!r} is not in the registry")
 
 
-def _attach(base_url: str, ticket_id: int, name: str) -> None:
+def _attach(base_url: str, ticket_ref: str, name: str) -> None:
     """Attach a label to a ticket (the label is created on demand)."""
     with httpx.Client(base_url=base_url, timeout=30.0) as client:
-        response = client.post(f"/api/v1/tickets/{ticket_id}/labels", json={"name": name})
+        response = client.post(f"/api/v1/tickets/{ticket_ref}/labels", json={"name": name})
         assert response.status_code == 201
 
 
@@ -71,7 +71,7 @@ class TestLabelFilter:
         label = _unique("e2e-one-label")
         labelled = make_ticket(title=_unique("One label member"))
         other = make_ticket(title=_unique("One label outsider"))
-        _attach(base_url, labelled["id"], label)
+        _attach(base_url, labelled["full_id"], label)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -88,10 +88,10 @@ class TestLabelFilter:
         both = make_ticket(title=_unique("Carries both"))
         only_first = make_ticket(title=_unique("Carries the first"))
         only_second = make_ticket(title=_unique("Carries the second"))
-        _attach(base_url, both["id"], first)
-        _attach(base_url, both["id"], second)
-        _attach(base_url, only_first["id"], first)
-        _attach(base_url, only_second["id"], second)
+        _attach(base_url, both["full_id"], first)
+        _attach(base_url, both["full_id"], second)
+        _attach(base_url, only_first["full_id"], first)
+        _attach(base_url, only_second["full_id"], second)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -111,10 +111,10 @@ class TestLabelFilter:
         both = make_ticket(title=_unique("Carries both"))
         only_first = make_ticket(title=_unique("Carries the first"))
         only_second = make_ticket(title=_unique("Carries the second"))
-        _attach(base_url, both["id"], first)
-        _attach(base_url, both["id"], second)
-        _attach(base_url, only_first["id"], first)
-        _attach(base_url, only_second["id"], second)
+        _attach(base_url, both["full_id"], first)
+        _attach(base_url, both["full_id"], second)
+        _attach(base_url, only_first["full_id"], first)
+        _attach(base_url, only_second["full_id"], second)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -133,9 +133,9 @@ class TestLabelFilter:
         second = _unique("e2e-default-second")
         both = make_ticket(title=_unique("Carries both"))
         only_first = make_ticket(title=_unique("Carries the first"))
-        _attach(base_url, both["id"], first)
-        _attach(base_url, both["id"], second)
-        _attach(base_url, only_first["id"], first)
+        _attach(base_url, both["full_id"], first)
+        _attach(base_url, both["full_id"], second)
+        _attach(base_url, only_first["full_id"], first)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -152,7 +152,7 @@ class TestLabelFilter:
         """The table shows the labels of every listed ticket."""
         label = _unique("e2e-column")
         ticket = make_ticket(title=_unique("Column member"))
-        _attach(base_url, ticket["id"], label)
+        _attach(base_url, ticket["full_id"], label)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -172,7 +172,7 @@ class TestSearchByLabelName:
         label = _unique("e2e-searchable")
         ticket = make_ticket(title=_unique("Findable by label"))
         other = make_ticket(title=_unique("Not findable by label"))
-        _attach(base_url, ticket["id"], label)
+        _attach(base_url, ticket["full_id"], label)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -196,7 +196,7 @@ class TestLabelFilterSurvivesSortingAndPaging:
         label = _unique("e2e-sort")
         member = make_ticket(title=_unique("Sorted member"))
         outsider = make_ticket(title=_unique("Sorted outsider"))
-        _attach(base_url, member["id"], label)
+        _attach(base_url, member["full_id"], label)
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -216,8 +216,8 @@ class TestLabelFilterSurvivesSortingAndPaging:
         first = make_ticket(title=_unique("Paged member A"))
         second = make_ticket(title=_unique("Paged member B"))
         outsider = make_ticket(title=_unique("Paged outsider"))
-        _attach(base_url, first["id"], label)
-        _attach(base_url, second["id"], label)
+        _attach(base_url, first["full_id"], label)
+        _attach(base_url, second["full_id"], label)
 
         page.goto(f"{base_url}/backlog?page_size=1")
         page.wait_for_load_state("networkidle")
@@ -236,7 +236,7 @@ class TestLabelFilterSurvivesSortingAndPaging:
         """The filter state is in the URL, so the view can be bookmarked."""
         label = _unique("e2e-url")
         member = make_ticket(title=_unique("Bookmarked member"))
-        _attach(base_url, member["id"], label)
+        _attach(base_url, member["full_id"], label)
         label_id = _label_id(base_url, label)
 
         page.goto(f"{base_url}/backlog")
@@ -269,7 +269,7 @@ class TestProjectScopedLabelFilter:
         uns, web, _ = seeded_projects
         member = make_ticket(project_id=web["id"], title=_unique("Scoped member"))
         elsewhere = make_ticket(project_id=uns["id"], title=_unique("Scoped outsider"))
-        _attach(base_url, member["id"], label)
+        _attach(base_url, member["full_id"], label)
 
         page.goto(f"{base_url}/backlog?project_id={web['id']}")
         page.wait_for_load_state("networkidle")

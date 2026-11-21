@@ -4,15 +4,15 @@ import httpx
 from playwright.sync_api import Page, expect
 
 
-def _set_criteria(base_url: str, ticket_id: int, criteria: list[str]) -> None:
+def _set_criteria(base_url: str, ticket_ref: str, criteria: list[str]) -> None:
     with httpx.Client(base_url=base_url, timeout=30.0) as api:
-        response = api.patch(f"/api/v1/tickets/{ticket_id}", json={"criteria": criteria})
+        response = api.patch(f"/api/v1/tickets/{ticket_ref}", json={"criteria": criteria})
         assert response.status_code == 200, response.text
 
 
-def _criteria(base_url: str, ticket_id: int) -> list[dict]:
+def _criteria(base_url: str, ticket_ref: str) -> list[dict]:
     with httpx.Client(base_url=base_url, timeout=30.0) as api:
-        response = api.get(f"/api/v1/tickets/{ticket_id}/criteria")
+        response = api.get(f"/api/v1/tickets/{ticket_ref}/criteria")
         assert response.status_code == 200, response.text
         return response.json()
 
@@ -23,7 +23,7 @@ class TestInlineCriteriaEditor:
     ):
         ticket = make_ticket(title="Clear acceptance criteria")
         ticket_id = ticket["id"]
-        _set_criteria(base_url, ticket_id, ["Remove this criterion"])
+        _set_criteria(base_url, ticket["full_id"], ["Remove this criterion"])
 
         page.goto(f"{base_url}/tickets/{ticket_id}")
         page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
@@ -39,7 +39,7 @@ class TestInlineCriteriaEditor:
             editor.get_by_role("button", name="Save").click()
         assert empty_save.value.status == 200
         expect(page.locator("#criteria-section")).to_contain_text("No acceptance criteria yet")
-        assert _criteria(base_url, ticket_id) == []
+        assert _criteria(base_url, ticket["full_id"]) == []
 
         # Saving an unchanged empty list must be a successful no-op, not an
         # omitted required JSON field.
@@ -58,7 +58,7 @@ class TestInlineCriteriaEditor:
     def test_edit_add_and_state_guidance(self, page: Page, base_url: str, make_ticket):
         ticket = make_ticket(title="Inline criteria controls")
         ticket_id = ticket["id"]
-        _set_criteria(base_url, ticket_id, ["Original criterion", "Second criterion"])
+        _set_criteria(base_url, ticket["full_id"], ["Original criterion", "Second criterion"])
 
         page.goto(f"{base_url}/tickets/{ticket_id}")
         page.wait_for_selector("#criteria-checklist .criterion-row", state="visible")
@@ -87,7 +87,7 @@ class TestInlineCriteriaEditor:
         rows.nth(2).fill("Added criterion")
         editor.get_by_role("button", name="Save").click()
         expect(page.locator("#criteria-checklist")).to_contain_text("Added criterion")
-        assert [row["text"] for row in _criteria(base_url, ticket_id)] == [
+        assert [row["text"] for row in _criteria(base_url, ticket["full_id"])] == [
             "Updated criterion",
             "Second criterion",
             "Added criterion",
@@ -147,7 +147,7 @@ class TestInlineCriteriaEditor:
         page.locator("#title").fill("Saved without criteria")
         page.get_by_role("button", name="Save Changes").click()
         page.wait_for_url(f"**/tickets/{ticket_id}")
-        assert _criteria(base_url, ticket_id) == []
+        assert _criteria(base_url, ticket["full_id"]) == []
 
         page.get_by_role("button", name="Groomed →").click()
         groom_form = page.locator("#groom-form")

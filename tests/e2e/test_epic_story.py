@@ -156,7 +156,7 @@ class TestEpicStoryLinking:
         selected_search_text = f"{story_ref} - {story['title']}"
         page.select_option("#link-modal select[name='link_type']", "relates_to")
 
-        expect(page.locator("#link-modal #target_id")).to_have_value(str(story["id"]))
+        expect(page.locator("#link-modal #target_id")).to_have_value(story["full_id"])
         expect(page.locator("#link-modal #target_search")).to_have_value(selected_search_text)
         expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
 
@@ -197,18 +197,18 @@ class TestEpicStoryLinking:
         page.wait_for_selector(".ticket-search-result", timeout=10000)
         page.click(".ticket-search-result >> nth=0")
         epic_search_text = f"{epic_ref} - {epic['title']}"
-        expect(page.locator("#link-modal #target_id")).to_have_value(str(epic["id"]))
+        expect(page.locator("#link-modal #target_id")).to_have_value(epic["full_id"])
         expect(page.locator("#link-modal #target_search")).to_have_value(epic_search_text)
         expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
 
         # A valid Epic target survives changing away from and back to child.
         page.select_option("#link-modal select[name='link_type']", "relates_to")
-        expect(page.locator("#link-modal #target_id")).to_have_value(str(epic["id"]))
+        expect(page.locator("#link-modal #target_id")).to_have_value(epic["full_id"])
         expect(page.locator("#link-modal #target_search")).to_have_value(epic_search_text)
         expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
 
         page.select_option("#link-modal select[name='link_type']", "child")
-        expect(page.locator("#link-modal #target_id")).to_have_value(str(epic["id"]))
+        expect(page.locator("#link-modal #target_id")).to_have_value(epic["full_id"])
         expect(page.locator("#link-modal #target_search")).to_have_value(epic_search_text)
         expect(page.locator("#link-modal #submit-btn")).to_be_enabled()
         page.click("#link-modal button[type='submit']")
@@ -225,10 +225,10 @@ class TestEpicStoryLinking:
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             response = client.post(
-                f"/api/v1/tickets/{stories[0]['id']}/links",
+                f"/api/v1/tickets/{stories[0]['full_id']}/links",
                 json={
-                    "source_id": stories[0]["id"],
-                    "target_id": epic["id"],
+                    "source_id": stories[0]["full_id"],
+                    "target_id": epic["full_id"],
                     "link_type": "child",
                 },
             )
@@ -253,10 +253,10 @@ class TestEpicStoryLinking:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             for story in stories:
                 resp = client.post(
-                    f"/api/v1/tickets/{story['id']}/links",
+                    f"/api/v1/tickets/{story['full_id']}/links",
                     json={
-                        "source_id": story["id"],
-                        "target_id": epic["id"],
+                        "source_id": story["full_id"],
+                        "target_id": epic["full_id"],
                         "link_type": "child",
                     },
                 )

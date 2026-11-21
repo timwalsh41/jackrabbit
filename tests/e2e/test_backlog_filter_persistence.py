@@ -175,7 +175,7 @@ class TestBacklogFilterPersistence:
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             for ticket in tickets:
-                client.delete(f"/api/v1/tickets/{ticket['id']}")
+                client.delete(f"/api/v1/tickets/{ticket['full_id']}")
 
     def _run(self, page: Page, base_url: str, canary: dict) -> None:
         """The page-two leave/return scenario (volume tickets already exist)."""

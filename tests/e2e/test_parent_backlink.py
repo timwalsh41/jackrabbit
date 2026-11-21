@@ -12,13 +12,13 @@ from tests.e2e.test_epic_story import _wait_modal_settled
 def make_link(base_url):
     """Create a link via the same API the UI calls."""
 
-    def _make(source_id: int, target_id: int, link_type: str) -> None:
+    def _make(source_ref: str, target_ref: str, link_type: str) -> None:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             response = client.post(
-                f"/api/v1/tickets/{source_id}/links",
+                f"/api/v1/tickets/{source_ref}/links",
                 json={
-                    "source_id": source_id,
-                    "target_id": target_id,
+                    "source_id": source_ref,
+                    "target_id": target_ref,
                     "link_type": link_type,
                 },
             )
@@ -32,7 +32,7 @@ def child_of_epic(make_ticket, make_link):
     """A Story already parented to an Epic, plus a second Epic to move it to."""
     epic = make_ticket(title="Epic: First Parent", ticket_type="Epic")
     story = make_ticket(title="Story: Moved Child")
-    make_link(epic["id"], story["id"], "parent")
+    make_link(epic["full_id"], story["full_id"], "parent")
     other_epic = make_ticket(title="Epic: Second Parent", ticket_type="Epic")
     return epic, story, other_epic
 
@@ -51,7 +51,7 @@ def _open_link_modal_for_child(page: Page, base_url: str, story: dict, target_ep
     page.fill("#link-modal #target_search", f"UNS-{target_epic['number']:03d}")
     page.dispatch_event("#link-modal #target_search", "keyup")
     page.wait_for_selector(".ticket-search-result", timeout=10000)
-    page.click(f".ticket-search-result[data-ticket-id='{target_epic['id']}']")
+    page.click(f".ticket-search-result[data-ticket-id='{target_epic['full_id']}']")
     page.wait_for_timeout(300)
 
 
@@ -92,12 +92,13 @@ class TestSecondParentConfirmFlow:
 
         # Abort: the modal stays open and nothing was re-parented
         expect(page.locator("#link-modal")).to_be_visible()
-        links = page.request.get(f"{base_url}/api/v1/tickets/{story['id']}/links").json()
+        links = page.request.get(f"{base_url}/api/v1/tickets/{story['full_id']}/links").json()
         assert any(
-            link["link_type"] == "child" and link["target_id"] == epic["id"] for link in links
+            link["link_type"] == "child" and link["target_id"] == epic["full_id"] for link in links
         )
         assert not any(
-            link["link_type"] == "child" and link["target_id"] == other_epic["id"] for link in links
+            link["link_type"] == "child" and link["target_id"] == other_epic["full_id"]
+            for link in links
         )
 
 

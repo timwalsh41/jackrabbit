@@ -12,9 +12,9 @@ from playwright.sync_api import Page, expect
 def set_triage_role(base_url: str):
     """Attach a triage label the way an agent does: via the labels API."""
 
-    def _set(ticket_id: int, name: str) -> dict:
+    def _set(ticket_ref: str, name: str) -> dict:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            response = client.post(f"/api/v1/tickets/{ticket_id}/labels", json={"name": name})
+            response = client.post(f"/api/v1/tickets/{ticket_ref}/labels", json={"name": name})
             assert response.status_code == 201, response.text
             return response.json()
 
@@ -28,7 +28,7 @@ class TestTriageLabelIsAnOrdinaryChip:
         self, page: Page, base_url: str, make_ticket, set_triage_role
     ):
         ticket = make_ticket()
-        set_triage_role(ticket["id"], "triage:ready-for-agent")
+        set_triage_role(ticket["full_id"], "triage:ready-for-agent")
 
         page.goto(f"{base_url}/ticket/{ticket['id']}")
         page.wait_for_load_state("networkidle")
@@ -44,7 +44,7 @@ class TestTriageLabelIsAnOrdinaryChip:
         self, page: Page, base_url: str, make_ticket, set_triage_role
     ):
         ticket = make_ticket(title="Backlog triage chip")
-        set_triage_role(ticket["id"], "triage:needs-info")
+        set_triage_role(ticket["full_id"], "triage:needs-info")
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
