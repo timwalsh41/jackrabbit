@@ -1,53 +1,43 @@
 # Triage Labels
 
-The engineering skills speak in terms of five canonical triage roles. Jackrabbit has
-**labels** (a global vocabulary, created on demand, appliable to any ticket), so each
-role is recorded as a **label in the `triage:` namespace** rather than as a keyword in
-the ticket description.
+The five canonical triage roles are a convention of the **skills ecosystem**, not a
+Jackrabbit construct. Jackrabbit provides **labels** (a global vocabulary, created on
+demand, applicable to any ticket); each role is recorded as a **label name** in the
+`triage:` namespace. This document is the single source of truth for the five names.
 
-| Role in the skills | Recorded as a label            | Meaning                                  |
-| ------------------ | ------------------------------ | ---------------------------------------- |
-| `needs-triage`     | `triage:needs-triage`          | Maintainer needs to evaluate this issue  |
-| `needs-info`       | `triage:needs-info`            | Waiting on reporter for more information |
-| `ready-for-agent`  | `triage:ready-for-agent`       | Fully specified, ready for an AFK agent  |
-| `ready-for-human`  | `triage:ready-for-human`       | Requires human implementation            |
-| `wontfix`          | `triage:wontfix`               | Will not be actioned                     |
+| Label name              | Meaning                                  |
+| ----------------------- | ---------------------------------------- |
+| `triage:needs-triage`   | Maintainer needs to evaluate this issue  |
+| `triage:needs-info`     | Waiting on reporter for more information |
+| `triage:ready-for-agent`| Fully specified, ready for an AFK agent  |
+| `triage:ready-for-human`| Requires human implementation            |
+| `triage:wontfix`        | Will not be actioned                     |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), **set** the
-role as a label on the ticket and **read** it back as a label. Do not parse the ticket
-description to find the role.
+Triage labels are **ordinary labels** (ADR-0027): Jackrabbit neither documents nor
+enforces any role vocabulary, and nothing in the product attaches meaning to a
+`triage:*` name. They render like any other label chip, and a ticket may carry
+whatever labels its workflow gives it.
 
 ## Recording a role
 
-    curl -s -X POST http://localhost:8080/api/v1/tickets/<id>/triage \
-      -H 'Content-Type: application/json' \
-      -d '{"role": "ready-for-agent"}'
-
-The label is created on demand, and setting a role replaces any triage role the
-ticket carried before (a ticket carries at most one triage role). Other labels on
-the ticket are left alone. An unknown role is rejected with `422`.
-
-The same effect is available by attaching the label directly:
+Attach the label by name through the generic labels API (created on demand):
 
     curl -s -X POST http://localhost:8080/api/v1/tickets/<id>/labels \
       -H 'Content-Type: application/json' \
       -d '{"name": "triage:ready-for-agent"}'
 
+Detach with `DELETE /api/v1/tickets/<id>/labels/<label_id>`, or replace the label set
+via ticket update (`PATCH /api/v1/tickets/<id>` with `labels`). There is no
+dedicated triage endpoint; the former `GET/POST /tickets/<id>/triage` and
+`GET /triage/roles` endpoints were removed (JRB-032).
+
 ## Reading a role
 
-    curl -s http://localhost:8080/api/v1/tickets/<id>/triage
-    # {"role": "ready-for-agent", "label": {"id": 7, "name": "triage:ready-for-agent", "color": "#..."}}
+A ticket's labels are part of the ticket payload (`GET /api/v1/tickets/<id>` →
+`labels`) and readable directly via `GET /api/v1/tickets/<id>/labels`. Triage labels
+render as ordinary label chips on the ticket page and in the backlog table.
 
-    curl -s http://localhost:8080/api/v1/triage/roles
-    # the five canonical roles and the label each one is recorded as
-
-A ticket's labels are also part of the ticket payload
-(`GET /api/v1/tickets/<id>` → `labels`), and the role is visible in the interface: on
-the ticket page and in the backlog table.
-
-## Until the label feature is deployed
-
-> The description keyword `**TRIAGE_STATUS**: <role>` remains the authoritative
-> triage marker until the label feature is deployed. The change of authority happens
-> at deployment: from that moment the label is what counts, and the keyword in the
-> description is only legacy text.
+> At-most-one-role is an mp-skills convention, not enforced by Jackrabbit: the plain
+> labels API lets a ticket carry several `triage:*` labels at once. Tooling that
+> expects a single role must manage replacement itself (detach the old label when
+> attaching the new one).

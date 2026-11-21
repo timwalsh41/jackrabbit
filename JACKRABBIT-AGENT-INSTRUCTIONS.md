@@ -9,7 +9,7 @@ Jackrabbit offers a lightweight, web-based issue tracking and project/sprint man
 - **Ticket types**: Epic (specs), Story (tickets), Bug, Spike
 - **Blocking links**: Native `blocks`/`blocked_by` relationships for task graph dependencies
 - **Epic→Story hierarchy**: Native `parent`/`child` links
-- **Triage roles**: Labels mapped to canonical roles via `/triage/roles` endpoint
+- **Triage labels**: mp-skills label-name convention (`triage:*`) over the generic labels feature
 - **Transition metadata**: Branch name, PR URL, and groomed fields recorded during status transitions
 
 ## Usage instructions
@@ -20,7 +20,7 @@ Jackrabbit offers a lightweight, web-based issue tracking and project/sprint man
 - Update ticket status appropriately as you proceed through workflow (after grooming, status should be `Groomed`, move ticket to `In Progress` when implementing, to `Ready for Review` when PR is available, and to `Complete` when merged)
 - Always reference the ticket number (epic, story, or bug) in the commit title and PR title
 - Create blocking and parent-child links between tickets as relevant when creating tickets or grooming
-- Triage label mappings are fetched from `GET /api/v1/triage/roles` at setup time. Canonical roles → Jackrabbit label strings.
+- Triage labels are attached by name via `POST /api/v1/tickets/{id}/labels` (e.g. `triage:ready-for-agent`). The five canonical names live in `docs/agents/triage-labels.md`.
 - Do not modify sprints (CRUD, move tickets, etc.) without explicit user consent or instruction
 
 ## Groomed fields

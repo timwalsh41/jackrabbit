@@ -61,9 +61,6 @@ from jackrabbit.schemas import (
     TicketUpdate,
     TransitionRequest,
     TransitionResponse,
-    TriageRead,
-    TriageRoleRead,
-    TriageRoleSet,
 )
 from jackrabbit.services import (
     ConflictError,
@@ -78,9 +75,7 @@ from jackrabbit.services import (
     SprintService,
     SprintTransitionError,
     TicketService,
-    TriageService,
 )
-from jackrabbit.triage import TRIAGE_ROLES
 
 router = APIRouter(prefix="/api/v1")
 
@@ -104,10 +99,6 @@ def get_link_service(session: Session = Depends(get_session)) -> LinkService:
 
 def get_label_service(session: Session = Depends(get_session)) -> LabelService:
     return LabelService(session)
-
-
-def get_triage_service(session: Session = Depends(get_session)) -> TriageService:
-    return TriageService(session)
 
 
 def get_criterion_service(session: Session = Depends(get_session)) -> CriterionService:
@@ -1234,57 +1225,6 @@ def delete_criterion(
     if not deleted:
         raise HTTPException(status_code=404, detail="Criterion not found for this ticket")
     return Response(status_code=204)
-
-
-# Triage endpoints — a ticket's triage role is a label in the `triage:` namespace
-@router.get("/triage/roles", response_model=list[TriageRoleRead])
-def list_triage_roles() -> list[TriageRoleRead]:
-    """The five canonical triage roles and the label that records each."""
-    return [TriageRoleRead(role=role.value, label=role.label_name) for role in TRIAGE_ROLES]
-
-
-@router.get("/tickets/{ticket_id}/triage", response_model=TriageRead)
-def get_ticket_triage(
-    ticket_id: int,
-    service: TriageService = Depends(get_triage_service),
-    ticket_service: TicketService = Depends(get_ticket_service),
-) -> TriageRead:
-    """Read a ticket's triage role (recorded as a label)."""
-    if not ticket_service.get_ticket(ticket_id):
-        raise HTTPException(status_code=404, detail="Ticket not found")
-
-    role = service.role_for(ticket_id)
-    if role is None:
-        return TriageRead()
-
-    label = service.label_service.find_by_name(role.label_name)
-    return TriageRead(
-        role=role.value,
-        label=LabelRead.model_validate(label) if label is not None else None,
-    )
-
-
-@router.post("/tickets/{ticket_id}/triage", response_model=TriageRead)
-def set_ticket_triage(
-    ticket_id: int,
-    role_in: TriageRoleSet,
-    service: TriageService = Depends(get_triage_service),
-    ticket_service: TicketService = Depends(get_ticket_service),
-) -> TriageRead:
-    """Record a ticket's triage role as a label, replacing any previous role."""
-    if not ticket_service.get_ticket(ticket_id):
-        raise HTTPException(status_code=404, detail="Ticket not found")
-
-    try:
-        role = service.set_role(ticket_id, role_in.role)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-
-    label = service.label_service.find_by_name(role.label_name)
-    return TriageRead(
-        role=role.value,
-        label=LabelRead.model_validate(label) if label is not None else None,
-    )
 
 
 # Image upload endpoints (JRB-027)

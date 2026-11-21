@@ -1,7 +1,9 @@
 # ADR-0024: Labels on Tickets
 
 ## Status
-Accepted (supersedes the `labels`/`tags` exclusion in ADR-0016)
+Accepted (supersedes the `labels`/`tags` exclusion in ADR-0016). The Triage section
+below is superseded by ADR-0027 (triage is a label-name convention over the labels
+feature; the label entity itself stays as specified here).
 
 ## Context
 ADR-0016 chose a minimal ticket model and explicitly excluded labels and tags, on the
