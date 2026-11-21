@@ -165,20 +165,23 @@ class TestMoveTicketToProject:
         assert ticket3.number == 3
 
     def test_move_ticket_to_project_with_gap(self, ticket_service, setup_projects):
-        """Moving into a project with a numbering gap assigns MAX(number)+1."""
+        """JRB-037: a moved ticket gets the target project's next counter
+        value, past any numbers freed by deletes."""
         web = setup_projects["web"]
         ticket_service.create_ticket(project_id=web.id, title="Web 1")
         ticket2 = ticket_service.create_ticket(project_id=web.id, title="Web 2")
         ticket_service.create_ticket(project_id=web.id, title="Web 3")
 
-        # Delete WEB-2, leaving a gap: WEB numbers are now {1, 3}
+        # Delete WEB-2, leaving a gap: WEB numbers are now {1, 3}, but the
+        # counter already sits past 3.
         ticket_service.session.delete(ticket2)
         ticket_service.session.commit()
 
         uns = setup_projects["uns"]
         mover = ticket_service.create_ticket(project_id=uns.id, title="Mover")
 
-        # MAX(number) in WEB is 3, so the moved ticket becomes WEB-4
+        # The WEB counter is at 4 (three creates), so the mover becomes WEB-4
+        # - the freed number 2 is not reissued.
         result = ticket_service.move_ticket_to_project(mover.id, web.id)
         assert result["new_full_id"] == "WEB-004"
 
@@ -187,14 +190,41 @@ class TestMoveTicketToProject:
         assert mover.number == 4
         assert mover.original_id == "UNS-001"
 
+    def test_move_ticket_uses_target_counter_even_after_highest_delete(
+        self, ticket_service, setup_projects
+    ):
+        """JRB-037: moving into a project whose highest-numbered ticket was
+        deleted must not reissue that number - the target project's counter
+        keeps allocating past it."""
+        web = setup_projects["web"]
+        ticket_service.create_ticket(project_id=web.id, title="Web 1")
+        ticket2 = ticket_service.create_ticket(project_id=web.id, title="Web 2")
+        ticket_service.session.delete(ticket2)
+        ticket_service.session.commit()
+
+        uns = setup_projects["uns"]
+        mover = ticket_service.create_ticket(project_id=uns.id, title="Mover")
+
+        # WEB-2 was deleted; the mover must get WEB-3, not the reused WEB-2.
+        result = ticket_service.move_ticket_to_project(mover.id, web.id)
+        assert result["new_full_id"] == "WEB-003"
+
+        ticket_service.session.refresh(mover)
+        assert mover.number == 3
+
+        # The moved ticket consumed the counter, so the next WEB ticket is 4.
+        nxt = ticket_service.create_ticket(project_id=web.id, title="Next")
+        assert nxt.number == 4
+
     def test_move_ticket_handles_concurrent_number_race(self, tmp_path):
-        """If a competing writer claims the target number between the MAX read
-        and the commit, the move retries and gets MAX(number)+1 instead of
-        creating a duplicate number."""
+        """If a competing writer claims the next number between the counter
+        read and the commit, the move retries and gets the fresh counter
+        value instead of creating a duplicate number."""
         db_file = tmp_path / "race.db"
         url = f"sqlite:///{db_file}"
 
-        # Seed shared schema + data
+        # Seed shared schema + data. Counters are seeded to match the seeded
+        # tickets, the way the JRB-037 migration seeds existing databases.
         seed_engine = create_engine(url, connect_args={"check_same_thread": False})
         from jackrabbit.models import SQLModel
 
@@ -208,9 +238,12 @@ class TestMoveTicketToProject:
                     description="Default",
                     color="#9ca3af",
                     is_system=True,
+                    next_number=2,
                 )
             )
-            seed.add(Project(id=2, prefix="WEB", name="Web Project", color="#3b82f6"))
+            seed.add(
+                Project(id=2, prefix="WEB", name="Web Project", color="#3b82f6", next_number=3)
+            )
             seed.add(Ticket(project_id=2, number=1, title="web one"))
             seed.add(Ticket(project_id=2, number=2, title="web two"))
             seed.add(Ticket(project_id=1, number=1, title="racer"))
@@ -232,11 +265,11 @@ class TestMoveTicketToProject:
 
         def racing_commit(*args, **kwargs):
             # Fires while service_a is committing its move: a competing writer
-            # claims WEB-3 (the number service_a computed from a stale MAX read)
+            # claims WEB-3 (the number service_a read from the counter) through
+            # the service, which also advances the WEB counter to 4.
             if not hook_fired["done"]:
                 hook_fired["done"] = True
-                session_b.add(Ticket(project_id=2, number=3, title="interloper"))
-                session_b.commit()
+                TicketService(session_b).create_ticket(project_id=2, title="interloper")
             return original_commit(*args, **kwargs)
 
         session_a.commit = racing_commit
