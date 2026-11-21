@@ -118,7 +118,7 @@ async def test_edit_sprint_form_uses_hx_patch(
     response = await client_with_seeds.get(f"/sprints/{sprint['id']}/edit")
     assert response.status_code == 200
     content = response.text
-    assert f'hx-patch="/api/v1/sprints/{sprint["id"]}"' in content
+    assert f'hx-patch="/api/v1/sprints/{sprint["number"]}"' in content
     # The form must not fall back to hx-post (the PATCH-only route would 405)
     assert 'hx-post="/api/v1/sprints/' not in content
     assert 'value="2601"' in content
@@ -207,7 +207,7 @@ async def test_sprint_board_blocked_completion_shows_why(
     assert "In Progress" in response.text
 
     # The persisted status is unchanged
-    data = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['id']}")).json()
+    data = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['number']}")).json()
     assert data["status"] == "In Progress"
 
 
@@ -217,10 +217,10 @@ async def test_sprint_board_reopen_action(
     """A Complete sprint offers Reopen Sprint, which clears the finish date."""
     sprint = await _create_sprint(client_with_seeds, name="Reopenable")
     await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "In Progress"}
+        f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "In Progress"}
     )
     await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint['id']}/transition", json={"to_status": "Complete"}
+        f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "Complete"}
     )
 
     response = await client_with_seeds.get(f"/sprints/{sprint['id']}/detail")
@@ -230,7 +230,7 @@ async def test_sprint_board_reopen_action(
         f"/sprints/{sprint['id']}/transition", data={"to_status": "In Progress"}
     )
     assert response.status_code == 200
-    data = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['id']}")).json()
+    data = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['number']}")).json()
     assert data["status"] == "In Progress"
     assert data["actual_finish"] is None
 
@@ -287,5 +287,5 @@ async def test_sprint_list_row_transitions_full_cycle(
     assert response.status_code == 200
     assert "In Progress" in response.text
     assert "Complete" in response.text  # the In Progress action replaces Reopen
-    rows = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['id']}/transitions")).json()
+    rows = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['number']}/transitions")).json()
     assert [r["to_status"] for r in rows] == ["In Progress", "Complete", "In Progress"]

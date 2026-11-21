@@ -15,8 +15,8 @@ async def _ticket(client: AsyncClient, title: str = "Label me", project_id: int 
     return response.json()
 
 
-async def _attach(client: AsyncClient, ticket_id: int, name: str):
-    return await client.post(f"/api/v1/tickets/{ticket_id}/labels", json={"name": name})
+async def _attach(client: AsyncClient, designator: str, name: str):
+    return await client.post(f"/api/v1/tickets/{designator}/labels", json={"name": name})
 
 
 def _chip_names(html: str) -> list[str]:
@@ -29,7 +29,7 @@ class TestLabelsSection:
 
     async def test_the_section_lists_the_tickets_labels(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
         response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels")
         assert response.status_code == 200
@@ -45,16 +45,17 @@ class TestLabelsSection:
 
     async def test_each_chip_can_be_removed(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        label = (await _attach(client_with_seeds, ticket["id"], "Backend")).json()
+        label = (await _attach(client_with_seeds, ticket["full_id"], "Backend")).json()
 
         response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels")
-        assert f'hx-delete="/api/v1/tickets/{ticket["id"]}/labels/{label["id"]}"' in response.text
+        hx_delete = f'hx-delete="/api/v1/tickets/{ticket["full_id"]}/labels/{label["id"]}"'
+        assert hx_delete in response.text
 
     async def test_the_section_offers_the_labels_in_use_as_suggestions(
         self, client_with_seeds: AsyncClient
     ):
         other = await _ticket(client_with_seeds, "Other")
-        await _attach(client_with_seeds, other["id"], "Frontend")
+        await _attach(client_with_seeds, other["full_id"], "Frontend")
         ticket = await _ticket(client_with_seeds)
 
         response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels/modal")
@@ -75,7 +76,7 @@ class TestAddLabelModal:
         self, client_with_seeds: AsyncClient
     ):
         other = await _ticket(client_with_seeds, "Other")
-        await _attach(client_with_seeds, other["id"], "Frontend")
+        await _attach(client_with_seeds, other["full_id"], "Frontend")
         ticket = await _ticket(client_with_seeds)
 
         response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels/modal")
@@ -84,7 +85,7 @@ class TestAddLabelModal:
     async def test_the_modal_posts_to_the_label_endpoint(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
         response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels/modal")
-        assert f'hx-post="/api/v1/tickets/{ticket["id"]}/labels"' in response.text
+        assert f'hx-post="/api/v1/tickets/{ticket["full_id"]}/labels"' in response.text
 
 
 class TestHtmxAttachAndDetach:
@@ -102,7 +103,7 @@ class TestHtmxAttachAndDetach:
 
     async def test_detaching_returns_the_refreshed_section(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        label = (await _attach(client_with_seeds, ticket["id"], "Backend")).json()
+        label = (await _attach(client_with_seeds, ticket["full_id"], "Backend")).json()
 
         response = await client_with_seeds.delete(
             f"/api/v1/tickets/{ticket['full_id']}/labels/{label['id']}",
@@ -122,7 +123,7 @@ class TestLabelsInTheTicketForm:
 
     async def test_the_edit_form_shows_the_current_labels(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
         response = await client_with_seeds.get(f"/tickets/{ticket['id']}/edit")
         assert response.status_code == 200
@@ -133,7 +134,7 @@ class TestLabelsInTheTicketForm:
         self, client_with_seeds: AsyncClient
     ):
         other = await _ticket(client_with_seeds, "Other")
-        await _attach(client_with_seeds, other["id"], "Frontend")
+        await _attach(client_with_seeds, other["full_id"], "Frontend")
 
         response = await client_with_seeds.get("/tickets/new")
         assert 'value="Frontend"' in response.text
