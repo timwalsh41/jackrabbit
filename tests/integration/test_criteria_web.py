@@ -12,7 +12,7 @@ async def _create_story(client: httpx.AsyncClient, criteria: list[str]) -> dict:
     ticket = response.json()
     if criteria:
         response = await client.patch(
-            f"/api/v1/tickets/{ticket['id']}", json={"criteria": criteria}
+            f"/api/v1/tickets/{ticket['full_id']}", json={"criteria": criteria}
         )
         assert response.status_code == 200, response.text
     return ticket
@@ -88,7 +88,7 @@ class TestCriteriaEditorRoute:
         assert "First" in response.text
         assert "Second" in response.text
         assert "Old criterion" not in response.text
-        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/criteria")).json()
         assert [row["text"] for row in rows] == ["First", "Second"]
 
         unchanged = await client_with_seeds.patch(
@@ -96,7 +96,7 @@ class TestCriteriaEditorRoute:
         )
         assert unchanged.status_code == 200, unchanged.text
         unchanged_rows = (
-            await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")
+            await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/criteria")
         ).json()
         assert [row["id"] for row in unchanged_rows] == [row["id"] for row in rows]
 
@@ -110,7 +110,7 @@ class TestCriteriaEditorRoute:
         assert response.status_code == 200, response.text
         assert "No acceptance criteria yet" in response.text
         assert (
-            await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")
+            await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/criteria")
         ).json() == []
 
     async def test_patch_rejects_locked_criteria_with_conflict(

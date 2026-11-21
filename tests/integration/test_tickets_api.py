@@ -29,12 +29,12 @@ async def _create_ticket(
 
 async def _transition(
     client: AsyncClient,
-    ticket_id: int,
+    designator: str,
     to_status: str,
     **kwargs,
 ):
     payload = {"to_status": to_status, **kwargs}
-    return await client.post(f"/api/v1/tickets/{ticket_id}/transition", json=payload)
+    return await client.post(f"/api/v1/tickets/{designator}/transition", json=payload)
 
 
 class TestTicketsCRUD:
@@ -66,17 +66,17 @@ class TestTicketsCRUD:
             json={
                 "project_id": two_projects["web"],
                 "title": "Child created with link",
-                "links": json.dumps([{"link_type": "child", "target_id": epic["id"]}]),
+                "links": json.dumps([{"link_type": "child", "target_id": epic["full_id"]}]),
             },
         )
         assert response.status_code == 201, response.text
         child = response.json()
-        links_response = await client_with_seeds.get(f"/api/v1/tickets/{child['id']}/links")
+        links_response = await client_with_seeds.get(f"/api/v1/tickets/{child['full_id']}/links")
         assert links_response.status_code == 200
         links = links_response.json()
         assert {(link["source_id"], link["target_id"], link["link_type"]) for link in links} == {
-            (child["id"], epic["id"], "child"),
-            (epic["id"], child["id"], "parent"),
+            (child["full_id"], epic["full_id"], "child"),
+            (epic["full_id"], child["full_id"], "parent"),
         }
 
     async def test_create_ticket_with_invalid_link_returns_400_without_ticket(
@@ -92,8 +92,8 @@ class TestTicketsCRUD:
                 "project_id": two_projects["web"],
                 "title": "Must not persist",
                 "links": [
-                    {"link_type": "child", "target_id": epic["id"]},
-                    {"link_type": "child", "target_id": not_epic["id"]},
+                    {"link_type": "child", "target_id": epic["full_id"]},
+                    {"link_type": "child", "target_id": not_epic["full_id"]},
                 ],
             },
         )
@@ -101,7 +101,9 @@ class TestTicketsCRUD:
         assert response.json()["detail"] == "Child link target must be an Epic"
         tickets = (await client_with_seeds.get("/api/v1/tickets")).json()
         assert all(ticket["title"] != "Must not persist" for ticket in tickets["items"])
-        assert (await client_with_seeds.get(f"/api/v1/tickets/{epic['id']}/links")).json() == []
+        assert (
+            await client_with_seeds.get(f"/api/v1/tickets/{epic['full_id']}/links")
+        ).json() == []
 
     async def test_numbers_are_per_project(self, client_with_seeds: AsyncClient, two_projects):
         t1 = await _create_ticket(client_with_seeds, two_projects["web"], "First")
@@ -111,7 +113,7 @@ class TestTicketsCRUD:
 
     async def test_get_ticket_with_details(self, client_with_seeds: AsyncClient, two_projects):
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Detail me")
-        response = await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")
+        response = await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")
         assert response.status_code == 200
         data = response.json()
         assert data["title"] == "Detail me"
@@ -120,7 +122,7 @@ class TestTicketsCRUD:
         assert data["transitions"] == []
 
     async def test_get_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
-        response = await client_with_seeds.get("/api/v1/tickets/9999")
+        response = await client_with_seeds.get("/api/v1/tickets/WEB-9999")
         assert response.status_code == 404
 
     async def test_get_ticket_by_full_id(self, client_with_seeds: AsyncClient, two_projects):
@@ -136,7 +138,7 @@ class TestTicketsCRUD:
     async def test_patch_ticket_updates_fields(self, client_with_seeds: AsyncClient, two_projects):
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Patch me")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}",
+            f"/api/v1/tickets/{created['full_id']}",
             json={"title": "Patched", "priority": "High", "story_points": 3},
         )
         assert response.status_code == 200
@@ -155,12 +157,12 @@ class TestTicketsCRUD:
         Without the empty-string -> None validator on sprint_id this 422'd.
         It must PATCH successfully and leave sprint_id null."""
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Sprintless edit")
-        assert (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()[
+        assert (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()[
             "sprint_id"
         ] is None
 
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}",
+            f"/api/v1/tickets/{created['full_id']}",
             json={"title": "Renamed via edit form", "sprint_id": ""},
         )
         assert response.status_code == 200, response.text
@@ -170,7 +172,7 @@ class TestTicketsCRUD:
         assert data["status"] == "Open"
 
     async def test_patch_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
-        response = await client_with_seeds.patch("/api/v1/tickets/9999", json={"title": "nope"})
+        response = await client_with_seeds.patch("/api/v1/tickets/WEB-9999", json={"title": "nope"})
         assert response.status_code == 404
 
 
@@ -186,7 +188,7 @@ class TestPatchStatusIsGuarded:
         Ready for Review; 400, ticket unchanged, NO Transition record."""
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Guard me")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}",
+            f"/api/v1/tickets/{created['full_id']}",
             json={"status": "Ready for Review"},
         )
         assert response.status_code == 400, response.text
@@ -194,7 +196,7 @@ class TestPatchStatusIsGuarded:
         # rejected as a status skip (through Groomed).
         assert "Cannot skip statuses" in response.json()["detail"]
 
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()
         assert data["status"] == "Open"
         assert data["transitions"] == []
         rows = list(test_db.exec(select(Transition).where(Transition.ticket_id == created["id"])))
@@ -206,7 +208,7 @@ class TestPatchStatusIsGuarded:
         """Allowed guarded change: Open + grooming fields -> Groomed with audit."""
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Groom via PATCH")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}",
+            f"/api/v1/tickets/{created['full_id']}",
             json={
                 "status": "Groomed",
                 "approach": "Do it carefully",
@@ -220,7 +222,7 @@ class TestPatchStatusIsGuarded:
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "Groomed"
 
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()
         assert data["status"] == "Groomed"
         assert len(data["transitions"]) == 1
         assert data["transitions"][0]["to_status"] == "Groomed"
@@ -245,10 +247,10 @@ class TestPatchStatusIsGuarded:
             validation_steps="x",
         )
         r1 = await _transition(
-            client_with_seeds, created["id"], "Groomed", reason="groom", criteria=["It works"]
+            client_with_seeds, created["full_id"], "Groomed", reason="groom", criteria=["It works"]
         )
         assert r1.status_code == 200, r1.text
-        r2 = await _transition(client_with_seeds, created["id"], "In Progress", reason="start")
+        r2 = await _transition(client_with_seeds, created["full_id"], "In Progress", reason="start")
         assert r2.status_code == 200, r2.text
         # Set the PR on the record (pr_url is not a PATCH-able field; the
         # Ready-for-Review modal provides it at transition time).
@@ -257,11 +259,11 @@ class TestPatchStatusIsGuarded:
         test_db.add(ticket)
         test_db.commit()
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}",
+            f"/api/v1/tickets/{created['full_id']}",
             json={"status": "Ready for Review"},
         )
         assert response.status_code == 200, response.text
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()
         assert data["status"] == "Ready for Review"
         assert data["pr_url"] == "https://github.com/o/r/pull/9"
 
@@ -270,7 +272,7 @@ class TestPatchStatusIsGuarded:
     ):
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Noop status")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}", json={"status": "Open"}
+            f"/api/v1/tickets/{created['full_id']}", json={"status": "Open"}
         )
         assert response.status_code == 200
         rows = list(test_db.exec(select(Transition).where(Transition.ticket_id == created["id"])))
@@ -290,14 +292,14 @@ class TestPatchStatusIsGuarded:
             validation_steps="x",
         )
         r1 = await _transition(
-            client_with_seeds, created["id"], "Groomed", reason="groom", criteria=["It works"]
+            client_with_seeds, created["full_id"], "Groomed", reason="groom", criteria=["It works"]
         )
         assert r1.status_code == 200, r1.text
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}", json={"status": "Open"}
+            f"/api/v1/tickets/{created['full_id']}", json={"status": "Open"}
         )
         assert response.status_code == 200
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()
         assert data["status"] == "Open"
         transitions = [t["to_status"] for t in data["transitions"]]
         assert transitions == ["Groomed", "Open"]
@@ -307,7 +309,7 @@ class TestPatchStatusIsGuarded:
     ):
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Skip")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}",
+            f"/api/v1/tickets/{created['full_id']}",
             json={
                 "status": "In Progress",
                 "approach": "x",
@@ -325,7 +327,7 @@ class TestPatchStatusIsGuarded:
         """HTMX edit form submissions get the 400 (form surfaces detail via JS)."""
         created = await _create_ticket(client_with_seeds, two_projects["web"], "HTMX guard")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}",
+            f"/api/v1/tickets/{created['full_id']}",
             content='{"status": "Ready for Review"}',
             headers={"Content-Type": "application/json", "HX-Request": "true"},
         )
@@ -347,14 +349,14 @@ class TestPatchStatusIsGuarded:
             validation_steps="x",
         )
         await _transition(
-            client_with_seeds, created["id"], "Groomed", reason="groom", criteria=["It works"]
+            client_with_seeds, created["full_id"], "Groomed", reason="groom", criteria=["It works"]
         )
-        await _transition(client_with_seeds, created["id"], "In Progress", reason="start")
+        await _transition(client_with_seeds, created["full_id"], "In Progress", reason="start")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}", json={"status": "Ready for Review"}
+            f"/api/v1/tickets/{created['full_id']}", json={"status": "Ready for Review"}
         )
         assert response.status_code == 200, response.text
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()
         assert data["status"] == "Ready for Review"
 
     async def test_patch_to_rejected_then_restore(
@@ -363,29 +365,29 @@ class TestPatchStatusIsGuarded:
         """Reject/restore semantics through PATCH."""
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Rejectable")
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}", json={"status": "Rejected"}
+            f"/api/v1/tickets/{created['full_id']}", json={"status": "Rejected"}
         )
         assert response.status_code == 200
-        assert (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()[
+        assert (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()[
             "status"
         ] == "Rejected"
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{created['id']}", json={"status": "Open"}
+            f"/api/v1/tickets/{created['full_id']}", json={"status": "Open"}
         )
         assert response.status_code == 200
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")).json()
         assert data["status"] == "Open"
         assert [t["to_status"] for t in data["transitions"]] == ["Rejected", "Open"]
 
     async def test_delete_ticket(self, client_with_seeds: AsyncClient, two_projects):
         created = await _create_ticket(client_with_seeds, two_projects["web"], "Delete me")
-        response = await client_with_seeds.delete(f"/api/v1/tickets/{created['id']}")
+        response = await client_with_seeds.delete(f"/api/v1/tickets/{created['full_id']}")
         assert response.status_code == 204
-        response = await client_with_seeds.get(f"/api/v1/tickets/{created['id']}")
+        response = await client_with_seeds.get(f"/api/v1/tickets/{created['full_id']}")
         assert response.status_code == 404
 
     async def test_delete_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
-        response = await client_with_seeds.delete("/api/v1/tickets/9999")
+        response = await client_with_seeds.delete("/api/v1/tickets/WEB-9999")
         assert response.status_code == 404
 
 
@@ -405,7 +407,9 @@ class TestTicketsFiltering:
             test_plan="t",
             validation_steps="v",
         )
-        await _transition(client, groomed["id"], "Groomed", reason="groomed", criteria=["It works"])
+        await _transition(
+            client, groomed["full_id"], "Groomed", reason="groomed", criteria=["It works"]
+        )
         await _create_ticket(client, web, "Open bug", type="Bug")
         await _create_ticket(client, api, "API story", type="Story")
         in_progress = await _create_ticket(
@@ -418,8 +422,10 @@ class TestTicketsFiltering:
             test_plan="t",
             validation_steps="v",
         )
-        await _transition(client, in_progress["id"], "Groomed", reason="g", criteria=["It works"])
-        await _transition(client, in_progress["id"], "In Progress", reason="w")
+        await _transition(
+            client, in_progress["full_id"], "Groomed", reason="g", criteria=["It works"]
+        )
+        await _transition(client, in_progress["full_id"], "In Progress", reason="w")
 
     async def test_filter_by_project(self, client_with_seeds: AsyncClient):
         await self._seed(client_with_seeds)
@@ -456,14 +462,14 @@ class TestTicketsFiltering:
         sprint_id = (await client_with_seeds.get("/api/v1/sprints")).json()[0]["id"]
         # Assign the first listed ticket to the sprint
         tickets = (await client_with_seeds.get("/api/v1/tickets")).json()["items"]
-        ticket_id = tickets[0]["id"]
-        response = await client_with_seeds.post(f"/api/v1/sprints/{sprint_id}/tickets/{ticket_id}")
+        designator = tickets[0]["full_id"]
+        response = await client_with_seeds.post(f"/api/v1/sprints/{sprint_id}/tickets/{designator}")
         assert response.status_code == 200
 
         listed = await client_with_seeds.get("/api/v1/tickets", params={"sprint_id": sprint_id})
         data = listed.json()
         assert data["total"] == 1
-        assert data["items"][0]["id"] == ticket_id
+        assert data["items"][0]["full_id"] == designator
 
     async def test_filter_sprint_id_zero_returns_unsprinted(self, client_with_seeds: AsyncClient):
         await self._seed(client_with_seeds)
@@ -493,7 +499,7 @@ class TestTicketsCriteriaStateFilter:
                 validation_steps="v",
             )
             groomed = await _transition(
-                client, ticket["id"], "Groomed", reason="g", criteria=criteria
+                client, ticket["full_id"], "Groomed", reason="g", criteria=criteria
             )
             assert groomed.status_code == 200, groomed.text
             return ticket
@@ -504,22 +510,23 @@ class TestTicketsCriteriaStateFilter:
 
         # In Progress, one verified and one unverified criterion.
         mixed = await _criteria_story("Partially signed off", ["It works", "It is tested"])
-        started = await _transition(client, mixed["id"], "In Progress", reason="w")
+        started = await _transition(client, mixed["full_id"], "In Progress", reason="w")
         assert started.status_code == 200
-        rows = (await client.get(f"/api/v1/tickets/{mixed['id']}/criteria")).json()
+        rows = (await client.get(f"/api/v1/tickets/{mixed['full_id']}/criteria")).json()
         signed = await client.patch(
-            f"/api/v1/tickets/{mixed['id']}/criteria/{rows[1]['id']}", json={"verified": True}
+            f"/api/v1/tickets/{mixed['full_id']}/criteria/{rows[1]['id']}", json={"verified": True}
         )
         assert signed.status_code == 200
         ids["mixed"] = mixed["id"]
 
         # In Progress, every criterion verified.
         verified = await _criteria_story("Fully signed off", ["It works"])
-        started = await _transition(client, verified["id"], "In Progress", reason="w")
+        started = await _transition(client, verified["full_id"], "In Progress", reason="w")
         assert started.status_code == 200
-        rows = (await client.get(f"/api/v1/tickets/{verified['id']}/criteria")).json()
+        rows = (await client.get(f"/api/v1/tickets/{verified['full_id']}/criteria")).json()
         signed = await client.patch(
-            f"/api/v1/tickets/{verified['id']}/criteria/{rows[0]['id']}", json={"verified": True}
+            f"/api/v1/tickets/{verified['full_id']}/criteria/{rows[0]['id']}",
+            json={"verified": True},
         )
         assert signed.status_code == 200
         ids["verified"] = verified["id"]
@@ -661,7 +668,7 @@ class TestTicketsTransitions:
 
         # Guarded: Open -> Groomed without fields is blocked
         blocked = await client_with_seeds.get(
-            f"/api/v1/tickets/{plain['id']}/transition/can",
+            f"/api/v1/tickets/{plain['full_id']}/transition/can",
             params={"to_status": "Groomed"},
         )
         assert blocked.status_code == 200
@@ -670,7 +677,7 @@ class TestTicketsTransitions:
 
         # Unguarded: Open -> Rejected is always allowed
         allowed = await client_with_seeds.get(
-            f"/api/v1/tickets/{groomable['id']}/transition/can",
+            f"/api/v1/tickets/{groomable['full_id']}/transition/can",
             params={"to_status": "Rejected"},
         )
         assert allowed.json()["can_transition"] is True
@@ -680,24 +687,24 @@ class TestTicketsTransitions:
         self, client_with_seeds: AsyncClient
     ):
         response = await client_with_seeds.get(
-            "/api/v1/tickets/9999/transition/can", params={"to_status": "Groomed"}
+            "/api/v1/tickets/WEB-9999/transition/can", params={"to_status": "Groomed"}
         )
         assert response.status_code == 404
 
     async def test_guarded_transition_rejected_with_400(self, client_with_seeds: AsyncClient):
         ticket = await _create_ticket(client_with_seeds, 2, "No fields")
         response = await _transition(
-            client_with_seeds, ticket["id"], "Groomed", reason="missing fields"
+            client_with_seeds, ticket["full_id"], "Groomed", reason="missing fields"
         )
         assert response.status_code == 400
         assert "Approach is required" in response.json()["detail"]
         # Status unchanged
-        check = await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")
+        check = await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")
         assert check.json()["status"] == "Open"
 
     async def test_full_lifecycle_with_branch_and_pr(self, client_with_seeds: AsyncClient):
         ticket = await self._groomable_ticket(client_with_seeds)
-        ticket_id = ticket["id"]
+        ticket_id = ticket["full_id"]
 
         # Open -> Groomed
         response = await _transition(
@@ -751,20 +758,22 @@ class TestTicketsTransitions:
     async def test_backward_transition_allowed(self, client_with_seeds: AsyncClient):
         ticket = await self._groomable_ticket(client_with_seeds)
         await _transition(
-            client_with_seeds, ticket["id"], "Groomed", reason="g", criteria=["It works"]
+            client_with_seeds, ticket["full_id"], "Groomed", reason="g", criteria=["It works"]
         )
-        response = await _transition(client_with_seeds, ticket["id"], "Open", reason="back to open")
+        response = await _transition(
+            client_with_seeds, ticket["full_id"], "Open", reason="back to open"
+        )
         assert response.status_code == 200
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
         assert data["status"] == "Open"
 
     async def test_skip_transition_rejected(self, client_with_seeds: AsyncClient):
         ticket = await self._groomable_ticket(client_with_seeds)
-        response = await _transition(client_with_seeds, ticket["id"], "In Progress")
+        response = await _transition(client_with_seeds, ticket["full_id"], "In Progress")
         assert response.status_code == 400
 
     async def test_transition_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
-        response = await _transition(client_with_seeds, 9999, "Groomed")
+        response = await _transition(client_with_seeds, "WEB-9999", "Groomed")
         assert response.status_code == 404
 
 
@@ -775,12 +784,12 @@ class TestTicketsLinks:
         t1 = await _create_ticket(client_with_seeds, 2, "Source")
         t2 = await _create_ticket(client_with_seeds, 2, "Target")
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{t1['id']}/links",
-            json={"source_id": t1["id"], "target_id": t2["id"], "link_type": "blocks"},
+            f"/api/v1/tickets/{t1['full_id']}/links",
+            json={"target_id": t2["full_id"], "link_type": "blocks"},
         )
         assert response.status_code == 201
 
-        data = (await client_with_seeds.get(f"/api/v1/tickets/{t1['id']}")).json()
+        data = (await client_with_seeds.get(f"/api/v1/tickets/{t1['full_id']}")).json()
         assert len(data["links"]) == 2  # forward + inverse
         link_types = {link["link_type"] for link in data["links"]}
         assert link_types == {"blocks", "blocked_by"}
@@ -793,7 +802,7 @@ class TestTicketsProjectMove:
         await _create_ticket(client_with_seeds, 2, "existing web ticket")
         moved = await _create_ticket(client_with_seeds, 3, "mover")
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{moved['id']}/move-project", json={"project_id": 2}
+            f"/api/v1/tickets/{moved['full_id']}/move-project", json={"project_id": 2}
         )
         assert response.status_code == 200
         data = response.json()
@@ -801,7 +810,7 @@ class TestTicketsProjectMove:
         assert data["new_full_id"] == "WEB-002"
         assert data["original_id"] == "API-001"
 
-        check = await client_with_seeds.get(f"/api/v1/tickets/{moved['id']}")
+        check = await client_with_seeds.get("/api/v1/tickets/WEB-002")
         assert check.json()["number"] == 2
         assert check.json()["project_id"] == 2
         assert check.json()["original_id"] == "API-001"
@@ -809,7 +818,7 @@ class TestTicketsProjectMove:
     async def test_move_to_same_project_returns_400(self, client_with_seeds: AsyncClient):
         ticket = await _create_ticket(client_with_seeds, 2, "stay put")
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{ticket['id']}/move-project", json={"project_id": 2}
+            f"/api/v1/tickets/{ticket['full_id']}/move-project", json={"project_id": 2}
         )
         assert response.status_code == 400
         assert "already in this project" in response.json()["detail"]
@@ -817,20 +826,20 @@ class TestTicketsProjectMove:
     async def test_move_missing_project_id_returns_400(self, client_with_seeds: AsyncClient):
         ticket = await _create_ticket(client_with_seeds, 2, "no target")
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{ticket['id']}/move-project", json={}
+            f"/api/v1/tickets/{ticket['full_id']}/move-project", json={}
         )
         assert response.status_code == 400
 
     async def test_move_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
         response = await client_with_seeds.post(
-            "/api/v1/tickets/9999/move-project", json={"project_id": 2}
+            "/api/v1/tickets/WEB-9999/move-project", json={"project_id": 2}
         )
         assert response.status_code == 404
 
     async def test_move_nonexistent_project_returns_400(self, client_with_seeds: AsyncClient):
         ticket = await _create_ticket(client_with_seeds, 2, "nowhere")
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{ticket['id']}/move-project", json={"project_id": 999}
+            f"/api/v1/tickets/{ticket['full_id']}/move-project", json={"project_id": 999}
         )
         assert response.status_code == 400
 
@@ -847,7 +856,7 @@ class TestTicketsMultiSelectFilters:
         bug = await _create_ticket(client, web, "WEB Bug", type="Bug", priority="Critical")
         await client.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 2601"})
         sprint_id = (await client.get("/api/v1/sprints")).json()[0]["id"]
-        resp = await client.post(f"/api/v1/sprints/{sprint_id}/tickets/{bug['id']}")
+        resp = await client.post(f"/api/v1/sprints/{sprint_id}/tickets/{bug['full_id']}")
         assert resp.status_code == 200
         story = await _create_ticket(client, api, "API Story", type="Story", priority="Medium")
         inprog = await _create_ticket(
@@ -861,8 +870,8 @@ class TestTicketsMultiSelectFilters:
             test_plan="c",
             validation_steps="d",
         )
-        await _transition(client, inprog["id"], "Groomed", reason="g", criteria=["It works"])
-        await _transition(client, inprog["id"], "In Progress", reason="w")
+        await _transition(client, inprog["full_id"], "Groomed", reason="g", criteria=["It works"])
+        await _transition(client, inprog["full_id"], "In Progress", reason="w")
         spike = await _create_ticket(client, 1, "UNS Spike", type="Spike", priority="Low")
         return {
             "bug": bug,
@@ -1002,7 +1011,7 @@ class TestCreateChildEndpoint:
             "type": "Story",
         }
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{epic['id']}/children", json=payload
+            f"/api/v1/tickets/{epic['full_id']}/children", json=payload
         )
         assert response.status_code == 201, response.text
         child = response.json()
@@ -1024,24 +1033,24 @@ class TestCreateChildEndpoint:
             "type": "Story",
         }
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{epic['id']}/children", json=payload
+            f"/api/v1/tickets/{epic['full_id']}/children", json=payload
         )
         assert response.status_code == 201, response.text
         child = response.json()
 
-        links = (await client_with_seeds.get(f"/api/v1/tickets/{epic['id']}/links")).json()
+        links = (await client_with_seeds.get(f"/api/v1/tickets/{epic['full_id']}/links")).json()
         # PARENT link: epic -> child
         parent_links = [
             link
             for link in links
-            if link["link_type"] == "parent" and link["target_id"] == child["id"]
+            if link["link_type"] == "parent" and link["target_id"] == child["full_id"]
         ]
         assert len(parent_links) == 1
         # CHILD link: child -> epic
         child_links = [
             link
             for link in links
-            if link["link_type"] == "child" and link["source_id"] == child["id"]
+            if link["link_type"] == "child" and link["source_id"] == child["full_id"]
         ]
         assert len(child_links) == 1
 
@@ -1057,7 +1066,7 @@ class TestCreateChildEndpoint:
             "type": "Story",
         }
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{story['id']}/children", json=payload
+            f"/api/v1/tickets/{story['full_id']}/children", json=payload
         )
         assert response.status_code == 400
         assert "Epic" in response.json()["detail"]
@@ -1070,7 +1079,7 @@ class TestCreateChildEndpoint:
             "title": "Orphan",
             "type": "Story",
         }
-        response = await client_with_seeds.post("/api/v1/tickets/99999/children", json=payload)
+        response = await client_with_seeds.post("/api/v1/tickets/WEB-99999/children", json=payload)
         assert response.status_code == 404
 
     async def test_create_child_htmx_returns_links_section(
@@ -1086,7 +1095,7 @@ class TestCreateChildEndpoint:
             "type": "Story",
         }
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{epic['id']}/children",
+            f"/api/v1/tickets/{epic['full_id']}/children",
             json=payload,
             headers={"HX-Request": "true"},
         )

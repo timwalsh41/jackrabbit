@@ -15,10 +15,12 @@ async def _ticket(
     return response.json()
 
 
-async def _link(client: AsyncClient, source_id: int, target_id: int, link_type: str):
+async def _link(
+    client: AsyncClient, source_designator: str, target_designator: str, link_type: str
+):
     return await client.post(
-        f"/api/v1/tickets/{source_id}/links",
-        json={"source_id": source_id, "target_id": target_id, "link_type": link_type},
+        f"/api/v1/tickets/{source_designator}/links",
+        json={"target_id": target_designator, "link_type": link_type},
     )
 
 
@@ -39,31 +41,31 @@ async def _blocker_ticket(client: AsyncClient, title: str) -> dict:
     return response.json()
 
 
-async def _transition(client: AsyncClient, ticket_id: int, to_status: str) -> None:
+async def _transition(client: AsyncClient, designator: str, to_status: str) -> None:
     response = await client.post(
-        f"/api/v1/tickets/{ticket_id}/transition", json={"to_status": to_status}
+        f"/api/v1/tickets/{designator}/transition", json={"to_status": to_status}
     )
     assert response.status_code == 200, response.text
 
 
-async def _advance_to_complete(client: AsyncClient, ticket_id: int) -> None:
+async def _advance_to_complete(client: AsyncClient, designator: str) -> None:
     """Step a ticket forward through each status to Complete."""
     for status in ("Groomed", "In Progress", "Ready for Review"):
         criteria = ["It works"] if status == "Groomed" else None
         payload = {"to_status": status}
         if criteria is not None:
             payload["criteria"] = criteria
-        response = await client.post(f"/api/v1/tickets/{ticket_id}/transition", json=payload)
+        response = await client.post(f"/api/v1/tickets/{designator}/transition", json=payload)
         assert response.status_code == 200, response.text
     # The Complete guard (ADR-0025) needs every criterion verified first.
-    rows = (await client.get(f"/api/v1/tickets/{ticket_id}/criteria")).json()
+    rows = (await client.get(f"/api/v1/tickets/{designator}/criteria")).json()
     for row in rows:
         signed = await client.patch(
-            f"/api/v1/tickets/{ticket_id}/criteria/{row['id']}", json={"verified": True}
+            f"/api/v1/tickets/{designator}/criteria/{row['id']}", json={"verified": True}
         )
         assert signed.status_code == 200, signed.text
     response = await client.post(
-        f"/api/v1/tickets/{ticket_id}/transition", json={"to_status": "Complete"}
+        f"/api/v1/tickets/{designator}/transition", json={"to_status": "Complete"}
     )
     assert response.status_code == 200, response.text
 
@@ -75,9 +77,9 @@ async def _links_section_html(client: AsyncClient, ticket_id: int) -> str:
     return response.text
 
 
-async def _links_of(client: AsyncClient, ticket_id: int) -> set[tuple[str, int, int]]:
+async def _links_of(client: AsyncClient, designator: str) -> set[tuple[str, str, str]]:
     """Set of (link_type, source_id, target_id) visible from a ticket."""
-    response = await client.get(f"/api/v1/tickets/{ticket_id}/links")
+    response = await client.get(f"/api/v1/tickets/{designator}/links")
     assert response.status_code == 200
     return {(link["link_type"], link["source_id"], link["target_id"]) for link in response.json()}
 
@@ -98,107 +100,111 @@ class TestCreateAllLinkTypes:
     async def test_parent_child_with_inverse(self, client_with_seeds: AsyncClient, tickets):
         # parent: source must be an Epic (the epic is the parent of the story)
         response = await _link(
-            client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent"
+            client_with_seeds, tickets["epic"]["full_id"], tickets["story"]["full_id"], "parent"
         )
         assert response.status_code == 201, response.text
         data = response.json()
-        assert data["source_id"] == tickets["epic"]["id"]
-        assert data["target_id"] == tickets["story"]["id"]
+        assert data["source_id"] == tickets["epic"]["full_id"]
+        assert data["target_id"] == tickets["story"]["full_id"]
         assert data["link_type"] == "parent"
 
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
-        assert ("parent", tickets["epic"]["id"], tickets["story"]["id"]) in visible
-        assert ("child", tickets["story"]["id"], tickets["epic"]["id"]) in visible
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
+        assert ("parent", tickets["epic"]["full_id"], tickets["story"]["full_id"]) in visible
+        assert ("child", tickets["story"]["full_id"], tickets["epic"]["full_id"]) in visible
 
     async def test_child_with_inverse(self, client_with_seeds: AsyncClient, tickets):
         response = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["epic"]["id"], "child"
+            client_with_seeds, tickets["story"]["full_id"], tickets["epic"]["full_id"], "child"
         )
         assert response.status_code == 201
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
-        assert ("child", tickets["story"]["id"], tickets["epic"]["id"]) in visible
-        assert ("parent", tickets["epic"]["id"], tickets["story"]["id"]) in visible
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
+        assert ("child", tickets["story"]["full_id"], tickets["epic"]["full_id"]) in visible
+        assert ("parent", tickets["epic"]["full_id"], tickets["story"]["full_id"]) in visible
 
     async def test_blocks_with_inverse(self, client_with_seeds: AsyncClient, tickets):
         response = await _link(
-            client_with_seeds, tickets["bug"]["id"], tickets["story"]["id"], "blocks"
+            client_with_seeds, tickets["bug"]["full_id"], tickets["story"]["full_id"], "blocks"
         )
         assert response.status_code == 201
-        visible = await _links_of(client_with_seeds, tickets["bug"]["id"])
-        assert ("blocks", tickets["bug"]["id"], tickets["story"]["id"]) in visible
-        assert ("blocked_by", tickets["story"]["id"], tickets["bug"]["id"]) in visible
+        visible = await _links_of(client_with_seeds, tickets["bug"]["full_id"])
+        assert ("blocks", tickets["bug"]["full_id"], tickets["story"]["full_id"]) in visible
+        assert ("blocked_by", tickets["story"]["full_id"], tickets["bug"]["full_id"]) in visible
 
     async def test_blocked_by_with_inverse(self, client_with_seeds: AsyncClient, tickets):
         response = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "blocked_by"
+            client_with_seeds, tickets["story"]["full_id"], tickets["bug"]["full_id"], "blocked_by"
         )
         assert response.status_code == 201
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
-        assert ("blocked_by", tickets["story"]["id"], tickets["bug"]["id"]) in visible
-        assert ("blocks", tickets["bug"]["id"], tickets["story"]["id"]) in visible
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
+        assert ("blocked_by", tickets["story"]["full_id"], tickets["bug"]["full_id"]) in visible
+        assert ("blocks", tickets["bug"]["full_id"], tickets["story"]["full_id"]) in visible
 
     async def test_relates_to_is_symmetric(self, client_with_seeds: AsyncClient, tickets):
         response = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "relates_to"
+            client_with_seeds, tickets["story"]["full_id"], tickets["bug"]["full_id"], "relates_to"
         )
         assert response.status_code == 201
         data = response.json()
         assert data["link_type"] == "relates_to"
 
         # Symmetric: both directions visible
-        from_story = await _links_of(client_with_seeds, tickets["story"]["id"])
-        from_bug = await _links_of(client_with_seeds, tickets["bug"]["id"])
-        assert ("relates_to", tickets["story"]["id"], tickets["bug"]["id"]) in from_story
-        assert ("relates_to", tickets["bug"]["id"], tickets["story"]["id"]) in from_bug
+        from_story = await _links_of(client_with_seeds, tickets["story"]["full_id"])
+        from_bug = await _links_of(client_with_seeds, tickets["bug"]["full_id"])
+        assert ("relates_to", tickets["story"]["full_id"], tickets["bug"]["full_id"]) in from_story
+        assert ("relates_to", tickets["bug"]["full_id"], tickets["story"]["full_id"]) in from_bug
 
     async def test_duplicate_link_is_idempotent(self, client_with_seeds: AsyncClient, tickets):
         first = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "relates_to"
+            client_with_seeds, tickets["story"]["full_id"], tickets["bug"]["full_id"], "relates_to"
         )
         second = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "relates_to"
+            client_with_seeds, tickets["story"]["full_id"], tickets["bug"]["full_id"], "relates_to"
         )
         assert first.status_code == 201
         assert second.status_code == 201
         assert first.json()["id"] == second.json()["id"]
 
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
         assert len([lnk for lnk in visible if lnk[0] == "relates_to"]) == 2  # both directions
 
     async def test_self_link_rejected(self, client_with_seeds: AsyncClient, tickets):
         response = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["story"]["id"], "relates_to"
+            client_with_seeds,
+            tickets["story"]["full_id"],
+            tickets["story"]["full_id"],
+            "relates_to",
         )
         assert response.status_code == 400
         assert "itself" in response.json()["detail"]
 
     async def test_parent_requires_epic_source(self, client_with_seeds: AsyncClient, tickets):
         response = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "parent"
+            client_with_seeds, tickets["story"]["full_id"], tickets["bug"]["full_id"], "parent"
         )
         assert response.status_code == 400
         assert "Epic" in response.json()["detail"]
 
     async def test_child_requires_epic_target(self, client_with_seeds: AsyncClient, tickets):
         response = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "child"
+            client_with_seeds, tickets["story"]["full_id"], tickets["bug"]["full_id"], "child"
         )
         assert response.status_code == 400
         assert "Epic" in response.json()["detail"]
 
     async def test_nonexistent_source_returns_404(self, client_with_seeds: AsyncClient, tickets):
         response = await client_with_seeds.post(
-            "/api/v1/tickets/9999/links",
+            "/api/v1/tickets/WEB-9999/links",
             json={
-                "source_id": 9999,
-                "target_id": tickets["story"]["id"],
+                "target_id": tickets["story"]["full_id"],
                 "link_type": "relates_to",
             },
         )
         assert response.status_code == 404
 
     async def test_nonexistent_target_returns_404(self, client_with_seeds: AsyncClient, tickets):
-        response = await _link(client_with_seeds, tickets["story"]["id"], 9999, "relates_to")
+        response = await _link(
+            client_with_seeds, tickets["story"]["full_id"], "WEB-9999", "relates_to"
+        )
         assert response.status_code == 404
 
 
@@ -217,57 +223,56 @@ class TestSingleParentConstraint:
         self, client_with_seeds: AsyncClient, tickets, second_epic
     ):
         first = await _link(
-            client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent"
+            client_with_seeds, tickets["epic"]["full_id"], tickets["story"]["full_id"], "parent"
         )
         assert first.status_code == 201, first.text
 
         response = await _link(
-            client_with_seeds, second_epic["id"], tickets["story"]["id"], "parent"
+            client_with_seeds, second_epic["full_id"], tickets["story"]["full_id"], "parent"
         )
 
         assert response.status_code == 409, response.text
         detail = response.json()["detail"]
-        assert str(tickets["epic"]["id"]) in detail
+        assert str(tickets["epic"]["full_id"]) in detail
 
     async def test_second_child_returns_409_with_existing_parent_id(
         self, client_with_seeds: AsyncClient, tickets, second_epic
     ):
         first = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["epic"]["id"], "child"
+            client_with_seeds, tickets["story"]["full_id"], tickets["epic"]["full_id"], "child"
         )
         assert first.status_code == 201, first.text
 
         response = await _link(
-            client_with_seeds, tickets["story"]["id"], second_epic["id"], "child"
+            client_with_seeds, tickets["story"]["full_id"], second_epic["full_id"], "child"
         )
 
         assert response.status_code == 409, response.text
         detail = response.json()["detail"]
-        assert str(tickets["epic"]["id"]) in detail
+        assert str(tickets["epic"]["full_id"]) in detail
 
     async def test_replace_parent_replaces_old_pair(
         self, client_with_seeds: AsyncClient, tickets, second_epic
     ):
         first = await _link(
-            client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent"
+            client_with_seeds, tickets["epic"]["full_id"], tickets["story"]["full_id"], "parent"
         )
         assert first.status_code == 201, first.text
 
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{second_epic['id']}/links",
+            f"/api/v1/tickets/{second_epic['full_id']}/links",
             json={
-                "source_id": second_epic["id"],
-                "target_id": tickets["story"]["id"],
+                "target_id": tickets["story"]["full_id"],
                 "link_type": "parent",
                 "replace_parent": True,
             },
         )
 
         assert response.status_code == 201, response.text
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
         assert visible == {
-            ("parent", second_epic["id"], tickets["story"]["id"]),
-            ("child", tickets["story"]["id"], second_epic["id"]),
+            ("parent", second_epic["full_id"], tickets["story"]["full_id"]),
+            ("child", tickets["story"]["full_id"], second_epic["full_id"]),
         }
 
     async def test_db_backstop_race_still_answers_409(
@@ -285,7 +290,7 @@ class TestSingleParentConstraint:
         from jackrabbit.services import LinkService
 
         first = await _link(
-            client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent"
+            client_with_seeds, tickets["epic"]["full_id"], tickets["story"]["full_id"], "parent"
         )
         assert first.status_code == 201, first.text
 
@@ -302,42 +307,42 @@ class TestSingleParentConstraint:
 
         monkeypatch.setattr(LinkService, "_find_existing_parent", stub)
         response = await _link(
-            client_with_seeds, second_epic["id"], tickets["story"]["id"], "parent"
+            client_with_seeds, second_epic["full_id"], tickets["story"]["full_id"], "parent"
         )
 
         assert response.status_code == 409, response.text
         detail = response.json()["detail"]
-        assert str(tickets["epic"]["id"]) in detail
+        assert str(tickets["epic"]["full_id"]) in detail
         # The child ends with exactly one parent — the race winner's.
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
         assert visible == {
-            ("parent", tickets["epic"]["id"], tickets["story"]["id"]),
-            ("child", tickets["story"]["id"], tickets["epic"]["id"]),
+            ("parent", tickets["epic"]["full_id"], tickets["story"]["full_id"]),
+            ("child", tickets["story"]["full_id"], tickets["epic"]["full_id"]),
         }
 
     async def test_replace_child_replaces_old_pair(
         self, client_with_seeds: AsyncClient, tickets, second_epic
     ):
         first = await _link(
-            client_with_seeds, tickets["story"]["id"], tickets["epic"]["id"], "child"
+            client_with_seeds, tickets["story"]["full_id"], tickets["epic"]["full_id"], "child"
         )
         assert first.status_code == 201, first.text
 
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{tickets['story']['id']}/links",
+            f"/api/v1/tickets/{tickets['story']['full_id']}/links",
             json={
-                "source_id": tickets["story"]["id"],
-                "target_id": second_epic["id"],
+                "source_id": tickets["story"]["full_id"],
+                "target_id": second_epic["full_id"],
                 "link_type": "child",
                 "replace_parent": True,
             },
         )
 
         assert response.status_code == 201, response.text
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
         assert visible == {
-            ("parent", second_epic["id"], tickets["story"]["id"]),
-            ("child", tickets["story"]["id"], second_epic["id"]),
+            ("parent", second_epic["full_id"], tickets["story"]["full_id"]),
+            ("child", tickets["story"]["full_id"], second_epic["full_id"]),
         }
 
 
@@ -346,13 +351,15 @@ class TestDeleteLinks:
 
     async def test_delete_removes_inverse_too(self, client_with_seeds: AsyncClient, tickets):
         link = (
-            await _link(client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent")
+            await _link(
+                client_with_seeds, tickets["epic"]["full_id"], tickets["story"]["full_id"], "parent"
+            )
         ).json()
         response = await client_with_seeds.delete(
-            f"/api/v1/tickets/{tickets['story']['id']}/links/{link['id']}"
+            f"/api/v1/tickets/{tickets['story']['full_id']}/links/{link['id']}"
         )
         assert response.status_code == 204
-        visible = await _links_of(client_with_seeds, tickets["story"]["id"])
+        visible = await _links_of(client_with_seeds, tickets["story"]["full_id"])
         assert visible == set()
 
     async def test_delete_relates_to_removes_both_directions(
@@ -360,37 +367,44 @@ class TestDeleteLinks:
     ):
         link = (
             await _link(
-                client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "relates_to"
+                client_with_seeds,
+                tickets["story"]["full_id"],
+                tickets["bug"]["full_id"],
+                "relates_to",
             )
         ).json()
         response = await client_with_seeds.delete(
-            f"/api/v1/tickets/{tickets['bug']['id']}/links/{link['id']}"
+            f"/api/v1/tickets/{tickets['bug']['full_id']}/links/{link['id']}"
         )
         assert response.status_code == 204
-        assert await _links_of(client_with_seeds, tickets["story"]["id"]) == set()
-        assert await _links_of(client_with_seeds, tickets["bug"]["id"]) == set()
+        assert await _links_of(client_with_seeds, tickets["story"]["full_id"]) == set()
+        assert await _links_of(client_with_seeds, tickets["bug"]["full_id"]) == set()
 
     async def test_delete_via_either_side(self, client_with_seeds: AsyncClient, tickets):
         """The link belongs to both endpoints: deleting via the inverse side works."""
         link = (
-            await _link(client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent")
+            await _link(
+                client_with_seeds, tickets["epic"]["full_id"], tickets["story"]["full_id"], "parent"
+            )
         ).json()
         # Delete via the story (the inverse link's source)
         response = await client_with_seeds.delete(
-            f"/api/v1/tickets/{tickets['story']['id']}/links/{link['id']}"
+            f"/api/v1/tickets/{tickets['story']['full_id']}/links/{link['id']}"
         )
         assert response.status_code == 204
-        assert await _links_of(client_with_seeds, tickets["story"]["id"]) == set()
+        assert await _links_of(client_with_seeds, tickets["story"]["full_id"]) == set()
 
     async def test_delete_link_of_other_ticket_returns_404(
         self, client_with_seeds: AsyncClient, tickets
     ):
         """A link not touching the given ticket is not found from that ticket."""
         link = (
-            await _link(client_with_seeds, tickets["epic"]["id"], tickets["story"]["id"], "parent")
+            await _link(
+                client_with_seeds, tickets["epic"]["full_id"], tickets["story"]["full_id"], "parent"
+            )
         ).json()
         response = await client_with_seeds.delete(
-            f"/api/v1/tickets/{tickets['bug']['id']}/links/{link['id']}"
+            f"/api/v1/tickets/{tickets['bug']['full_id']}/links/{link['id']}"
         )
         assert response.status_code == 404
 
@@ -398,12 +412,12 @@ class TestDeleteLinks:
         self, client_with_seeds: AsyncClient, tickets
     ):
         response = await client_with_seeds.delete(
-            f"/api/v1/tickets/{tickets['story']['id']}/links/9999"
+            f"/api/v1/tickets/{tickets['story']['full_id']}/links/9999"
         )
         assert response.status_code == 404
 
     async def test_delete_nonexistent_ticket_returns_404(self, client_with_seeds: AsyncClient):
-        response = await client_with_seeds.delete("/api/v1/tickets/9999/links/1")
+        response = await client_with_seeds.delete("/api/v1/tickets/WEB-9999/links/1")
         assert response.status_code == 404
 
 
@@ -412,32 +426,44 @@ class TestBlockerQueries:
 
     async def test_blockers_and_blocked(self, client_with_seeds: AsyncClient, tickets):
         # bug blocks story
-        await _link(client_with_seeds, tickets["bug"]["id"], tickets["story"]["id"], "blocks")
+        await _link(
+            client_with_seeds, tickets["bug"]["full_id"], tickets["story"]["full_id"], "blocks"
+        )
 
-        blockers = await client_with_seeds.get(f"/api/v1/tickets/{tickets['story']['id']}/blockers")
+        blockers = await client_with_seeds.get(
+            f"/api/v1/tickets/{tickets['story']['full_id']}/blockers"
+        )
         assert blockers.status_code == 200
         data = blockers.json()
         assert len(data) == 1
-        assert data[0]["source_id"] == tickets["bug"]["id"]
-        assert data[0]["target_id"] == tickets["story"]["id"]
+        assert data[0]["source_id"] == tickets["bug"]["full_id"]
+        assert data[0]["target_id"] == tickets["story"]["full_id"]
         assert data[0]["link_type"] == "blocks"
 
-        blocked = await client_with_seeds.get(f"/api/v1/tickets/{tickets['bug']['id']}/blocked")
+        blocked = await client_with_seeds.get(
+            f"/api/v1/tickets/{tickets['bug']['full_id']}/blocked"
+        )
         assert blocked.status_code == 200
         data = blocked.json()
         assert len(data) == 1
-        assert data[0]["source_id"] == tickets["bug"]["id"]
+        assert data[0]["source_id"] == tickets["bug"]["full_id"]
 
     async def test_no_blockers_returns_empty(self, client_with_seeds: AsyncClient, tickets):
-        response = await client_with_seeds.get(f"/api/v1/tickets/{tickets['story']['id']}/blockers")
+        response = await client_with_seeds.get(
+            f"/api/v1/tickets/{tickets['story']['full_id']}/blockers"
+        )
         assert response.status_code == 200
         assert response.json() == []
 
     async def test_relates_to_does_not_count_as_blocker(
         self, client_with_seeds: AsyncClient, tickets
     ):
-        await _link(client_with_seeds, tickets["story"]["id"], tickets["bug"]["id"], "relates_to")
-        response = await client_with_seeds.get(f"/api/v1/tickets/{tickets['story']['id']}/blockers")
+        await _link(
+            client_with_seeds, tickets["story"]["full_id"], tickets["bug"]["full_id"], "relates_to"
+        )
+        response = await client_with_seeds.get(
+            f"/api/v1/tickets/{tickets['story']['full_id']}/blockers"
+        )
         assert response.json() == []
 
 
@@ -460,7 +486,7 @@ async def test_link_modal_and_search_results_expose_target_type(
             },
         )
         assert results.status_code == 200
-        assert f'data-ticket-id="{ticket["id"]}"' in results.text
+        assert f'data-ticket-id="{ticket["full_id"]}"' in results.text
         assert f'data-ticket-type="{ticket_type}"' in results.text
 
 
@@ -480,10 +506,9 @@ async def test_create_link_htmx_returns_links_section(
     ).json()
 
     response = await client_with_seeds.post(
-        f"/api/v1/tickets/{epic['id']}/links",
+        f"/api/v1/tickets/{epic['full_id']}/links",
         json={
-            "source_id": epic["id"],
-            "target_id": story["id"],
+            "target_id": story["full_id"],
             "link_type": "parent",
         },
         headers={"HX-Request": "true"},
@@ -507,14 +532,16 @@ class TestBlockerWarningHidesWhenBlockersTerminal:
         """Create a story blocked by each of the given blocker tickets."""
         story = await _blocker_ticket(client_with_seeds, "Blocked Story")
         for blocker in blockers:
-            response = await _link(client_with_seeds, blocker["id"], story["id"], "blocks")
+            response = await _link(
+                client_with_seeds, blocker["full_id"], story["full_id"], "blocks"
+            )
             assert response.status_code == 201, response.text
         return story
 
     async def test_all_blockers_complete_hides_warning(self, client_with_seeds: AsyncClient):
         blocker = await _blocker_ticket(client_with_seeds, "Done Blocker")
         story = await self._block_story(client_with_seeds, blocker)
-        await _advance_to_complete(client_with_seeds, blocker["id"])
+        await _advance_to_complete(client_with_seeds, blocker["full_id"])
 
         html = await _links_section_html(client_with_seeds, story["id"])
         assert "This ticket has open blockers" not in html
@@ -523,7 +550,7 @@ class TestBlockerWarningHidesWhenBlockersTerminal:
         done = await _blocker_ticket(client_with_seeds, "Done Blocker")
         open_blocker = await _blocker_ticket(client_with_seeds, "Open Blocker")
         story = await self._block_story(client_with_seeds, done, open_blocker)
-        await _advance_to_complete(client_with_seeds, done["id"])
+        await _advance_to_complete(client_with_seeds, done["full_id"])
 
         html = await _links_section_html(client_with_seeds, story["id"])
         start = html.find("This ticket has open blockers")
@@ -536,7 +563,7 @@ class TestBlockerWarningHidesWhenBlockersTerminal:
     async def test_rejected_blocker_hides_warning(self, client_with_seeds: AsyncClient):
         blocker = await _blocker_ticket(client_with_seeds, "Rejected Blocker")
         story = await self._block_story(client_with_seeds, blocker)
-        await _transition(client_with_seeds, blocker["id"], "Rejected")
+        await _transition(client_with_seeds, blocker["full_id"], "Rejected")
 
         html = await _links_section_html(client_with_seeds, story["id"])
         assert "This ticket has open blockers" not in html
@@ -557,9 +584,9 @@ class TestBacklogRowOpenBlockerBadge:
     async def test_rejected_blocker_shows_no_badge(self, client_with_seeds: AsyncClient):
         blocker = await _blocker_ticket(client_with_seeds, "Rejected Blocker")
         story = await _blocker_ticket(client_with_seeds, "Blocked Story")
-        response = await _link(client_with_seeds, blocker["id"], story["id"], "blocks")
+        response = await _link(client_with_seeds, blocker["full_id"], story["full_id"], "blocks")
         assert response.status_code == 201, response.text
-        await _transition(client_with_seeds, blocker["id"], "Rejected")
+        await _transition(client_with_seeds, blocker["full_id"], "Rejected")
 
         response = await client_with_seeds.get("/backlog", headers={"accept": "text/html"})
         assert response.status_code == 200
@@ -569,7 +596,7 @@ class TestBacklogRowOpenBlockerBadge:
     async def test_open_blocker_shows_badge(self, client_with_seeds: AsyncClient):
         blocker = await _blocker_ticket(client_with_seeds, "Open Blocker")
         story = await _blocker_ticket(client_with_seeds, "Blocked Story")
-        response = await _link(client_with_seeds, blocker["id"], story["id"], "blocks")
+        response = await _link(client_with_seeds, blocker["full_id"], story["full_id"], "blocks")
         assert response.status_code == 201, response.text
 
         response = await client_with_seeds.get("/backlog", headers={"accept": "text/html"})

@@ -71,7 +71,7 @@
     </div>
     
     {# Remove button #}
-    <form hx-delete="/api/v1/tickets/{{ ticket.id }}/links/{{ link.id }}"
+    <form hx-delete="/api/v1/tickets/{{ ticket.full_id }}/links/{{ link.id }}"
           hx-target="#link-{{ link.id }}"
           hx-swap="outerHTML"
           hx-confirm="Remove this link?"

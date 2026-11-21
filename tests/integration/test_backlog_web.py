@@ -509,14 +509,14 @@ class TestEditTicketForm:
         t = backlog_tickets["high"]
         r = await _get(client, f"/tickets/{t.id}/edit")
         assert r.status_code == 200
-        assert f'hx-patch="/api/v1/tickets/{t.id}"' in r.text
+        assert f'hx-patch="/api/v1/tickets/{t.full_id}"' in r.text
         assert f'value="{t.title}"' in r.text
 
     async def test_edit_modal_htmx_targets_row(self, client, backlog_tickets):
         t = backlog_tickets["high"]
         r = await _get(client, f"/tickets/{t.id}/edit", headers={"HX-Request": "true"})
         assert r.status_code == 200
-        assert f'hx-patch="/api/v1/tickets/{t.id}"' in r.text
+        assert f'hx-patch="/api/v1/tickets/{t.full_id}"' in r.text
         assert f'hx-target="#ticket-row-{t.id}"' in r.text
         assert 'hx-swap="outerHTML"' in r.text
         assert f'value="{t.title}"' in r.text
@@ -533,7 +533,7 @@ class TestPatchReturnsRow:
         t = backlog_tickets["high"]
         payload = {"title": "Renamed via HTMX", "priority": Priority.HIGH.value}
         r = await client_with_seeds.patch(
-            f"/api/v1/tickets/{t.id}",
+            f"/api/v1/tickets/{t.full_id}",
             content=json.dumps(payload),
             headers={
                 "Content-Type": "application/json",
@@ -555,7 +555,7 @@ class TestPatchReturnsRow:
         t = backlog_tickets["medium"]
         payload = {"title": "Edited full page"}
         r = await client.patch(
-            f"/api/v1/tickets/{t.id}",
+            f"/api/v1/tickets/{t.full_id}",
             content=json.dumps(payload),
             headers={"Content-Type": "application/json", "HX-Request": "true"},
         )
@@ -565,7 +565,7 @@ class TestPatchReturnsRow:
         t = backlog_tickets["low"]
         payload = {"story_points": 3}
         r = await client.patch(
-            f"/api/v1/tickets/{t.id}",
+            f"/api/v1/tickets/{t.full_id}",
             content=json.dumps(payload),
             headers={"Content-Type": "application/json"},
         )
@@ -963,10 +963,11 @@ class TestMoveToSprintMenu:
         r = await _get(client_with_seeds, "/backlog")
         assert r.status_code == 200
         # The unassigned row offers the open sprint...
-        assert f"/api/v1/sprints/{open_sprint.id}/tickets/{unassigned_ticket.id}" in r.text
+        assert f"/api/v1/sprints/{open_sprint.id}/tickets/{unassigned_ticket.full_id}" in r.text
         # ...but not the completed one.
         assert (
-            f"/api/v1/sprints/{completed_sprint['id']}/tickets/{unassigned_ticket.id}" not in r.text
+            f"/api/v1/sprints/{completed_sprint['id']}/tickets/{unassigned_ticket.full_id}"
+            not in r.text
         )
 
     async def test_menu_shows_disabled_entry_when_no_open_sprints(
@@ -981,4 +982,4 @@ class TestMoveToSprintMenu:
         r = await _get(client_with_seeds, "/backlog")
         assert r.status_code == 200
         assert "No open sprints available" in r.text
-        assert f"/api/v1/sprints/{completed_sprint['id']}/tickets/{ticket.id}" not in r.text
+        assert f"/api/v1/sprints/{completed_sprint['id']}/tickets/{ticket.full_id}" not in r.text

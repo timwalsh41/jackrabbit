@@ -81,7 +81,7 @@ class TestEditSaveRedirect:
         ticket = await create_ticket(client_with_seeds)
         payload = {"title": "Renamed via full-page edit", "priority": Priority.HIGH.value}
         r = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}",
+            f"/api/v1/tickets/{ticket['full_id']}",
             content=json.dumps(payload),
             headers={
                 "Content-Type": "application/json",
@@ -99,7 +99,7 @@ class TestEditSaveRedirect:
         ticket = await create_ticket(client_with_seeds)
         payload = {"title": "Renamed via modal edit"}
         r = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}",
+            f"/api/v1/tickets/{ticket['full_id']}",
             content=json.dumps(payload),
             headers={
                 "Content-Type": "application/json",
@@ -115,7 +115,7 @@ class TestEditSaveRedirect:
         ticket = await create_ticket(client_with_seeds)
         payload = {"title": "Renamed via plain PATCH"}
         r = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}",
+            f"/api/v1/tickets/{ticket['full_id']}",
             content=json.dumps(payload),
             headers={"Content-Type": "application/json"},
         )
@@ -144,7 +144,7 @@ class TestEditFormCriteria:
         ticket = created.json()
         if texts:
             response = await client.patch(
-                f"/api/v1/tickets/{ticket['id']}", json={"criteria": texts}
+                f"/api/v1/tickets/{ticket['full_id']}", json={"criteria": texts}
             )
             assert response.status_code == 200, response.text
         return ticket
@@ -182,7 +182,7 @@ class TestEditFormCriteria:
         other fields never trips the 409 criteria-locked guard."""
         ticket = await self._story_with_criteria(client_with_seeds, ["Locked criterion"])
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={
                 "to_status": "Groomed",
                 "approach": "Approach",
@@ -194,7 +194,7 @@ class TestEditFormCriteria:
         )
         assert response.status_code == 200, response.text
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={
                 "to_status": "In Progress",
                 "branch_name": "feature/edit-criteria-001",
@@ -215,9 +215,9 @@ class TestEditFormCriteria:
         so a plain title save does not replace (and re-number) the rows."""
         ticket = await self._story_with_criteria(client_with_seeds, ["Untouched criterion"])
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}", json={"title": "Renamed only"}
+            f"/api/v1/tickets/{ticket['full_id']}", json={"title": "Renamed only"}
         )
         assert response.status_code == 200, response.text
-        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/criteria")).json()
         assert [row["text"] for row in rows] == ["Untouched criterion"]
         assert rows[0]["id"] is not None

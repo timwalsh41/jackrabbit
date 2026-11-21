@@ -18,6 +18,7 @@ from jackrabbit.image_storage import (
 )
 from jackrabbit.labels import parse_label_ids, parse_label_match
 from jackrabbit.models import (
+    LinkType,
     Priority,
     Project,
     Sprint,
@@ -66,6 +67,7 @@ from jackrabbit.services import (
     ConflictError,
     CriterionLockedError,
     CriterionService,
+    DesignatorFormatError,
     LabelService,
     LinkService,
     ParentLinkConflictError,
@@ -108,6 +110,25 @@ def get_criterion_service(session: Session = Depends(get_session)) -> CriterionS
 def _label_reads(labels: list[Any]) -> list[LabelRead]:
     """Convert label rows into their API representation."""
     return [LabelRead.model_validate(label) for label in labels]
+
+
+def _ticket_from_path(
+    ticket_designator: str, service: TicketService, not_found_detail: str = "Ticket not found"
+) -> Ticket:
+    """Resolve a ticket path param to its row (JRB-038).
+
+    The path param is the project-scoped designator (e.g. ``WEB-028``): a
+    malformed identifier (including a bare integer) answers 422 with the
+    designator form named; a well-formed but unknown prefix/number answers
+    404. Resolution happens once, to the internal PK used by the services.
+    """
+    try:
+        ticket = service.get_ticket_by_designator(ticket_designator)
+    except DesignatorFormatError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    return ticket
 
 
 def _sprint_not_assignable_conflict(e: SprintNotAssignableError) -> HTTPException:
@@ -350,16 +371,19 @@ def _ticket_row_response(request: Request, ticket_id: int, session: Session) -> 
 
 
 @router.post(
-    "/sprints/{sprint_id}/tickets/{ticket_id}",
+    "/sprints/{sprint_id}/tickets/{ticket_designator}",
     status_code=200,
     response_model=None,
 )
 def assign_ticket_to_sprint(
     sprint_id: int,
-    ticket_id: int,
+    ticket_designator: str,
     request: Request,
     service: SprintService = Depends(get_sprint_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
 ) -> dict | Response:
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket_id = cast(int, ticket.id)
     try:
         ticket = service.assign_ticket_to_sprint(sprint_id, ticket_id)
         # HTMX-aware: the Backlog "Move to Sprint" dropdown swaps the refreshed
@@ -380,16 +404,19 @@ def assign_ticket_to_sprint(
 
 
 @router.delete(
-    "/sprints/{sprint_id}/tickets/{ticket_id}",
+    "/sprints/{sprint_id}/tickets/{ticket_designator}",
     status_code=200,
     response_model=None,
 )
 def unassign_ticket_from_sprint(
     sprint_id: int,
-    ticket_id: int,
+    ticket_designator: str,
     request: Request,
     service: SprintService = Depends(get_sprint_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
 ) -> dict | Response:
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket_id = cast(int, ticket.id)
     try:
         ticket = service.unassign_ticket_from_sprint(sprint_id, ticket_id)
         # HTMX-aware: the Backlog "Remove from Sprint" form swaps the row.
@@ -498,6 +525,21 @@ def create_ticket(
         raise HTTPException(status_code=422, detail=str(e)) from e
 
     try:
+        # Link targets are designators (JRB-038); resolve each to the internal
+        # PK before the service writes the link rows.
+        resolved_links: list[tuple[LinkType, int]] = []
+        for link in ticket_in.links:
+            try:
+                target = service.get_ticket_by_designator(link.target_id)
+            except DesignatorFormatError as e:
+                raise HTTPException(status_code=422, detail=str(e)) from e
+            if target is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Link target ticket {link.target_id} not found",
+                )
+            resolved_links.append((link.link_type, cast(int, target.id)))
+
         ticket = service.create_ticket(
             project_id=ticket_in.project_id,
             title=ticket_in.title,
@@ -511,7 +553,7 @@ def create_ticket(
             validation_steps=ticket_in.validation_steps,
             sprint_id=ticket_in.sprint_id,
             status=ticket_in.status,
-            links=[(link.link_type, link.target_id) for link in ticket_in.links],
+            links=resolved_links,
         )
     except SprintNotAssignableError as e:
         raise _sprint_not_assignable_conflict(e) from e
@@ -528,13 +570,13 @@ def create_ticket(
 
 
 @router.post(
-    "/tickets/{parent_id}/children",
+    "/tickets/{parent_designator}/children",
     response_model=None,
     status_code=201,
 )
 def create_child_ticket(
     request: Request,
-    parent_id: int,
+    parent_designator: str,
     child_in: TicketCreate,
     ticket_service: TicketService = Depends(get_ticket_service),
     link_service: LinkService = Depends(get_link_service),
@@ -547,9 +589,8 @@ def create_child_ticket(
     - HTMX (HX-Request) -> refreshed links-section partial that swaps
       #links-section in place; otherwise the created child as a TicketRead (201).
     """
-    parent = ticket_service.get_ticket(parent_id)
-    if not parent:
-        raise HTTPException(status_code=404, detail="Parent ticket not found")
+    parent = _ticket_from_path(parent_designator, ticket_service, "Parent ticket not found")
+    parent_id = cast(int, parent.id)
     if parent.type != TicketType.EPIC:
         raise HTTPException(
             status_code=400, detail="Parent ticket must be an Epic to create a child"
@@ -689,13 +730,15 @@ def list_tickets(
     )
 
 
-@router.get("/tickets/{ticket_id}", response_model=TicketReadWithDetails)
+@router.get("/tickets/{ticket_designator}", response_model=TicketReadWithDetails)
 def get_ticket(
-    ticket_id: int,
+    ticket_designator: str,
     service: TicketService = Depends(get_ticket_service),
     link_service: LinkService = Depends(get_link_service),
     label_service: LabelService = Depends(get_label_service),
 ) -> TicketReadWithDetails:
+    ticket = _ticket_from_path(ticket_designator, service)
+    ticket_id = cast(int, ticket.id)
     result = service.get_ticket_with_details(ticket_id, link_service)
     if not result:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -723,7 +766,7 @@ def get_ticket(
         updated_at=ticket.updated_at,
         completed_at=ticket.completed_at,
         project_prefix=result["project_prefix"],
-        links=result["links"],
+        links=[_link_read(link, service) for link in result["links"]],
         transitions=result["transitions"],
         criteria=[CriterionRead.model_validate(row) for row in result["criteria"]],
         criteria_history=[
@@ -746,18 +789,17 @@ def get_ticket_by_full_id(
     return _ticket_read(ticket, label_service.labels_for_ticket(cast(int, ticket.id)))
 
 
-@router.patch("/tickets/{ticket_id}", response_model=TicketRead)
+@router.patch("/tickets/{ticket_designator}", response_model=TicketRead)
 def update_ticket(
-    ticket_id: int,
+    ticket_designator: str,
     ticket_in: TicketUpdate,
     request: Request,
     service: TicketService = Depends(get_ticket_service),
     label_service: LabelService = Depends(get_label_service),
     criterion_service: CriterionService = Depends(get_criterion_service),
 ) -> TicketRead | Response:
-    ticket = service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, service)
+    ticket_id = cast(int, ticket.id)
 
     update_data = ticket_in.model_dump(exclude_unset=True)
 
@@ -849,38 +891,37 @@ def update_ticket(
     return _ticket_read(ticket, label_service.labels_for_ticket(ticket_id))
 
 
-@router.delete("/tickets/{ticket_id}", status_code=204)
+@router.delete("/tickets/{ticket_designator}", status_code=204)
 def delete_ticket(
-    ticket_id: int,
+    ticket_designator: str,
     service: TicketService = Depends(get_ticket_service),
 ) -> None:
-    if not service.delete_ticket(ticket_id):
+    ticket = _ticket_from_path(ticket_designator, service)
+    if not service.delete_ticket(cast(int, ticket.id)):
         raise HTTPException(status_code=404, detail="Ticket not found")
 
 
 # Transition endpoints
-@router.get("/tickets/{ticket_id}/transition/can", response_model=CanTransitionResponse)
+@router.get("/tickets/{ticket_designator}/transition/can", response_model=CanTransitionResponse)
 def check_can_transition(
-    ticket_id: int,
+    ticket_designator: str,
     to_status: TicketStatus = Query(...),
     service: TicketService = Depends(get_ticket_service),
 ) -> CanTransitionResponse:
-    ticket = service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, service)
     can_transition, error = service.can_transition(ticket, to_status)
     return CanTransitionResponse(can_transition=can_transition, error_message=error)
 
 
-@router.post("/tickets/{ticket_id}/transition", response_model=TransitionResponse, status_code=200)
+@router.post(
+    "/tickets/{ticket_designator}/transition", response_model=TransitionResponse, status_code=200
+)
 def transition_ticket(
-    ticket_id: int,
+    ticket_designator: str,
     request: TransitionRequest,
     service: TicketService = Depends(get_ticket_service),
 ) -> TransitionResponse:
-    ticket = service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, service)
     try:
         from_status = ticket.status
 
@@ -919,10 +960,10 @@ def transition_ticket(
 
 # Project Move endpoints
 @router.post(
-    "/tickets/{ticket_id}/move-project", response_model=MoveProjectResponse, status_code=200
+    "/tickets/{ticket_designator}/move-project", response_model=MoveProjectResponse, status_code=200
 )
 async def move_ticket_project(
-    ticket_id: int,
+    ticket_designator: str,
     request: Request,
     service: TicketService = Depends(get_ticket_service),
 ) -> MoveProjectResponse:
@@ -931,9 +972,8 @@ async def move_ticket_project(
     Accepts `project_id` (and the documented alias `target_project_id`) so both
     JSON API clients and htmx form posts work.
     """
-    ticket = service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, service)
+    ticket_id = cast(int, ticket.id)
 
     payload = await _parse_move_payload(request)
     target_raw = payload.get("project_id", payload.get("target_project_id"))
@@ -969,31 +1009,28 @@ async def _parse_move_payload(request: Request) -> dict[str, Any]:
 
 # Link endpoints
 @router.post(
-    "/tickets/{source_id}/links",
+    "/tickets/{source_designator}/links",
     response_model=None,
     status_code=201,
 )
 def create_link(
     request: Request,
-    source_id: int,
+    source_designator: str,
     link_in: TicketLinkCreate,
     service: LinkService = Depends(get_link_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> TicketLink | HTMLResponse:
-    # Verify source ticket exists
-    source = ticket_service.get_ticket(source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Source ticket not found")
-
-    # Verify target ticket exists
-    target = ticket_service.get_ticket(link_in.target_id)
-    if not target:
-        raise HTTPException(status_code=404, detail="Target ticket not found")
+    # Resolve source and target designators to the internal PKs the link
+    # service works with (JRB-038).
+    source = _ticket_from_path(source_designator, ticket_service, "Source ticket not found")
+    target = _ticket_from_path(link_in.target_id, ticket_service, "Target ticket not found")
+    source_id = cast(int, source.id)
+    target_id = cast(int, target.id)
 
     try:
         link = service.create_link(
             source_id=source_id,
-            target_id=link_in.target_id,
+            target_id=target_id,
             link_type=link_in.link_type,
             replace_parent=link_in.replace_parent,
         )
@@ -1016,20 +1053,19 @@ def create_link(
             TicketService(service.session),
             LinkService(service.session),
         )
-    return link
+    return _link_read(link, ticket_service)
 
 
-@router.delete("/tickets/{source_id}/links/{link_id}", status_code=204)
+@router.delete("/tickets/{source_designator}/links/{link_id}", status_code=204)
 def delete_link(
-    source_id: int,
+    source_designator: str,
     link_id: int,
     service: LinkService = Depends(get_link_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> None:
     # Verify source ticket exists
-    source = ticket_service.get_ticket(source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Source ticket not found")
+    source = _ticket_from_path(source_designator, ticket_service, "Source ticket not found")
+    source_id = cast(int, source.id)
 
     # Verify link exists and belongs to this ticket
     link = service.session.get(TicketLink, link_id)
@@ -1042,25 +1078,48 @@ def delete_link(
         raise HTTPException(status_code=404, detail="Link not found")
 
 
-@router.get("/tickets/{ticket_id}/links", response_model=list[TicketLinkRead])
+@router.get("/tickets/{ticket_designator}/links", response_model=list[TicketLinkRead])
 def get_ticket_links(
-    ticket_id: int, service: LinkService = Depends(get_link_service)
-) -> list[TicketLink]:
-    return service.get_links_for_ticket(ticket_id)
+    ticket_designator: str,
+    service: LinkService = Depends(get_link_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> list[TicketLinkRead]:
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    return [
+        _link_read(link, ticket_service)
+        for link in service.get_links_for_ticket(cast(int, ticket.id))
+    ]
 
 
-@router.get("/tickets/{ticket_id}/blockers", response_model=list[TicketLinkRead])
+@router.get("/tickets/{ticket_designator}/blockers", response_model=list[TicketLinkRead])
 def get_ticket_blockers(
-    ticket_id: int, service: LinkService = Depends(get_link_service)
-) -> list[TicketLink]:
-    return service.get_blockers(ticket_id)
+    ticket_designator: str,
+    service: LinkService = Depends(get_link_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> list[TicketLinkRead]:
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    return [_link_read(link, ticket_service) for link in service.get_blockers(cast(int, ticket.id))]
 
 
-@router.get("/tickets/{ticket_id}/blocked", response_model=list[TicketLinkRead])
+@router.get("/tickets/{ticket_designator}/blocked", response_model=list[TicketLinkRead])
 def get_ticket_blocked(
-    ticket_id: int, service: LinkService = Depends(get_link_service)
-) -> list[TicketLink]:
-    return service.get_blocked(ticket_id)
+    ticket_designator: str,
+    service: LinkService = Depends(get_link_service),
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> list[TicketLinkRead]:
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    return [_link_read(link, ticket_service) for link in service.get_blocked(cast(int, ticket.id))]
+
+
+def _link_read(link: TicketLink, ticket_service: TicketService) -> TicketLinkRead:
+    """Serialize a link row with designator source/target (JRB-038)."""
+    return TicketLinkRead(
+        id=cast(int, link.id),
+        source_id=ticket_service.full_id_for(link.source_id),
+        target_id=ticket_service.full_id_for(link.target_id),
+        link_type=link.link_type,
+        created_at=link.created_at,
+    )
 
 
 # Label endpoints
@@ -1078,28 +1137,27 @@ def list_labels(service: LabelService = Depends(get_label_service)) -> list[Labe
     ]
 
 
-@router.get("/tickets/{ticket_id}/labels", response_model=list[LabelRead])
+@router.get("/tickets/{ticket_designator}/labels", response_model=list[LabelRead])
 def get_ticket_labels(
-    ticket_id: int,
+    ticket_designator: str,
     service: LabelService = Depends(get_label_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[LabelRead]:
-    if not ticket_service.get_ticket(ticket_id):
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    return _label_reads(service.labels_for_ticket(ticket_id))
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    return _label_reads(service.labels_for_ticket(cast(int, ticket.id)))
 
 
-@router.post("/tickets/{ticket_id}/labels", response_model=None, status_code=201)
+@router.post("/tickets/{ticket_designator}/labels", response_model=None, status_code=201)
 def attach_label(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     label_in: LabelCreate,
     service: LabelService = Depends(get_label_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> LabelRead | Response:
     """Attach a label to a ticket by name, creating the label on demand."""
-    if not ticket_service.get_ticket(ticket_id):
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket_id = cast(int, ticket.id)
 
     try:
         label = service.attach(ticket_id, label_in.name)
@@ -1115,17 +1173,19 @@ def attach_label(
     return LabelRead.model_validate(label)
 
 
-@router.delete("/tickets/{ticket_id}/labels/{label_id}", status_code=204, response_model=None)
+@router.delete(
+    "/tickets/{ticket_designator}/labels/{label_id}", status_code=204, response_model=None
+)
 def detach_label(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     label_id: int,
     service: LabelService = Depends(get_label_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> Response:
     """Detach a label from a ticket."""
-    if not ticket_service.get_ticket(ticket_id):
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket_id = cast(int, ticket.id)
 
     if not service.detach(ticket_id, label_id):
         raise HTTPException(status_code=404, detail="Label not found for this ticket")
@@ -1139,30 +1199,26 @@ def detach_label(
 
 
 # Criteria endpoints — structured acceptance criteria (ADR-0025)
-@router.get("/tickets/{ticket_id}/criteria", response_model=list[CriterionRead])
+@router.get("/tickets/{ticket_designator}/criteria", response_model=list[CriterionRead])
 def get_ticket_criteria(
-    ticket_id: int,
+    ticket_designator: str,
     criterion_service: CriterionService = Depends(get_criterion_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketCriterion]:
     """The ticket's acceptance criteria in ordinal order."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
     return criterion_service.list_criteria(ticket)
 
 
-@router.post("/tickets/{ticket_id}/criteria", response_model=CriterionRead, status_code=201)
+@router.post("/tickets/{ticket_designator}/criteria", response_model=CriterionRead, status_code=201)
 def add_criterion(
-    ticket_id: int,
+    ticket_designator: str,
     criterion_in: CriterionCreate,
     criterion_service: CriterionService = Depends(get_criterion_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> TicketCriterion:
     """Append an acceptance criterion; rejected once the ticket is In Progress."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
     try:
         return criterion_service.add_criterion(ticket, criterion_in.text)
     except CriterionLockedError as e:
@@ -1171,9 +1227,9 @@ def add_criterion(
         raise HTTPException(status_code=422, detail=str(e)) from e
 
 
-@router.patch("/tickets/{ticket_id}/criteria/{criterion_id}", response_model=CriterionRead)
+@router.patch("/tickets/{ticket_designator}/criteria/{criterion_id}", response_model=CriterionRead)
 def update_criterion(
-    ticket_id: int,
+    ticket_designator: str,
     criterion_id: int,
     criterion_in: CriterionUpdate,
     criterion_service: CriterionService = Depends(get_criterion_service),
@@ -1185,9 +1241,7 @@ def update_criterion(
     only while the ticket is In Progress or Ready for Review. Text/position
     edits keep the Open/Groomed gate.
     """
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
     try:
         if criterion_in.verified is not None:
             row = criterion_service.sign_off(ticket, criterion_id, criterion_in.verified)
@@ -1207,17 +1261,17 @@ def update_criterion(
     return row
 
 
-@router.delete("/tickets/{ticket_id}/criteria/{criterion_id}", status_code=204, response_model=None)
+@router.delete(
+    "/tickets/{ticket_designator}/criteria/{criterion_id}", status_code=204, response_model=None
+)
 def delete_criterion(
-    ticket_id: int,
+    ticket_designator: str,
     criterion_id: int,
     criterion_service: CriterionService = Depends(get_criterion_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> Response:
     """Delete an acceptance criterion; rejected once the ticket is In Progress."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_path(ticket_designator, ticket_service)
     try:
         deleted = criterion_service.delete_criterion(ticket, criterion_id)
     except CriterionLockedError as e:

@@ -27,8 +27,8 @@ class TestLabelRegistry:
 
     async def test_registry_lists_labels_with_a_usage_count(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
-        await _attach(client_with_seeds, ticket["id"], "Frontend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Frontend")
 
         response = await client_with_seeds.get("/api/v1/labels")
         assert response.status_code == 200
@@ -44,16 +44,16 @@ class TestLabelRegistry:
     ):
         first = await _ticket(client_with_seeds, "First")
         second = await _ticket(client_with_seeds, "Second")
-        await _attach(client_with_seeds, first["id"], "Backend")
-        await _attach(client_with_seeds, second["id"], "Backend")
+        await _attach(client_with_seeds, first["full_id"], "Backend")
+        await _attach(client_with_seeds, second["full_id"], "Backend")
 
         data = (await client_with_seeds.get("/api/v1/labels")).json()
         assert data[0]["usage_count"] == 2
 
     async def test_a_label_keeps_the_spelling_first_typed(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
-        await _attach(client_with_seeds, ticket["id"], "backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "backend")
 
         data = (await client_with_seeds.get("/api/v1/labels")).json()
         assert len(data) == 1
@@ -65,7 +65,7 @@ class TestAttachAndDetach:
 
     async def test_attach_creates_the_label_on_demand(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        response = await _attach(client_with_seeds, ticket["id"], "Backend")
+        response = await _attach(client_with_seeds, ticket["full_id"], "Backend")
         assert response.status_code == 201, response.text
         data = response.json()
         assert data["name"] == "Backend"
@@ -73,58 +73,60 @@ class TestAttachAndDetach:
 
     async def test_attach_is_case_insensitive(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        first = await _attach(client_with_seeds, ticket["id"], "Backend")
-        second = await _attach(client_with_seeds, ticket["id"], "backend")
+        first = await _attach(client_with_seeds, ticket["full_id"], "Backend")
+        second = await _attach(client_with_seeds, ticket["full_id"], "backend")
         assert second.status_code == 201
         assert second.json()["id"] == first.json()["id"]
         assert second.json()["name"] == "Backend"
 
     async def test_attach_to_an_unknown_ticket_is_404(self, client_with_seeds: AsyncClient):
-        response = await _attach(client_with_seeds, 9999, "Backend")
+        response = await _attach(client_with_seeds, "WEB-9999", "Backend")
         assert response.status_code == 404
 
     async def test_attach_rejects_an_invalid_name(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        response = await _attach(client_with_seeds, ticket["id"], "back/end")
+        response = await _attach(client_with_seeds, ticket["full_id"], "back/end")
         assert response.status_code == 422
         assert "letters" in response.json()["detail"]
 
     async def test_attach_rejects_an_overlong_name(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        response = await _attach(client_with_seeds, ticket["id"], "x" * 51)
+        response = await _attach(client_with_seeds, ticket["full_id"], "x" * 51)
         assert response.status_code == 422
         assert "50" in response.json()["detail"]
 
     async def test_labels_of_a_ticket_are_readable(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
-        await _attach(client_with_seeds, ticket["id"], "Frontend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Frontend")
 
-        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/labels")
+        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/labels")
         assert response.status_code == 200
         assert {label["name"] for label in response.json()} == {"Backend", "Frontend"}
 
     async def test_detach_removes_the_label(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        label = (await _attach(client_with_seeds, ticket["id"], "Backend")).json()
+        label = (await _attach(client_with_seeds, ticket["full_id"], "Backend")).json()
 
         response = await client_with_seeds.delete(
-            f"/api/v1/tickets/{ticket['id']}/labels/{label['id']}"
+            f"/api/v1/tickets/{ticket['full_id']}/labels/{label['id']}"
         )
         assert response.status_code == 204
 
-        labels = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/labels")).json()
+        labels = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/labels")).json()
         assert labels == []
 
     async def test_detach_an_unknown_label_is_404(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        response = await client_with_seeds.delete(f"/api/v1/tickets/{ticket['id']}/labels/4242")
+        response = await client_with_seeds.delete(
+            f"/api/v1/tickets/{ticket['full_id']}/labels/4242"
+        )
         assert response.status_code == 404
 
     async def test_a_label_can_be_attached_to_any_ticket_type(self, client_with_seeds: AsyncClient):
         for ticket_type in ("Epic", "Story", "Bug", "Spike"):
             ticket = await _ticket(client_with_seeds, f"A {ticket_type}")
-            response = await _attach(client_with_seeds, ticket["id"], "Backend")
+            response = await _attach(client_with_seeds, ticket["full_id"], "Backend")
             assert response.status_code == 201, response.text
 
 
@@ -133,9 +135,9 @@ class TestTicketPayload:
 
     async def test_ticket_detail_includes_labels(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
-        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")
+        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")
         assert response.status_code == 200
         labels = response.json()["labels"]
         assert [label["name"] for label in labels] == ["Backend"]
@@ -143,7 +145,7 @@ class TestTicketPayload:
 
     async def test_ticket_listing_includes_labels(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
         response = await client_with_seeds.get("/api/v1/tickets")
         assert response.status_code == 200
@@ -152,7 +154,7 @@ class TestTicketPayload:
 
     async def test_a_ticket_may_carry_no_labels(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")
+        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")
         assert response.json()["labels"] == []
 
 
@@ -187,31 +189,31 @@ class TestCreateAndUpdateWithLabels:
 
     async def test_update_replaces_the_whole_label_set(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
-        await _attach(client_with_seeds, ticket["id"], "Frontend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Frontend")
 
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}", json={"labels": ["Backend"]}
+            f"/api/v1/tickets/{ticket['full_id']}", json={"labels": ["Backend"]}
         )
         assert response.status_code == 200, response.text
         assert [label["name"] for label in response.json()["labels"]] == ["Backend"]
 
     async def test_update_with_no_labels_removes_them_all(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}", json={"labels": []}
+            f"/api/v1/tickets/{ticket['full_id']}", json={"labels": []}
         )
         assert response.status_code == 200
         assert response.json()["labels"] == []
 
     async def test_update_without_labels_leaves_them_alone(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}", json={"title": "Renamed"}
+            f"/api/v1/tickets/{ticket['full_id']}", json={"title": "Renamed"}
         )
         assert response.status_code == 200
         assert [label["name"] for label in response.json()["labels"]] == ["Backend"]
@@ -221,7 +223,7 @@ class TestCreateAndUpdateWithLabels:
     ):
         ticket = await _ticket(client_with_seeds)
         response = await client_with_seeds.patch(
-            f"/api/v1/tickets/{ticket['id']}", json={"labels": ["Docs"]}
+            f"/api/v1/tickets/{ticket['full_id']}", json={"labels": ["Docs"]}
         )
         assert response.status_code == 200
         assert [label["name"] for label in response.json()["labels"]] == ["Docs"]
@@ -236,9 +238,9 @@ class TestDeletingATicket:
         self, client_with_seeds: AsyncClient
     ):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
-        response = await client_with_seeds.delete(f"/api/v1/tickets/{ticket['id']}")
+        response = await client_with_seeds.delete(f"/api/v1/tickets/{ticket['full_id']}")
         assert response.status_code == 204
 
         # The label survives in the registry, with no tickets carrying it.
@@ -248,18 +250,18 @@ class TestDeletingATicket:
 
     async def test_the_ticket_no_longer_lists_labels(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        await _attach(client_with_seeds, ticket["id"], "Backend")
-        await client_with_seeds.delete(f"/api/v1/tickets/{ticket['id']}")
+        await _attach(client_with_seeds, ticket["full_id"], "Backend")
+        await client_with_seeds.delete(f"/api/v1/tickets/{ticket['full_id']}")
 
         # The ticket is gone, so its labels are no longer readable.
-        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/labels")
+        response = await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/labels")
         assert response.status_code == 404
 
 
 @pytest.mark.parametrize("name", ["Backend", "triage:ready-for-agent", "needs review"])
 async def test_valid_names_are_accepted(client_with_seeds: AsyncClient, name: str):
     ticket = await _ticket(client_with_seeds)
-    response = await _attach(client_with_seeds, ticket["id"], name)
+    response = await _attach(client_with_seeds, ticket["full_id"], name)
     assert response.status_code == 201, response.text
     assert response.json()["name"] == name
 
@@ -273,19 +275,19 @@ class TestTriageIsALabelConvention:
     ):
         ticket = await _ticket(client_with_seeds)
 
-        response = await _attach(client_with_seeds, ticket["id"], "triage:ready-for-agent")
+        response = await _attach(client_with_seeds, ticket["full_id"], "triage:ready-for-agent")
         assert response.status_code == 201, response.text
         assert response.json()["name"] == "triage:ready-for-agent"
 
-        payload = await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")
+        payload = await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")
         assert [label["name"] for label in payload.json()["labels"]] == ["triage:ready-for-agent"]
 
     async def test_the_triage_endpoints_are_gone(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
         for method, path in (
             ("GET", "/api/v1/triage/roles"),
-            ("GET", f"/api/v1/tickets/{ticket['id']}/triage"),
-            ("POST", f"/api/v1/tickets/{ticket['id']}/triage"),
+            ("GET", f"/api/v1/tickets/{ticket['full_id']}/triage"),
+            ("POST", f"/api/v1/tickets/{ticket['full_id']}/triage"),
         ):
             response = await client_with_seeds.request(method, path)
             assert response.status_code == 404, (method, path, response.text)

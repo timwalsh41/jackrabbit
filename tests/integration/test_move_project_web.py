@@ -26,7 +26,7 @@ async def test_move_modal_excludes_current_project(client_with_seeds: AsyncClien
 
     body = response.text
     # Modal form posts to the move endpoint for this ticket
-    assert f"/api/v1/tickets/{uns_ticket.id}/move-project" in body
+    assert f"/api/v1/tickets/{uns_ticket.full_id}/move-project" in body
     # Current project (UNS) is excluded from the dropdown options
     uns_id = uns_ticket.project_id
     assert f'<option value="{uns_id}">UNS' not in body
@@ -46,7 +46,7 @@ async def test_htmx_form_move_updates_ticket(
     """Simulate the htmx form submission (urlencoded body) and verify the move."""
     web = seeded_projects[1]
     response = await client_with_seeds.post(
-        f"/api/v1/tickets/{uns_ticket.id}/move-project",
+        f"/api/v1/tickets/{uns_ticket.full_id}/move-project",
         data={"project_id": str(web.id)},
         headers={"HX-Request": "true"},
     )
@@ -56,7 +56,7 @@ async def test_htmx_form_move_updates_ticket(
     assert data["original_id"] == "UNS-001"
 
     # Ticket detail now shows the new project and preserved original_id
-    detail = await client_with_seeds.get(f"/api/v1/tickets/{uns_ticket.id}")
+    detail = await client_with_seeds.get(f"/api/v1/tickets/{uns_ticket.full_id}")
     assert detail.status_code == 200
     assert detail.json()["project_id"] == web.id
     assert detail.json()["original_id"] == "UNS-001"
@@ -67,7 +67,7 @@ async def test_move_modal_move_missing_project_returns_400(
     client_with_seeds: AsyncClient, uns_ticket
 ):
     response = await client_with_seeds.post(
-        f"/api/v1/tickets/{uns_ticket.id}/move-project",
+        f"/api/v1/tickets/{uns_ticket.full_id}/move-project",
         data={"project_id": ""},
     )
     assert response.status_code == 400

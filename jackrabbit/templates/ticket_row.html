@@ -162,7 +162,7 @@
                class="hidden text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 max-w-[16rem]"
                role="alert"></p>
             {% endif %}
-            <form hx-delete="/api/v1/tickets/{{ ticket.id }}"
+            <form hx-delete="/api/v1/tickets/{{ ticket.full_id }}"
                   hx-target="#ticket-row-{{ ticket.id }}"
                   hx-swap="outerHTML"
                   hx-confirm="Are you sure you want to delete {{ (ticket.project.prefix if ticket.project else 'UNK') ~ '-' ~ ('%03d'|format(ticket.number)) }}?"

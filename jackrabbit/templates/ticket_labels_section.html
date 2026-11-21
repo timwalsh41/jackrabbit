@@ -29,7 +29,7 @@
                     class="label-chip-remove opacity-70 hover:opacity-100"
                     title="Remove label"
                     aria-label="Remove label {{ label.name }}"
-                    hx-delete="/api/v1/tickets/{{ ticket.id }}/labels/{{ label.id }}"
+                    hx-delete="/api/v1/tickets/{{ ticket.full_id }}/labels/{{ label.id }}"
                     hx-target="#labels-section"
                     hx-swap="outerHTML"
                     hx-confirm="Remove the label {{ label.name }}?">×</button>

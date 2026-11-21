@@ -69,6 +69,38 @@ class SprintNotAssignableError(ValueError):
     """
 
 
+class DesignatorFormatError(ValueError):
+    """An identifier is not a ticket designator (JRB-038).
+
+    The classic wrong guess is a bare integer: PK 28 read as designator 028
+    silently names a different ticket. The error message names the designator
+    form so API clients can retry with e.g. ``WEB-028``; HTTP surfaces map
+    this to 422.
+    """
+
+
+# A project prefix is alphanumeric (starts with a letter); the number part
+# accepts any zero-padding. ``WEB-028``, ``web-28`` and ``Web-000028`` all
+# parse to ("WEB", 28).
+DESIGNATOR_PATTERN = re.compile(r"^(?P<prefix>[A-Za-z][A-Za-z0-9]*)-(?P<number>\d+)$")
+
+
+def parse_ticket_designator(designator: str) -> tuple[str, int]:
+    """Split a ticket designator like ``WEB-028`` into (``WEB``, 28).
+
+    Raises DesignatorFormatError for anything else — bare integers, missing
+    number, trailing characters — so callers answer 422, never 404, for a
+    malformed identifier.
+    """
+    match = DESIGNATOR_PATTERN.fullmatch(designator)
+    if match is None:
+        raise DesignatorFormatError(
+            f"{designator!r} is not a ticket designator: use the designator "
+            "form PREFIX-NUMBER (e.g. WEB-028); bare numeric ids are not accepted"
+        )
+    return match["prefix"], int(match["number"])
+
+
 # The only legal sprint lifecycle moves (JRB-029, ADR-0026). Anything not in
 # this map raises SprintTransitionError and leaves the sprint unchanged.
 LEGAL_SPRINT_TRANSITIONS: frozenset[tuple[SprintStatus, SprintStatus]] = frozenset(
@@ -376,6 +408,24 @@ class TicketService:
                 Ticket.number == number,
             )
         ).first()
+
+    def get_ticket_by_designator(self, designator: str) -> Ticket | None:
+        """Resolve a ticket designator (e.g. ``WEB-028``) to its row (JRB-038).
+
+        Raises DesignatorFormatError for a malformed identifier (a bare
+        integer is the wrong-guess case the designator epic exists to kill);
+        returns None for a well-formed designator naming no ticket (unknown
+        prefix or number).
+        """
+        prefix, number = parse_ticket_designator(designator)
+        return self.get_ticket_by_full_id(prefix, number)
+
+    def full_id_for(self, ticket_id: int) -> str:
+        """The designator (``WEB-028``) for a ticket PK, for payloads (JRB-038)."""
+        ticket = self.get_ticket(ticket_id)
+        if ticket is None:
+            raise ValueError(f"Ticket {ticket_id} not found")
+        return ticket.full_id
 
     def get_ticket_with_details(
         self, ticket_id: int, link_service: LinkService | None = None
@@ -1637,11 +1687,18 @@ class LinkService:
             ).first()
         return None
 
-    @staticmethod
-    def _parent_conflict_error(child_id: int, existing_parent_id: int) -> ParentLinkConflictError:
+    def _parent_conflict_error(
+        self, child_id: int, existing_parent_id: int
+    ) -> ParentLinkConflictError:
+        """Name the child and the existing parent by designator (JRB-038):
+        the 409 detail feeds the UI confirm flow and must not leak PKs."""
+        child = self.session.get(Ticket, child_id)
+        parent = self.session.get(Ticket, existing_parent_id)
+        child_ref = child.full_id if child is not None else child_id
+        parent_ref = parent.full_id if parent is not None else existing_parent_id
         return ParentLinkConflictError(
-            f"Ticket {child_id} already has a parent (ticket "
-            f"{existing_parent_id}): a ticket can have only one parent. "
+            f"Ticket {child_ref} already has a parent (ticket "
+            f"{parent_ref}): a ticket can have only one parent. "
             "Set replace_parent=true to re-parent it.",
             existing_parent_id,
         )

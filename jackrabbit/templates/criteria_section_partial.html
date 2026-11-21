@@ -25,7 +25,7 @@
                        class="mt-1 h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer"
                        {% if criterion.verified %}checked{% endif %}
                        {% if not criteria_signoff_allowed %}disabled{% endif %}
-                       onchange="toggleCriterion({{ ticket.id }}, {{ criterion.id }}, this.checked)">
+                       onchange="toggleCriterion('{{ ticket.full_id }}', {{ criterion.id }}, this.checked)">
                 <label for="criterion-check-{{ criterion.id }}" class="text-sm text-gray-700 flex-1">{{ criterion.text }}</label>
                 {% if criterion.verified %}
                 <span class="criterion-tick text-green-600 text-sm whitespace-nowrap">✓ <span class="text-xs text-gray-400" data-criterion-verified-at="{{ criterion.verified_at.isoformat() if criterion.verified_at else '' }}">{{ criterion.verified_at }}</span></span>

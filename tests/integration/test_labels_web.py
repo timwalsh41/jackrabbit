@@ -93,7 +93,7 @@ class TestHtmxAttachAndDetach:
     async def test_attaching_returns_the_refreshed_section(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{ticket['id']}/labels",
+            f"/api/v1/tickets/{ticket['full_id']}/labels",
             json={"name": "Backend"},
             headers={"HX-Request": "true"},
         )
@@ -105,7 +105,7 @@ class TestHtmxAttachAndDetach:
         label = (await _attach(client_with_seeds, ticket["id"], "Backend")).json()
 
         response = await client_with_seeds.delete(
-            f"/api/v1/tickets/{ticket['id']}/labels/{label['id']}",
+            f"/api/v1/tickets/{ticket['full_id']}/labels/{label['id']}",
             headers={"HX-Request": "true"},
         )
         assert response.status_code == 200

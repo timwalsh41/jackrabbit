@@ -676,7 +676,7 @@ async def test_assign_ticket_htmx_returns_row_partial(
     ).json()
 
     response = await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}",
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}",
         headers={"HX-Request": "true"},
     )
     assert response.status_code == 200
@@ -695,10 +695,10 @@ async def test_unassign_ticket_htmx_returns_row_partial(
             "/api/v1/tickets", json={"project_id": 2, "title": "HTMX Unassign"}
         )
     ).json()
-    await client_with_seeds.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}")
+    await client_with_seeds.post(f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}")
 
     response = await client_with_seeds.delete(
-        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}",
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}",
         headers={"HX-Request": "true"},
     )
     assert response.status_code == 200
@@ -719,7 +719,7 @@ async def test_assign_ticket_plain_request_still_json(
     ).json()
 
     response = await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}"
     )
     assert response.status_code == 200
     assert response.json()["message"] == "Ticket assigned to sprint"
@@ -902,12 +902,12 @@ async def test_assign_to_completed_sprint_refused_with_reason(
     ).json()
 
     response = await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}"
     )
     assert response.status_code == 409
     assert "Complete" in response.json()["detail"]
     # The refusal leaves the ticket unassigned.
-    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
     assert detail["sprint_id"] is None
 
 
@@ -929,7 +929,7 @@ async def test_assign_to_not_started_and_in_progress_sprints_accepted(
             )
         ).json()
         response = await client_with_seeds.post(
-            f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+            f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}"
         )
         assert response.status_code == 200
 
@@ -947,19 +947,19 @@ async def test_ticket_stays_assigned_after_sprint_completes(
         )
     ).json()
     response = await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}"
     )
     assert response.status_code == 200
 
     await _complete_sprint(client_with_seeds, sprint["id"])
-    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
     assert detail["sprint_id"] == sprint["id"]
 
     response = await client_with_seeds.delete(
-        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['id']}"
+        f"/api/v1/sprints/{sprint['id']}/tickets/{ticket['full_id']}"
     )
     assert response.status_code == 200
-    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
     assert detail["sprint_id"] is None
 
 
@@ -993,12 +993,12 @@ async def test_edit_ticket_into_completed_sprint_refused(
     ).json()
 
     response = await client_with_seeds.patch(
-        f"/api/v1/tickets/{ticket['id']}", json={"sprint_id": completed["id"]}
+        f"/api/v1/tickets/{ticket['full_id']}", json={"sprint_id": completed["id"]}
     )
     assert response.status_code == 409
     assert "Complete" in response.json()["detail"]
     # The ticket keeps its existing sprint.
-    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
     assert detail["sprint_id"] == open_sprint["id"]
 
 
@@ -1021,8 +1021,8 @@ async def test_edit_ticket_keeping_completed_sprint_allowed(
     await _complete_sprint(client_with_seeds, sprint["id"])
 
     response = await client_with_seeds.patch(
-        f"/api/v1/tickets/{ticket['id']}", json={"title": "Renamed"}
+        f"/api/v1/tickets/{ticket['full_id']}", json={"title": "Renamed"}
     )
     assert response.status_code == 200
-    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    detail = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
     assert detail["sprint_id"] == sprint["id"]

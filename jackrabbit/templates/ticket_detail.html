@@ -19,7 +19,7 @@
                     title="Move to another project">
                 Move Project
             </button>
-            <form hx-delete="/api/v1/tickets/{{ ticket_id }}"
+            <form hx-delete="/api/v1/tickets/{{ full_id }}"
                   hx-confirm="Are you sure you want to delete {{ full_id }}? This cannot be undone."
                   class="inline"
                   hx-on::after-request="if(event.detail.successful) { window.location.href = '/backlog'; }">
@@ -79,7 +79,7 @@
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-6" id="ticket-content"
-         hx-get="/api/v1/tickets/{{ ticket_id }}"
+         hx-get="/api/v1/tickets/{{ full_id }}"
          hx-trigger="load"
          hx-swap="innerHTML">
         <div class="text-center text-gray-500 py-8">Loading ticket details...</div>
@@ -275,7 +275,7 @@
             } else {
                 // Direct (non-modal) transitions still POST JSON to the API —
                 // json-enc encodes the hx-vals object, the header keeps FastAPI happy.
-                buttonAttrs = `hx-post="/api/v1/tickets/${ticket.id}/transition" hx-ext="json-enc" hx-headers='{"Content-Type": "application/json"}' hx-vals='js:{to_status: "${t.status}", reason: prompt("Reason for transition to ${t.status}:")}' hx-swap="none" hx-on::after-request="if(event.detail.successful) { htmx.ajax('GET', '/api/v1/tickets/${ticket.id}', {target: '#ticket-content', swap: 'innerHTML'}); }"`;
+                buttonAttrs = `hx-post="/api/v1/tickets/${ticket.full_id}/transition" hx-ext="json-enc" hx-headers='{"Content-Type": "application/json"}' hx-vals='js:{to_status: "${t.status}", reason: prompt("Reason for transition to ${t.status}:")}' hx-swap="none" hx-on::after-request="if(event.detail.successful) { htmx.ajax('GET', '/api/v1/tickets/${ticket.full_id}', {target: '#ticket-content', swap: 'innerHTML'}); }"`;
             }
             
             html += `
@@ -567,7 +567,7 @@
             console.log('Groom form submitted successfully, reloading ticket content');
             // Extract ticket ID from the form's hx-post attribute
             const hxPost = target.getAttribute('hx-post');
-            const match = hxPost && hxPost.match(/\/api\/v1\/tickets\/(\d+)\/transition/);
+            const match = hxPost && hxPost.match(/\/api\/v1\/tickets\/([^/]+)\/transition/);
             if (match) {
                 htmx.ajax('GET', '/api/v1/tickets/' + match[1], {target: '#ticket-content', swap: 'innerHTML'});
             }
