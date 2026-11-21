@@ -61,11 +61,11 @@ async def test_create_link(client_with_seeds: AsyncClient) -> None:
     await client_with_seeds.post("/api/v1/tickets", json={"project_id": 2, "title": "Ticket 2"})
 
     response = await client_with_seeds.post(
-        "/api/v1/tickets/1/links",
-        json={"source_id": 1, "target_id": 2, "link_type": "blocks"},
+        "/api/v1/tickets/WEB-001/links",
+        json={"target_id": "WEB-002", "link_type": "blocks"},
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["source_id"] == 1
-    assert data["target_id"] == 2
+    assert data["source_id"] == "WEB-001"
+    assert data["target_id"] == "WEB-002"
     assert data["link_type"] == "blocks"

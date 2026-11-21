@@ -838,11 +838,11 @@ class TestTransitionAPI:
         # Create project and ticket
         client.post("/api/v1/projects", json={"prefix": "TEST", "name": "Test Project"})
         response = client.post("/api/v1/tickets", json={"project_id": 2, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         # Check OPEN -> GROOMED without fields
         response = client.get(
-            f"/api/v1/tickets/{ticket_id}/transition/can", params={"to_status": "Groomed"}
+            f"/api/v1/tickets/{ticket_designator}/transition/can", params={"to_status": "Groomed"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -851,7 +851,7 @@ class TestTransitionAPI:
 
         # Check OPEN -> REJECTED
         response = client.get(
-            f"/api/v1/tickets/{ticket_id}/transition/can", params={"to_status": "Rejected"}
+            f"/api/v1/tickets/{ticket_designator}/transition/can", params={"to_status": "Rejected"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -873,11 +873,11 @@ class TestTransitionAPI:
                 "validation_steps": "Steps",
             },
         )
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         # Transition OPEN -> GROOMED
         response = client.post(
-            f"/api/v1/tickets/{ticket_id}/transition",
+            f"/api/v1/tickets/{ticket_designator}/transition",
             json={
                 "to_status": "Groomed",
                 "reason": "Ready for grooming",
@@ -891,18 +891,18 @@ class TestTransitionAPI:
         assert data["reason"] == "Ready for grooming"
 
         # Verify ticket status updated
-        response = client.get(f"/api/v1/tickets/{ticket_id}")
+        response = client.get(f"/api/v1/tickets/{ticket_designator}")
         assert response.json()["status"] == "Groomed"
 
     def test_transition_endpoint_invalid_guard(self, client):
         """Test transition endpoint rejects invalid transitions."""
         client.post("/api/v1/projects", json={"prefix": "TEST", "name": "Test Project"})
         response = client.post("/api/v1/tickets", json={"project_id": 2, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         # Try to transition without required fields
         response = client.post(
-            f"/api/v1/tickets/{ticket_id}/transition",
+            f"/api/v1/tickets/{ticket_designator}/transition",
             json={"to_status": "Groomed", "reason": "No fields"},
         )
         assert response.status_code == 400
@@ -929,7 +929,7 @@ class TestTransitionAPI:
         ).json()
 
         response = client.get(
-            f"/api/v1/tickets/{story['id']}/transition/can", params={"to_status": "Groomed"}
+            f"/api/v1/tickets/{story['full_id']}/transition/can", params={"to_status": "Groomed"}
         )
         assert response.json()["can_transition"] is False
         assert (
@@ -938,7 +938,7 @@ class TestTransitionAPI:
         )
 
         response = client.get(
-            f"/api/v1/tickets/{epic['id']}/transition/can", params={"to_status": "Groomed"}
+            f"/api/v1/tickets/{epic['full_id']}/transition/can", params={"to_status": "Groomed"}
         )
         assert response.json()["can_transition"] is True
 

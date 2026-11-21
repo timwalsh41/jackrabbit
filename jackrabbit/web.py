@@ -1110,7 +1110,7 @@ async def sprint_edit(
         {
             "sprint": sprint,
             "next_number": None,
-            "action": f"/api/v1/sprints/{sprint_id}",
+            "action": f"/api/v1/sprints/{sprint.number}",
             "method": "patch",
         },
     )

@@ -380,18 +380,20 @@ class TestMoveProjectAPI:
 
         # Create ticket in UNS (project_id=1)
         response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         # Move to WEB (project_id=2)
-        response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 2})
+        response = client.post(
+            f"/api/v1/tickets/{ticket_designator}/move-project", json={"project_id": 2}
+        )
         assert response.status_code == 200
         data = response.json()
         assert data["old_full_id"] == "UNS-001"
         assert data["new_full_id"] == "WEB-001"
         assert data["original_id"] == "UNS-001"
 
-        # Verify ticket updated
-        response = client.get(f"/api/v1/tickets/{ticket_id}")
+        # Verify ticket updated (the designator changed with the move)
+        response = client.get("/api/v1/tickets/WEB-001")
         assert response.json()["project_id"] == 2
         assert response.json()["number"] == 1
         assert response.json()["original_id"] == "UNS-001"
@@ -405,22 +407,24 @@ class TestMoveProjectAPI:
 
         # Create ticket in UNS
         response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         # First move: UNS -> WEB
-        response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 2})
+        response = client.post(
+            f"/api/v1/tickets/{ticket_designator}/move-project", json={"project_id": 2}
+        )
         assert response.status_code == 200
         assert response.json()["original_id"] == "UNS-001"
 
-        # Second move: WEB -> API
-        response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 3})
+        # Second move: WEB -> API (the designator changed with the move)
+        response = client.post("/api/v1/tickets/WEB-001/move-project", json={"project_id": 3})
         assert response.status_code == 200
         assert response.json()["original_id"] == "UNS-001"
         assert response.json()["old_full_id"] == "WEB-001"
         assert response.json()["new_full_id"] == "API-001"
 
-        # Third move: API -> MOB
-        response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 4})
+        # Third move: API -> MOB (the designator changed again)
+        response = client.post("/api/v1/tickets/API-001/move-project", json={"project_id": 4})
         assert response.status_code == 200
         assert response.json()["original_id"] == "UNS-001"
         assert response.json()["old_full_id"] == "API-001"
@@ -430,10 +434,10 @@ class TestMoveProjectAPI:
         """htmx forms post urlencoded bodies; the endpoint must accept them."""
         client.post("/api/v1/projects", json={"prefix": "WEB", "name": "Web Project"})
         response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         response = client.post(
-            f"/api/v1/tickets/{ticket_id}/move-project", data={"project_id": "2"}
+            f"/api/v1/tickets/{ticket_designator}/move-project", data={"project_id": "2"}
         )
         assert response.status_code == 200
         assert response.json()["new_full_id"] == "WEB-001"
@@ -442,10 +446,10 @@ class TestMoveProjectAPI:
         """The documented field name target_project_id is also accepted."""
         client.post("/api/v1/projects", json={"prefix": "WEB", "name": "Web Project"})
         response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         response = client.post(
-            f"/api/v1/tickets/{ticket_id}/move-project", json={"target_project_id": 2}
+            f"/api/v1/tickets/{ticket_designator}/move-project", json={"target_project_id": 2}
         )
         assert response.status_code == 200
         assert response.json()["new_full_id"] == "WEB-001"
@@ -453,25 +457,27 @@ class TestMoveProjectAPI:
     def test_move_project_same_project_returns_400(self, client):
         """Moving to same project returns 400."""
         response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
-        response = client.post(f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 1})
+        response = client.post(
+            f"/api/v1/tickets/{ticket_designator}/move-project", json={"project_id": 1}
+        )
         assert response.status_code == 400
         assert "already in this project" in response.json()["detail"]
 
     def test_move_project_nonexistent_ticket_returns_404(self, client):
         """Moving nonexistent ticket returns 404."""
         client.post("/api/v1/projects", json={"prefix": "WEB", "name": "Web Project"})
-        response = client.post("/api/v1/tickets/99999/move-project", json={"project_id": 2})
+        response = client.post("/api/v1/tickets/WEB-99999/move-project", json={"project_id": 2})
         assert response.status_code == 404
 
     def test_move_project_nonexistent_project_returns_400(self, client):
         """Moving to nonexistent project returns 400."""
         response = client.post("/api/v1/tickets", json={"project_id": 1, "title": "Test Ticket"})
-        ticket_id = response.json()["id"]
+        ticket_designator = response.json()["full_id"]
 
         response = client.post(
-            f"/api/v1/tickets/{ticket_id}/move-project", json={"project_id": 99999}
+            f"/api/v1/tickets/{ticket_designator}/move-project", json={"project_id": 99999}
         )
         assert response.status_code == 400
         assert "not found" in response.json()["detail"]

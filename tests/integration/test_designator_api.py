@@ -51,16 +51,13 @@ class TestTicketResponsesSelfIdentify:
             "/api/v1/sprints", json={"number": 2601, "name": "Sprint 2601"}
         )
         assert create_sprint.status_code == 201, create_sprint.text
-        # Sprint addressing by number is covered in its own cycle (JRB-038);
-        # this test only covers nested ticket self-identification.
+        sprint_number = create_sprint.json()["number"]
         assign = await client_with_seeds.post(
-            f"/api/v1/sprints/{create_sprint.json()['id']}/tickets/{ticket['full_id']}"
+            f"/api/v1/sprints/{sprint_number}/tickets/{ticket['full_id']}"
         )
         assert assign.status_code == 200, assign.text
 
-        # Sprint addressing by number arrives in its own cycle (JRB-038);
-        # this test only covers nested ticket self-identification.
-        response = await client_with_seeds.get(f"/api/v1/sprints/{create_sprint.json()['id']}")
+        response = await client_with_seeds.get(f"/api/v1/sprints/{sprint_number}")
         assert response.status_code == 200
         nested = response.json()["tickets"]
         assert nested and all(t["full_id"] for t in nested)

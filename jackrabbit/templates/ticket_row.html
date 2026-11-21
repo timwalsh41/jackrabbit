@@ -113,7 +113,7 @@
             </button>
             {% if ticket.sprint %}
             <!-- Remove from Sprint button -->
-            <form hx-delete="/api/v1/sprints/{{ ticket.sprint.id }}/tickets/{{ ticket.id }}"
+            <form hx-delete="/api/v1/sprints/{{ ticket.sprint.number }}/tickets/{{ ticket.full_id }}"
                   hx-target="#ticket-row-{{ ticket.id }}"
                   hx-swap="outerHTML"
                   hx-confirm="Remove this ticket from the sprint?"
@@ -140,7 +140,7 @@
                     {% if assignable_sprints %}
                     {% for sprint in assignable_sprints %}
                     <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                            hx-post="/api/v1/sprints/{{ sprint.id }}/tickets/{{ ticket.id }}"
+                            hx-post="/api/v1/sprints/{{ sprint.number }}/tickets/{{ ticket.full_id }}"
                             hx-target="#ticket-row-{{ ticket.id }}"
                             hx-swap="outerHTML"
                             hx-on::after-request="if(event.detail.successful) { document.getElementById('move-to-sprint-dropdown-{{ ticket.id }}').classList.add('hidden'); } else { var el = document.getElementById('sprint-move-error-{{ ticket.id }}'); var msg = 'Move to sprint failed (' + event.detail.xhr.status + ').'; try { var d = JSON.parse(event.detail.xhr.responseText); if (d && typeof d.detail === 'string') { msg = d.detail; } } catch (e) {} el.textContent = msg; el.classList.remove('hidden'); }">

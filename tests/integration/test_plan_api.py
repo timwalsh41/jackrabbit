@@ -65,9 +65,8 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
             "actual_finish": past_end,
         },
     )
-    sprint3_id = sprint3.json()["id"]
     response = await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint3_id}/transition", json={"to_status": "In Progress"}
+        f"/api/v1/sprints/{sprint3.json()['number']}/transition", json={"to_status": "In Progress"}
     )
     assert response.status_code == 200, response.text
 
@@ -119,13 +118,13 @@ async def test_get_plan_with_sprints(client_with_seeds: AsyncClient) -> None:
         json={
             "project_id": 2,
             "title": "Done Ticket",
-            "sprint_id": sprint3_id,
+            "sprint_id": sprint3.json()["id"],
             "status": "Complete",
         },
     )
     # Complete the reopened sprint now that its ticket is seeded.
     response = await client_with_seeds.post(
-        f"/api/v1/sprints/{sprint3_id}/transition", json={"to_status": "Complete"}
+        f"/api/v1/sprints/{sprint3.json()['number']}/transition", json={"to_status": "Complete"}
     )
     assert response.status_code == 200, response.text
 
@@ -363,8 +362,7 @@ async def test_plan_web_page_shows_epics_with_children(
         link_resp = await client_with_seeds.post(
             f"/api/v1/tickets/{child['full_id']}/links",
             json={
-                "source_id": child["id"],
-                "target_id": epic["id"],
+                "target_id": epic["full_id"],
                 "link_type": "child",
             },
         )

@@ -137,9 +137,8 @@ def test_sprint_create_number_optional_auto_assigned() -> None:
 
 def test_ticket_link_create_schema() -> None:
     """Test TicketLinkCreate schema validation."""
-    link = TicketLinkCreate(source_id=1, target_id=2, link_type=LinkType.BLOCKS)
-    assert link.source_id == 1
-    assert link.target_id == 2
+    link = TicketLinkCreate(target_id="WEB-002", link_type=LinkType.BLOCKS)
+    assert link.target_id == "WEB-002"
     assert link.link_type == LinkType.BLOCKS
 
 

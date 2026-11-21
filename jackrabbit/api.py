@@ -131,6 +131,19 @@ def _ticket_from_path(
     return ticket
 
 
+def _sprint_from_path(sprint_number: int, service: SprintService) -> Sprint:
+    """Resolve a sprint path param to its row (JRB-038).
+
+    Sprints are addressed by their globally unique, never-reused sprint
+    number (e.g. 2601), not by the internal PK; an unknown number answers
+    404 and a PK value simply names no sprint.
+    """
+    sprint = service.get_sprint_by_number(sprint_number)
+    if sprint is None:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    return sprint
+
+
 def _sprint_not_assignable_conflict(e: SprintNotAssignableError) -> HTTPException:
     """Shared mapping of SprintNotAssignableError to its HTTP response.
 
@@ -238,11 +251,12 @@ def get_next_sprint_number(service: SprintService = Depends(get_sprint_service))
     return {"number": service.get_next_sprint_number()}
 
 
-@router.get("/sprints/{sprint_id}", response_model=SprintReadWithTickets)
+@router.get("/sprints/{sprint_number}", response_model=SprintReadWithTickets)
 def get_sprint(
-    sprint_id: int, service: SprintService = Depends(get_sprint_service)
+    sprint_number: int, service: SprintService = Depends(get_sprint_service)
 ) -> SprintReadWithTickets:
-    result = service.get_sprint_with_tickets(sprint_id)
+    sprint = _sprint_from_path(sprint_number, service)
+    result = service.get_sprint_with_tickets(cast(int, sprint.id))
     if not result:
         raise HTTPException(status_code=404, detail="Sprint not found")
 
@@ -269,11 +283,12 @@ def get_sprint(
     )
 
 
-@router.get("/sprints/{sprint_id}/by-status", response_model=SprintReadWithTicketsByStatus)
+@router.get("/sprints/{sprint_number}/by-status", response_model=SprintReadWithTicketsByStatus)
 def get_sprint_by_status(
-    sprint_id: int, service: SprintService = Depends(get_sprint_service)
+    sprint_number: int, service: SprintService = Depends(get_sprint_service)
 ) -> SprintReadWithTicketsByStatus:
-    result = service.get_sprint_with_tickets_by_status(sprint_id)
+    sprint = _sprint_from_path(sprint_number, service)
+    result = service.get_sprint_with_tickets_by_status(cast(int, sprint.id))
     if not result:
         raise HTTPException(status_code=404, detail="Sprint not found")
 
@@ -371,17 +386,19 @@ def _ticket_row_response(request: Request, ticket_id: int, session: Session) -> 
 
 
 @router.post(
-    "/sprints/{sprint_id}/tickets/{ticket_designator}",
+    "/sprints/{sprint_number}/tickets/{ticket_designator}",
     status_code=200,
     response_model=None,
 )
 def assign_ticket_to_sprint(
-    sprint_id: int,
+    sprint_number: int,
     ticket_designator: str,
     request: Request,
     service: SprintService = Depends(get_sprint_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> dict | Response:
+    sprint = _sprint_from_path(sprint_number, service)
+    sprint_id = cast(int, sprint.id)
     ticket = _ticket_from_path(ticket_designator, ticket_service)
     ticket_id = cast(int, ticket.id)
     try:
@@ -404,17 +421,19 @@ def assign_ticket_to_sprint(
 
 
 @router.delete(
-    "/sprints/{sprint_id}/tickets/{ticket_designator}",
+    "/sprints/{sprint_number}/tickets/{ticket_designator}",
     status_code=200,
     response_model=None,
 )
 def unassign_ticket_from_sprint(
-    sprint_id: int,
+    sprint_number: int,
     ticket_designator: str,
     request: Request,
     service: SprintService = Depends(get_sprint_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> dict | Response:
+    sprint = _sprint_from_path(sprint_number, service)
+    sprint_id = cast(int, sprint.id)
     ticket = _ticket_from_path(ticket_designator, ticket_service)
     ticket_id = cast(int, ticket.id)
     try:
@@ -431,14 +450,15 @@ def unassign_ticket_from_sprint(
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@router.patch("/sprints/{sprint_id}", response_model=SprintRead)
+@router.patch("/sprints/{sprint_number}", response_model=SprintRead)
 def update_sprint(
-    sprint_id: int,
+    sprint_number: int,
     sprint_in: SprintUpdate,
     service: SprintService = Depends(get_sprint_service),
 ) -> Sprint:
     # SprintUpdate carries no actual_start/actual_finish: the dates are
     # transition-owned (JRB-029), only POST /transition writes them.
+    sprint_id = cast(int, _sprint_from_path(sprint_number, service).id)
     sprint = service.update_sprint(
         sprint_id=sprint_id,
         name=sprint_in.name,
@@ -452,9 +472,9 @@ def update_sprint(
     return sprint
 
 
-@router.post("/sprints/{sprint_id}/transition", response_model=SprintTransitionResponse)
+@router.post("/sprints/{sprint_number}/transition", response_model=SprintTransitionResponse)
 def transition_sprint(
-    sprint_id: int,
+    sprint_number: int,
     request: SprintTransitionRequest,
     service: SprintService = Depends(get_sprint_service),
 ) -> SprintTransitionResponse:
@@ -465,9 +485,8 @@ def transition_sprint(
     completion blocked by unfinished tickets answers 409 with the blocking
     tickets named in the detail.
     """
-    sprint = service.get_sprint(sprint_id)
-    if not sprint:
-        raise HTTPException(status_code=404, detail="Sprint not found")
+    sprint = _sprint_from_path(sprint_number, service)
+    sprint_id = cast(int, sprint.id)
     from_status = sprint.status
     try:
         sprint = service.transition(sprint_id, request.to_status, request.reason)
@@ -487,25 +506,28 @@ def transition_sprint(
 
 
 @router.get(
-    "/sprints/{sprint_id}/transitions",
+    "/sprints/{sprint_number}/transitions",
     response_model=list[SprintTransitionRead],
 )
 def list_sprint_transitions(
-    sprint_id: int,
+    sprint_number: int,
     service: SprintService = Depends(get_sprint_service),
 ) -> list[SprintTransitionRead]:
     """The sprint's transition history, oldest first (JRB-029)."""
-    if not service.get_sprint(sprint_id):
-        raise HTTPException(status_code=404, detail="Sprint not found")
-    return [SprintTransitionRead.model_validate(row) for row in service.list_transitions(sprint_id)]
+    sprint = _sprint_from_path(sprint_number, service)
+    return [
+        SprintTransitionRead.model_validate(row)
+        for row in service.list_transitions(cast(int, sprint.id))
+    ]
 
 
-@router.delete("/sprints/{sprint_id}", status_code=204)
+@router.delete("/sprints/{sprint_number}", status_code=204)
 def delete_sprint(
-    sprint_id: int,
+    sprint_number: int,
     service: SprintService = Depends(get_sprint_service),
 ) -> None:
-    if not service.delete_sprint(sprint_id):
+    sprint = _sprint_from_path(sprint_number, service)
+    if not service.delete_sprint(cast(int, sprint.id)):
         raise HTTPException(status_code=404, detail="Sprint not found")
 
 
@@ -1019,7 +1041,7 @@ def create_link(
     link_in: TicketLinkCreate,
     service: LinkService = Depends(get_link_service),
     ticket_service: TicketService = Depends(get_ticket_service),
-) -> TicketLink | HTMLResponse:
+) -> TicketLinkRead | HTMLResponse:
     # Resolve source and target designators to the internal PKs the link
     # service works with (JRB-038).
     source = _ticket_from_path(source_designator, ticket_service, "Source ticket not found")

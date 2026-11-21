@@ -44,8 +44,7 @@ class TestParentBacklink:
         link = await client.post(
             f"/api/v1/tickets/{epic['full_id']}/links",
             json={
-                "source_id": epic["id"],
-                "target_id": story["id"],
+                "target_id": story["full_id"],
                 "link_type": "parent",
             },
         )
@@ -64,8 +63,7 @@ class TestParentBacklink:
         link = await client.post(
             f"/api/v1/tickets/{epic['full_id']}/links",
             json={
-                "source_id": epic["id"],
-                "target_id": story["id"],
+                "target_id": story["full_id"],
                 "link_type": "parent",
             },
         )
@@ -90,8 +88,7 @@ class TestParentBacklink:
         link = await client.post(
             f"/api/v1/tickets/{epic['full_id']}/links",
             json={
-                "source_id": epic["id"],
-                "target_id": story["id"],
+                "target_id": story["full_id"],
                 "link_type": "parent",
             },
         )
@@ -138,7 +135,8 @@ class TestTicketDetailPage:
         assert "text/html" in response.headers["content-type"]
 
     async def test_api_404s_stay_json(self, client: httpx.AsyncClient):
-        response = await client.get("/api/v1/tickets/99999")
+        # Unknown designator: well-formed prefix + nonexistent number -> 404.
+        response = await client.get("/api/v1/tickets/UNS-99999")
         assert response.status_code == 404
         assert response.json()["detail"] == "Ticket not found"
 
@@ -311,7 +309,7 @@ class TestNewTicketLinksPartial:
         )
 
         assert response.status_code == 200
-        assert f'data-ticket-id="{epic["id"]}"' in response.text
+        assert f'data-ticket-id="{epic["full_id"]}"' in response.text
         assert 'data-ticket-type="Epic"' in response.text
         assert "Searchable Story" not in response.text
 
@@ -514,7 +512,7 @@ class TestDetailPageActions:
         ticket = await create_ticket(client)
         response = await get_page(client, f"/tickets/{ticket['id']}")
         assert response.status_code == 200
-        assert f'hx-delete="/api/v1/tickets/{ticket["id"]}"' in response.text
+        assert f'hx-delete="/api/v1/tickets/{ticket["full_id"]}"' in response.text
         assert "hx-confirm" in response.text
 
     async def test_edit_action_links_to_edit_page(self, client: httpx.AsyncClient):
@@ -587,7 +585,7 @@ class TestCreateChildWeb:
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
         assert "New Child Ticket" in response.text
-        assert f'hx-post="/api/v1/tickets/{epic["id"]}/children"' in response.text
+        assert f'hx-post="/api/v1/tickets/{epic["full_id"]}/children"' in response.text
         # Child creation posts to a separate endpoint that does not accept links;
         # do not expose the regular New Ticket links picker here.
         assert 'id="ticket-links"' not in response.text

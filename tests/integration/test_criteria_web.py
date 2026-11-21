@@ -19,10 +19,10 @@ async def _create_story(client: httpx.AsyncClient, criteria: list[str]) -> dict:
 
 
 async def _transition(
-    client: httpx.AsyncClient, ticket_id: int, to_status: str, **fields: object
+    client: httpx.AsyncClient, designator: str, to_status: str, **fields: object
 ) -> httpx.Response:
     return await client.post(
-        f"/api/v1/tickets/{ticket_id}/transition",
+        f"/api/v1/tickets/{designator}/transition",
         json={"to_status": to_status, **fields},
     )
 
@@ -49,7 +49,7 @@ class TestCriteriaEditorRoute:
         ticket = await _create_story(client_with_seeds, ["Groomed criterion"])
         groomed = await _transition(
             client_with_seeds,
-            ticket["id"],
+            ticket["full_id"],
             "Groomed",
             approach="Approach",
             files_to_change="files.py",
@@ -119,7 +119,7 @@ class TestCriteriaEditorRoute:
         ticket = await _create_story(client_with_seeds, ["Locked criterion"])
         groomed = await _transition(
             client_with_seeds,
-            ticket["id"],
+            ticket["full_id"],
             "Groomed",
             approach="Approach",
             files_to_change="files.py",
@@ -130,7 +130,7 @@ class TestCriteriaEditorRoute:
         assert groomed.status_code == 200, groomed.text
         started = await _transition(
             client_with_seeds,
-            ticket["id"],
+            ticket["full_id"],
             "In Progress",
             branch_name="feature/criteria-editor",
         )
@@ -149,7 +149,7 @@ class TestCriteriaEditorRoute:
         ticket = await _create_story(client_with_seeds, ["Locked criterion"])
         groomed = await _transition(
             client_with_seeds,
-            ticket["id"],
+            ticket["full_id"],
             "Groomed",
             approach="Approach",
             files_to_change="files.py",
@@ -160,7 +160,7 @@ class TestCriteriaEditorRoute:
         assert groomed.status_code == 200, groomed.text
         started = await _transition(
             client_with_seeds,
-            ticket["id"],
+            ticket["full_id"],
             "In Progress",
             branch_name="feature/criteria-editor",
         )

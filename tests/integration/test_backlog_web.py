@@ -367,7 +367,7 @@ class TestMoveToSprintRefusalSurfacing:
         sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
 
         response = await client.post(
-            f"/api/v1/sprints/{sprint.id}/tickets/{backlog_tickets['high'].id}",
+            f"/api/v1/sprints/{sprint.number}/tickets/{backlog_tickets['high'].full_id}",
             headers={"HX-Request": "true"},
         )
         assert response.status_code == 409
@@ -963,10 +963,10 @@ class TestMoveToSprintMenu:
         r = await _get(client_with_seeds, "/backlog")
         assert r.status_code == 200
         # The unassigned row offers the open sprint...
-        assert f"/api/v1/sprints/{open_sprint.id}/tickets/{unassigned_ticket.full_id}" in r.text
+        assert f"/api/v1/sprints/{open_sprint.number}/tickets/{unassigned_ticket.full_id}" in r.text
         # ...but not the completed one.
         assert (
-            f"/api/v1/sprints/{completed_sprint['id']}/tickets/{unassigned_ticket.full_id}"
+            f"/api/v1/sprints/{completed_sprint['number']}/tickets/{unassigned_ticket.full_id}"
             not in r.text
         )
 
@@ -982,4 +982,6 @@ class TestMoveToSprintMenu:
         r = await _get(client_with_seeds, "/backlog")
         assert r.status_code == 200
         assert "No open sprints available" in r.text
-        assert f"/api/v1/sprints/{completed_sprint['id']}/tickets/{ticket.full_id}" not in r.text
+        assert (
+            f"/api/v1/sprints/{completed_sprint['number']}/tickets/{ticket.full_id}" not in r.text
+        )

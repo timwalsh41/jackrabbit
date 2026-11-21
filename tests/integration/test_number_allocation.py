@@ -26,7 +26,7 @@ async def test_create_delete_create_does_not_reissue_number(
     assert [t["number"] for t in created] == [1, 2, 3]
 
     # Delete the highest-numbered ticket (WEB-3).
-    delete = await client_with_seeds.delete(f"/api/v1/tickets/{created[-1]['id']}")
+    delete = await client_with_seeds.delete(f"/api/v1/tickets/{created[-1]['full_id']}")
     assert delete.status_code == 204
 
     response = await client_with_seeds.post(
@@ -66,10 +66,8 @@ async def test_move_project_uses_target_project_counter(
     mover = await client_with_seeds.post(
         "/api/v1/tickets", json={"project_id": 3, "title": "mover"}
     )
-    mover_id = mover.json()["id"]
-
     response = await client_with_seeds.post(
-        f"/api/v1/tickets/{mover_id}/move-project", json={"project_id": 2}
+        f"/api/v1/tickets/{mover.json()['full_id']}/move-project", json={"project_id": 2}
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -77,5 +75,5 @@ async def test_move_project_uses_target_project_counter(
     assert body["new_full_id"] == "WEB-003"
     assert body["original_id"] == "API-001"
 
-    ticket = test_db.exec(select(Ticket).where(Ticket.id == mover_id)).one()
+    ticket = test_db.exec(select(Ticket).where(Ticket.number == 3)).one()
     assert (ticket.project_id, ticket.number) == (2, 3)

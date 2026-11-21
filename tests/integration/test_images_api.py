@@ -205,9 +205,7 @@ class TestImageReferencesInTickets:
                 "description": f"![shot]({saved['url']})",
             },
         )
-        ticket_id = created.json()["id"]
-
-        deleted = await image_client.delete(f"/api/v1/tickets/{ticket_id}")
+        deleted = await image_client.delete(f"/api/v1/tickets/{created.json()['full_id']}")
         assert deleted.status_code == 204
 
         # Retention requirement: nothing removes the stored upload.

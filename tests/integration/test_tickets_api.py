@@ -460,10 +460,13 @@ class TestTicketsFiltering:
         await self._seed(client_with_seeds)
         await client_with_seeds.post("/api/v1/sprints", json={"number": 2601, "name": "S"})
         sprint_id = (await client_with_seeds.get("/api/v1/sprints")).json()[0]["id"]
+        sprint_number = (await client_with_seeds.get("/api/v1/sprints")).json()[0]["number"]
         # Assign the first listed ticket to the sprint
         tickets = (await client_with_seeds.get("/api/v1/tickets")).json()["items"]
         designator = tickets[0]["full_id"]
-        response = await client_with_seeds.post(f"/api/v1/sprints/{sprint_id}/tickets/{designator}")
+        response = await client_with_seeds.post(
+            f"/api/v1/sprints/{sprint_number}/tickets/{designator}"
+        )
         assert response.status_code == 200
 
         listed = await client_with_seeds.get("/api/v1/tickets", params={"sprint_id": sprint_id})
@@ -856,7 +859,8 @@ class TestTicketsMultiSelectFilters:
         bug = await _create_ticket(client, web, "WEB Bug", type="Bug", priority="Critical")
         await client.post("/api/v1/sprints", json={"number": 2601, "name": "Sprint 2601"})
         sprint_id = (await client.get("/api/v1/sprints")).json()[0]["id"]
-        resp = await client.post(f"/api/v1/sprints/{sprint_id}/tickets/{bug['full_id']}")
+        sprint_number = (await client.get("/api/v1/sprints")).json()[0]["number"]
+        resp = await client.post(f"/api/v1/sprints/{sprint_number}/tickets/{bug['full_id']}")
         assert resp.status_code == 200
         story = await _create_ticket(client, api, "API Story", type="Story", priority="Medium")
         inprog = await _create_ticket(

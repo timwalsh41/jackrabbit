@@ -115,7 +115,7 @@
                     </div>
                     {% endif %}
                     <div class="flex justify-end mt-2">
-                        <form hx-delete="/api/v1/sprints/{{ sprint.id }}/tickets/{{ ticket.id }}"
+                        <form hx-delete="/api/v1/sprints/{{ sprint.number }}/tickets/{{ ticket.full_id }}"
                               hx-target="#ticket-row-sprint-{{ ticket.id }}"
                               hx-swap="outerHTML"
                               hx-confirm="Remove this ticket from the sprint?"
