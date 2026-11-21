@@ -33,7 +33,7 @@ The server will start on port 8080 (or the PORT from .env).
 
 ## Agent Usage
 
-Point your agent at `AGENT-INSTRUCTIONS.md` to orient it to the use of Jackrabbit. Make sure to set the Jackrabbit URL/port appropriately for your setup.
+Point your agent at `JACKRABBIT-AGENT-INSTRUCTIONS.md` to orient it to the use of Jackrabbit. Make sure to set the Jackrabbit URL/port appropriately for your setup.
 
 ## CLI Commands
 
