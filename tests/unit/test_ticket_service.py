@@ -165,15 +165,31 @@ class TestCreateTicket:
         assert web_ticket.number == 1
         assert api_ticket.number == 1
 
-    def test_number_reuses_highest_after_delete(self, ticket_service, setup_projects):
+    def test_counter_persists_beyond_the_highest_ticket(self, ticket_service, setup_projects):
+        """JRB-037: the per-project counter survives even when the ticket that
+        carried the highest number is deleted (never-reusing allocation)."""
         web_id = setup_projects["web"].id
-        t1 = ticket_service.create_ticket(project_id=web_id, title="One")
+        ticket_service.create_ticket(project_id=web_id, title="One")
         ticket_service.create_ticket(project_id=web_id, title="Two")
-        ticket_service.create_ticket(project_id=web_id, title="Three")
-        ticket_service.delete_ticket(t1.id + 2)
+        t3 = ticket_service.create_ticket(project_id=web_id, title="Three")
+        ticket_service.delete_ticket(t3.id)
+        assert web_id is not None
+        project = ticket_service.session.get(Project, web_id)
+        assert project is not None
+        assert project.next_number == 4
+
+    def test_number_not_reissued_after_delete(self, ticket_service, setup_projects):
+        """JRB-037: numbers come from a monotone per-project counter, so
+        deleting the highest-numbered ticket never reissues its number."""
+        web_id = setup_projects["web"].id
+        ticket_service.create_ticket(project_id=web_id, title="One")
+        ticket_service.create_ticket(project_id=web_id, title="Two")
+        t3 = ticket_service.create_ticket(project_id=web_id, title="Three")
+        ticket_service.delete_ticket(t3.id)
         t4 = ticket_service.create_ticket(project_id=web_id, title="Four")
-        # max remaining number is 2, so the next number is 3
-        assert t4.number == 3
+        # WEB-3 was deleted, but the counter keeps it spoken for: the next
+        # ticket is WEB-4, not the reused WEB-3.
+        assert t4.number == 4
 
     def test_full_creation_options(self, ticket_service, setup_projects):
         ticket = ticket_service.create_ticket(

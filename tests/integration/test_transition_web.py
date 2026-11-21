@@ -9,6 +9,16 @@ import httpx
 import pytest
 
 
+@pytest.fixture
+def client(client_with_seeds: httpx.AsyncClient) -> httpx.AsyncClient:
+    """Seeded HTTP client (UNS=1, WEB=2, API=3) for this module.
+
+    JRB-037: number allocation reads the project's counter, so ticket
+    creation needs the project row to exist.
+    """
+    return client_with_seeds
+
+
 async def _create_ticket(client: httpx.AsyncClient, project_id: int = 1) -> dict:
     response = await client.post(
         "/api/v1/tickets",

@@ -292,11 +292,14 @@ class TicketService:
             if sprint is not None:
                 sprint_service.assert_sprint_assignable(sprint)
 
-        # Get next ticket number for project
-        max_num = self.session.exec(
-            select(func.max(Ticket.number)).where(Ticket.project_id == project_id)
-        ).first()
-        next_number = (max_num or 0) + 1
+        # Allocate the number from the project's persisted counter (JRB-037)
+        # and bump it in the same transaction, so a number is never reissued
+        # even after the highest-numbered ticket is deleted.
+        project = self.session.get(Project, project_id)
+        if project is None:
+            raise ValueError(f"Project {project_id} not found")
+        next_number = project.next_number
+        project.next_number = next_number + 1
 
         ticket = Ticket(
             project_id=project_id,
@@ -314,6 +317,7 @@ class TicketService:
             status=status,
         )
         self.session.add(ticket)
+        self.session.add(project)
         try:
             self.session.flush()
             link_service = LinkService(self.session)
@@ -951,20 +955,25 @@ class TicketService:
         if original_id is None:
             original_id = old_full_id
 
-        # Perform the move: read MAX(number) and write in a tight window.
-        # A concurrent writer could claim the computed number between the read
-        # and the commit; the uq_ticket_project_number constraint turns that
-        # into an IntegrityError, and we retry with a fresh MAX read.
+        # Allocate from the target project's persisted counter (JRB-037) and
+        # bump it in the same transaction: the number is never reissued, even
+        # if the highest-numbered ticket in the target project is deleted. A
+        # concurrent writer could claim the number between the read and the
+        # commit; the uq_ticket_project_number constraint turns that into an
+        # IntegrityError, and we retry with a fresh counter read.
         max_attempts = 5
         for attempt in range(max_attempts):
             current = self.get_ticket(ticket_id)
             if current is None:  # pragma: no cover - deleted mid-move
                 raise ValueError(f"Ticket {ticket_id} not found")
             ticket = current
-            max_num = self.session.exec(
-                select(func.max(Ticket.number)).where(Ticket.project_id == new_project_id)
-            ).first()
-            next_number = (max_num or 0) + 1
+            # After a rollback all instances are expired, so this re-queries
+            # the counter from the database.
+            target = self.session.get(Project, new_project_id)
+            if target is None:  # pragma: no cover - project deleted mid-move
+                raise ValueError(f"Target project {new_project_id} not found")
+            next_number = target.next_number
+            target.next_number = next_number + 1
 
             ticket.project_id = new_project_id
             ticket.number = next_number
@@ -972,6 +981,7 @@ class TicketService:
             ticket.updated_at = utc_now()
 
             self.session.add(ticket)
+            self.session.add(target)
             try:
                 self.session.commit()
                 self.session.refresh(ticket)

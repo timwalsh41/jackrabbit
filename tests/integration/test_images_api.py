@@ -24,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 from jackrabbit.config import Settings, get_settings
 from jackrabbit.main import create_app
+from jackrabbit.services import ProjectService
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 16
@@ -35,9 +36,20 @@ WEBP_BYTES = b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 16
 async def image_client(
     test_db,
     tmp_path: Path,
-    seeded_projects,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Seeded httpx client whose DATA_DIR (and thus /images storage) is tmp_path."""
+    """Seeded httpx client whose DATA_DIR (and thus /images storage) is tmp_path.
+
+    Seeds the UNS system project: image-reference tests create tickets in
+    project 1, and JRB-037 number allocation needs the project row to read
+    and bump its ``next_number`` counter.
+    """
+    ProjectService(test_db).create_project(
+        prefix="UNS",
+        name="Unsorted",
+        description="Default unsorted project",
+        color="#9ca3af",
+        is_system=True,
+    )
 
     def get_test_session():
         yield test_db

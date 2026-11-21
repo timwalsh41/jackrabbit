@@ -76,6 +76,11 @@ class Project(SQLModel, table=True):
     description: str = ""
     color: str = "#6366f1"
     is_system: bool = Field(default=False)
+    # JRB-037: persisted ticket-number allocation counter. Tickets take
+    # `next_number` and the counter is bumped in the same transaction, so a
+    # number is never reissued even after the highest-numbered ticket is
+    # deleted. The migration seeds existing projects to MAX(number)+1.
+    next_number: int = Field(default=1)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
