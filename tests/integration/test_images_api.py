@@ -184,10 +184,10 @@ class TestImageReferencesInTickets:
                 "description": f"Screenshot: ![shot]({saved['url']})",
             },
         )
-        ticket_id = created.json()["id"]
+        designator = created.json()["full_id"]
 
         fields = await image_client.get(
-            f"/tickets/{ticket_id}/fields", headers={"Accept": "text/html"}
+            f"/tickets/{designator}/fields", headers={"Accept": "text/html"}
         )
         assert fields.status_code == 200
         assert f'<img src="{saved["url"]}" alt="shot">' in fields.text

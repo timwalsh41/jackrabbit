@@ -27,9 +27,9 @@
                               'complete': 'btn btn-sm bg-green-600 text-white hover:bg-green-700',
                               'reopen': 'btn btn-sm bg-blue-600 text-white hover:bg-blue-700'} %}
             {% include "sprint_transition_actions.html" %}
-            <a href="/sprints/{{ sprint.id }}/edit"
+            <a href="/sprints/{{ sprint.number }}/edit"
                class="text-indigo-600 hover:text-indigo-900 text-sm"
-               hx-get="/sprints/{{ sprint.id }}/edit"
+               hx-get="/sprints/{{ sprint.number }}/edit"
                hx-target="#sprint-detail-content"
                hx-swap="outerHTML">
                 Edit Sprint
@@ -71,7 +71,7 @@
             <div class="space-y-2 flex-1 overflow-y-auto" id="column-{{ status_key.lower().replace(' ', '-') }}">
                 {% for ticket in tickets_by_status[status_key] %}
                 <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer"
-                     hx-get="/ticket/{{ ticket.id }}"
+                     hx-get="/ticket/{{ ticket.full_id }}"
                      hx-target="#ticket-modal"
                      hx-swap="innerHTML">
                     <div class="flex justify-between items-start mb-2">

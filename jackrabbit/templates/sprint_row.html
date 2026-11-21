@@ -54,12 +54,12 @@
                           'complete': 'text-green-600 hover:text-green-900',
                           'reopen': 'text-blue-600 hover:text-blue-900'} %}
         {% include "sprint_transition_actions.html" %}
-        <a href="/sprints/{{ sprint.id }}/detail" class="text-indigo-600 hover:text-indigo-900">
+        <a href="/sprints/{{ sprint.number }}/detail" class="text-indigo-600 hover:text-indigo-900">
             Board
         </a>
-        <a href="/sprints/{{ sprint.id }}/edit"
+        <a href="/sprints/{{ sprint.number }}/edit"
            class="text-indigo-600 hover:text-indigo-900"
-           hx-get="/sprints/{{ sprint.id }}/edit"
+           hx-get="/sprints/{{ sprint.number }}/edit"
            hx-target="#sprint-modal"
            hx-swap="innerHTML">
             Edit

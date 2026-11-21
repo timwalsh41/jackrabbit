@@ -2,7 +2,7 @@
    Swaps itself in place after assign/unassign so no full reload is needed. #}
 <div id="sprint-section" class="flex items-center gap-2 flex-wrap">
     {% if sprint %}
-        <a href="/sprints/{{ sprint.id }}/detail"
+        <a href="/sprints/{{ sprint.number }}/detail"
            class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
             Sprint {{ sprint.number }}{% if sprint.name %} — {{ sprint.name }}{% endif %}
         </a>
@@ -15,7 +15,7 @@
             {% else %}bg-gray-100 text-gray-800{% endif %}">
             {{ sprint.status }}
         </span>
-        <form hx-post="/tickets/{{ ticket.id }}/unassign-sprint"
+        <form hx-post="/tickets/{{ ticket.full_id }}/unassign-sprint"
               hx-target="#sprint-section"
               hx-swap="outerHTML"
               class="inline">
@@ -27,7 +27,7 @@
         </form>
     {% else %}
         <span class="text-sm text-gray-500">Unassigned</span>
-        <form hx-post="/tickets/{{ ticket.id }}/assign-sprint"
+        <form hx-post="/tickets/{{ ticket.full_id }}/assign-sprint"
               hx-target="#sprint-section"
               hx-swap="outerHTML"
               class="inline flex items-center gap-2">

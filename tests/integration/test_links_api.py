@@ -70,8 +70,8 @@ async def _advance_to_complete(client: AsyncClient, designator: str) -> None:
     assert response.status_code == 200, response.text
 
 
-async def _links_section_html(client: AsyncClient, ticket_id: int) -> str:
-    response = await client.get(f"/tickets/{ticket_id}/links", headers={"accept": "text/html"})
+async def _links_section_html(client: AsyncClient, designator: str) -> str:
+    response = await client.get(f"/tickets/{designator}/links", headers={"accept": "text/html"})
     assert response.status_code == 200, response.text
     assert "text/html" in response.headers["content-type"]
     return response.text
@@ -471,7 +471,7 @@ async def test_link_modal_and_search_results_expose_target_type(
     client_with_seeds: AsyncClient, tickets: dict
 ) -> None:
     """The rendered modal can stash type data from ticket search results."""
-    modal = await client_with_seeds.get(f"/tickets/{tickets['epic']['id']}/links/modal")
+    modal = await client_with_seeds.get(f"/tickets/{tickets['epic']['full_id']}/links/modal")
     assert modal.status_code == 200
     assert 'id="target_id" data-ticket-type="" required' in modal.text
 
@@ -543,7 +543,7 @@ class TestBlockerWarningHidesWhenBlockersTerminal:
         story = await self._block_story(client_with_seeds, blocker)
         await _advance_to_complete(client_with_seeds, blocker["full_id"])
 
-        html = await _links_section_html(client_with_seeds, story["id"])
+        html = await _links_section_html(client_with_seeds, story["full_id"])
         assert "This ticket has open blockers" not in html
 
     async def test_mixed_blockers_lists_only_open(self, client_with_seeds: AsyncClient):
@@ -552,7 +552,7 @@ class TestBlockerWarningHidesWhenBlockersTerminal:
         story = await self._block_story(client_with_seeds, done, open_blocker)
         await _advance_to_complete(client_with_seeds, done["full_id"])
 
-        html = await _links_section_html(client_with_seeds, story["id"])
+        html = await _links_section_html(client_with_seeds, story["full_id"])
         start = html.find("This ticket has open blockers")
         # The warning block ends right before the link-modal container.
         warning = html[start : html.find("link-modal-container", start)]
@@ -565,14 +565,14 @@ class TestBlockerWarningHidesWhenBlockersTerminal:
         story = await self._block_story(client_with_seeds, blocker)
         await _transition(client_with_seeds, blocker["full_id"], "Rejected")
 
-        html = await _links_section_html(client_with_seeds, story["id"])
+        html = await _links_section_html(client_with_seeds, story["full_id"])
         assert "This ticket has open blockers" not in html
 
     async def test_open_blocker_still_warns(self, client_with_seeds: AsyncClient):
         blocker = await _blocker_ticket(client_with_seeds, "Open Blocker")
         story = await self._block_story(client_with_seeds, blocker)
 
-        html = await _links_section_html(client_with_seeds, story["id"])
+        html = await _links_section_html(client_with_seeds, story["full_id"])
         start = html.find("This ticket has open blockers")
         warning = html[start : html.find("link-modal-container", start)]
         assert "Open Blocker" in warning

@@ -3,10 +3,10 @@
         <h3 class="text-sm font-medium text-gray-900">Acceptance criteria</h3>
         {% if criteria_editable %}
         <div class="flex items-center gap-3">
-            <button type="button" hx-get="/tickets/{{ ticket.id }}/criteria/edit"
+            <button type="button" hx-get="/tickets/{{ ticket.full_id }}/criteria/edit"
                     hx-target="#criteria-section" hx-swap="outerHTML"
                     class="text-xs font-medium text-indigo-600 hover:text-indigo-500">Edit</button>
-            <button type="button" hx-get="/tickets/{{ ticket.id }}/criteria/edit?add=true"
+            <button type="button" hx-get="/tickets/{{ ticket.full_id }}/criteria/edit?add=true"
                     hx-target="#criteria-section" hx-swap="outerHTML"
                     class="text-xs font-medium text-indigo-600 hover:text-indigo-500">+ Add</button>
         </div>

@@ -21,7 +21,7 @@ async def uns_ticket(test_db, seeded_projects):
 @pytest.mark.asyncio
 async def test_move_modal_excludes_current_project(client_with_seeds: AsyncClient, uns_ticket):
     """The modal dropdown lists other projects but not the ticket's current one."""
-    response = await client_with_seeds.get(f"/tickets/{uns_ticket.id}/move-project/modal")
+    response = await client_with_seeds.get(f"/tickets/{uns_ticket.full_id}/move-project/modal")
     assert response.status_code == 200
 
     body = response.text
@@ -35,7 +35,7 @@ async def test_move_modal_excludes_current_project(client_with_seeds: AsyncClien
 
 @pytest.mark.asyncio
 async def test_move_modal_unknown_ticket_404(client_with_seeds: AsyncClient):
-    response = await client_with_seeds.get("/tickets/99999/move-project/modal")
+    response = await client_with_seeds.get("/tickets/UNS-99999/move-project/modal")
     assert response.status_code == 404
 
 

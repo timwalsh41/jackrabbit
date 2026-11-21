@@ -32,6 +32,7 @@ from jackrabbit.schemas import CriteriaReplace, ProjectCreate, ProjectUpdate
 from jackrabbit.services import (
     CriterionLockedError,
     CriterionService,
+    DesignatorFormatError,
     FilterMode,
     LabelService,
     LinkService,
@@ -112,6 +113,28 @@ def get_label_service(session: Session = Depends(get_session)) -> LabelService:
     return LabelService(session)
 
 
+def _ticket_from_designator(
+    ticket_designator: str,
+    ticket_service: TicketService,
+    not_found_detail: str = "Ticket not found",
+) -> Ticket:
+    """Resolve a web path param designator to its row (JRB-039).
+
+    Mirrors the API contract (JRB-038): the path param is the project-scoped
+    designator (e.g. ``WEB-028``); a malformed identifier — including a bare
+    integer, the wrong-guess trap this epic kills — answers 422, a
+    well-formed but unknown prefix/number 404. Resolution happens once, to
+    the internal PK the services use.
+    """
+    try:
+        ticket = ticket_service.get_ticket_by_designator(ticket_designator)
+    except DesignatorFormatError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    return ticket
+
+
 @router.get("/")
 async def index(request: Request) -> RedirectResponse:
     """Redirect to the backlog (spec Web Routes: GET / -> /backlog)."""
@@ -160,10 +183,10 @@ async def ticket_new(
     )
 
 
-@router.get("/tickets/{ticket_id}/edit", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/edit", response_class=HTMLResponse)
 async def ticket_edit(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     project_service: ProjectService = Depends(get_project_service),
     sprint_service: SprintService = Depends(get_sprint_service),
@@ -180,9 +203,7 @@ async def ticket_edit(
     the editor read-only); the modal partial (ticket_edit_modal.html) does
     not include the criteria editor.
     """
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     projects = project_service.list_projects()
     # The edit form's sprint dropdown offers only assignable sprints (JRB-030);
@@ -193,7 +214,7 @@ async def ticket_edit(
         current = sprint_service.get_sprint(ticket.sprint_id)
         if current is not None and not sprint_service.is_sprint_assignable(current):
             sprints = [current, *sprints]
-    current_labels = label_service.labels_for_ticket(ticket_id)
+    current_labels = label_service.labels_for_ticket(cast(int, ticket.id))
     label_suggestions = label_service.list_labels_in_use()
 
     # HTMX request (Edit button in a ticket row): return the modal partial
@@ -235,26 +256,39 @@ async def ticket_edit(
     )
 
 
-@router.get("/sprint/{sprint_id}", response_class=HTMLResponse)
+@router.get("/sprint/{sprint_ref}", response_class=HTMLResponse)
 async def sprint_view(
     request: Request,
-    sprint_id: int,
+    sprint_ref: str,
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> RedirectResponse:
-    """Legacy board URL; redirects to the canonical GET /sprints/{id}/detail."""
-    if not sprint_service.get_sprint_with_tickets_by_status(sprint_id):
+    """Legacy alias; redirects to the canonical GET /sprints/{number}/detail.
+
+    Accepts the sprint number (the public identifier, JRB-037/038) and, for
+    pre-epic bookmarks, the internal PK; an unknown ref answers 404.
+    """
+    sprint = None
+    if sprint_ref.isdigit():
+        sprint = sprint_service.get_sprint_by_number(int(sprint_ref))
+        if sprint is None:
+            sprint = sprint_service.get_sprint(int(sprint_ref))
+    if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    return RedirectResponse(url=f"/sprints/{sprint.number}/detail", status_code=307)
 
-    return RedirectResponse(url=f"/sprints/{sprint_id}/detail", status_code=307)
 
-
-@router.get("/sprints/{sprint_id}/detail", response_class=HTMLResponse)
+@router.get("/sprints/{sprint_number}/detail", response_class=HTMLResponse)
 async def sprint_detail(
     request: Request,
-    sprint_id: int,
+    sprint_number: int,
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
-    result = sprint_service.get_sprint_with_tickets_by_status(sprint_id)
+    """Sprint board, addressed by sprint number (JRB-039)."""
+    sprint = sprint_service.get_sprint_by_number(sprint_number)
+    if sprint is None:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    sprint_pk = cast(int, sprint.id)
+    result = sprint_service.get_sprint_with_tickets_by_status(sprint_pk)
     if not result:
         raise HTTPException(status_code=404, detail="Sprint not found")
 
@@ -269,20 +303,22 @@ async def sprint_detail(
             "sprint": sprint,
             "tickets_by_status": tickets_by_status,
             "status": status,
-            "transitions": sprint_service.list_transitions(sprint_id),
+            "transitions": sprint_service.list_transitions(sprint_pk),
             "error": None,
         },
     )
 
 
-@router.post("/sprints/{sprint_id}/transition", response_class=HTMLResponse)
+@router.post("/sprints/{sprint_number}/transition", response_class=HTMLResponse)
 async def sprint_transition(
     request: Request,
-    sprint_id: int,
+    sprint_number: int,
     view: str = Query("board"),
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
     """HTMX endpoint for the Start/Complete/Reopen sprint actions (JRB-029).
+
+    The sprint is addressed by its sprint number (JRB-039).
 
     Accepts the urlencoded form the buttons post (``to_status`` and an
     optional ``reason``). On success (and on a refusal) the refreshed board
@@ -291,9 +327,10 @@ async def sprint_transition(
     ``view=row`` re-renders the single Sprints-list row; anything else
     re-renders the sprint board.
     """
-    sprint = sprint_service.get_sprint(sprint_id)
+    sprint = sprint_service.get_sprint_by_number(sprint_number)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    sprint_pk = cast(int, sprint.id)
 
     form = await request.form()
     raw_status = str(form.get("to_status", ""))
@@ -305,7 +342,7 @@ async def sprint_transition(
 
     error: str | None = None
     try:
-        sprint_service.transition(sprint_id, to_status, reason)
+        sprint_service.transition(sprint_pk, to_status, reason)
     except SprintTransitionError as e:
         # Illegal move or guarded completion: the sprint is unchanged and the
         # refusal is shown inline on the re-rendered board/row.
@@ -313,9 +350,9 @@ async def sprint_transition(
 
     if view == "row":
         tickets = list(
-            sprint_service.session.exec(select(Ticket).where(Ticket.sprint_id == sprint_id)).all()
+            sprint_service.session.exec(select(Ticket).where(Ticket.sprint_id == sprint_pk)).all()
         )
-        refreshed = sprint_service.get_sprint(sprint_id)
+        refreshed = sprint_service.get_sprint(sprint_pk)
         return templates.TemplateResponse(
             request,
             "sprint_row.html",
@@ -327,7 +364,7 @@ async def sprint_transition(
             },
         )
 
-    result = sprint_service.get_sprint_with_tickets_by_status(sprint_id)
+    result = sprint_service.get_sprint_with_tickets_by_status(sprint_pk)
     if not result:  # pragma: no cover - sprint exists (checked above)
         raise HTTPException(status_code=404, detail="Sprint not found")
     return templates.TemplateResponse(
@@ -337,7 +374,7 @@ async def sprint_transition(
             "sprint": result["sprint"],
             "tickets_by_status": result["tickets_by_status"],
             "status": result["status"],
-            "transitions": sprint_service.list_transitions(sprint_id),
+            "transitions": sprint_service.list_transitions(sprint_pk),
             "error": error,
         },
     )
@@ -445,25 +482,24 @@ def _links_section_response(
     )
 
 
-@router.get("/tickets/{ticket_id}/links", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/links", response_class=HTMLResponse)
 async def ticket_links_section(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     link_service: LinkService = Depends(get_link_service),
 ) -> HTMLResponse:
-    return _links_section_response(request, ticket_id, ticket_service, link_service)
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    return _links_section_response(request, cast(int, ticket.id), ticket_service, link_service)
 
 
-@router.get("/tickets/{ticket_id}/links/modal", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/links/modal", response_class=HTMLResponse)
 async def ticket_link_modal(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     # Get all tickets for the modal search
     all_tickets, _ = ticket_service.list_tickets(page_size=1000)
@@ -505,28 +541,27 @@ def _labels_section_response(
     )
 
 
-@router.get("/tickets/{ticket_id}/labels", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/labels", response_class=HTMLResponse)
 async def ticket_labels_section(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     label_service: LabelService = Depends(get_label_service),
 ) -> HTMLResponse:
     """The ticket page's labels section: chips, remove buttons, add button."""
-    return _labels_section_response(request, ticket_id, ticket_service, label_service)
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    return _labels_section_response(request, cast(int, ticket.id), ticket_service, label_service)
 
 
-@router.get("/tickets/{ticket_id}/labels/modal", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/labels/modal", response_class=HTMLResponse)
 async def ticket_label_modal(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     label_service: LabelService = Depends(get_label_service),
 ) -> HTMLResponse:
     """Modal for adding a label, offering the labels already in use."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1090,13 +1125,13 @@ async def sprint_new(
     )
 
 
-@router.get("/sprints/{sprint_id}/edit", response_class=HTMLResponse)
+@router.get("/sprints/{sprint_number}/edit", response_class=HTMLResponse)
 async def sprint_edit(
     request: Request,
-    sprint_id: int,
+    sprint_number: int,
     service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
-    sprint = service.get_sprint(sprint_id)
+    sprint = service.get_sprint_by_number(sprint_number)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     # HTMX requests get the modal partial (targeted at the row/modal target);
@@ -1117,16 +1152,14 @@ async def sprint_edit(
 
 
 # Move Project web routes
-@router.get("/tickets/{ticket_id}/move-project/modal", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/move-project/modal", response_class=HTMLResponse)
 async def ticket_move_project_modal(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     project_service: ProjectService = Depends(get_project_service),
 ) -> HTMLResponse:
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     project = project_service.get_project(ticket.project_id)
     projects = project_service.list_projects()
@@ -1145,10 +1178,10 @@ async def ticket_move_project_modal(
     )
 
 
-@router.get("/tickets/{ticket_id}/transition/groomed/modal", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/transition/groomed/modal", response_class=HTMLResponse)
 async def ticket_transition_groomed_modal(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     criterion_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
@@ -1161,9 +1194,7 @@ async def ticket_transition_groomed_modal(
     existing criterion texts pre-filled into the editor; ``criteria_editable``
     is False once the ticket is past Groomed, rendering the editor read-only.
     """
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1176,16 +1207,16 @@ async def ticket_transition_groomed_modal(
     )
 
 
-@router.get("/tickets/{ticket_id}/transition/in-progress/modal", response_class=HTMLResponse)
+@router.get(
+    "/tickets/{ticket_designator}/transition/in-progress/modal", response_class=HTMLResponse
+)
 async def ticket_transition_in_progress_modal(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Modal for transitioning to In Progress with branch name field."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     # Generate suggested branch name
     from jackrabbit.services import generate_branch_name
@@ -1202,16 +1233,16 @@ async def ticket_transition_in_progress_modal(
     )
 
 
-@router.get("/tickets/{ticket_id}/transition/ready-for-review/modal", response_class=HTMLResponse)
+@router.get(
+    "/tickets/{ticket_designator}/transition/ready-for-review/modal", response_class=HTMLResponse
+)
 async def ticket_transition_ready_for_review_modal(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Modal for transitioning to Ready for Review with PR URL field."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1222,16 +1253,14 @@ async def ticket_transition_ready_for_review_modal(
     )
 
 
-@router.get("/tickets/{ticket_id}/transition/complete/modal", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/transition/complete/modal", response_class=HTMLResponse)
 async def ticket_transition_complete_modal(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Modal for transitioning to Complete with a reason field."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1293,28 +1322,29 @@ async def ticket_search(
 
 # ---------------------------------------------------------------------------
 # Ticket Detail page routes (ticket 12) — registered after /tickets/new and
-# /tickets/search so the literal paths win over /tickets/{ticket_id}.
+# /tickets/search so the literal paths win over /tickets/{ticket_designator}.
 # ---------------------------------------------------------------------------
 
 
-@router.get("/ticket/{ticket_id}", response_class=HTMLResponse)
-@router.get("/tickets/{ticket_id}", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}", response_class=HTMLResponse)
 async def ticket_detail(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     link_service: LinkService = Depends(get_link_service),
 ) -> HTMLResponse:
-    """Ticket detail page (deep-linkable).
+    """Ticket detail page (deep-linkable), addressed by designator (JRB-039).
+
+    The path param is the project-scoped designator (e.g. ``WEB-028``); a
+    bare integer is the wrong-guess trap and answers 422 like the API
+    (JRB-038), never a silently different ticket.
 
     The shell is server-rendered (header, actions, project/sprint/branch/PR
     metadata); dynamic sections load via HTMX: the ticket JSON card, the
     markdown/fields section, the sprint-assignment partial and the links
     section. Non-existent tickets render the HTML 404 page.
     """
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     # Resolve the project prefix while the session is open (plain scalars for
     # the template, so rendering never depends on lazy relationship loads).
@@ -1324,11 +1354,11 @@ async def ticket_detail(
     # Parent back-link context (JRB-019): resolve the parent via LinkService
     # while the session is open and pass plain scalars to the template, so
     # rendering never depends on lazy relationship loads.
-    parent = link_service.get_parent(ticket_id)
-    parent_id: int | None = None
+    parent = link_service.get_parent(cast(int, ticket.id))
+    parent_pk: int | None = None
     parent_full_id: str | None = None
     if parent is not None:
-        parent_id = cast(int, parent.id)
+        parent_pk = cast(int, parent.id)
         parent_project = ticket_service.session.get(Project, parent.project_id)
         parent_prefix = parent_project.prefix if parent_project else "UNK"
         parent_full_id = f"{parent_prefix}-{parent.number:03d}"
@@ -1353,19 +1383,43 @@ async def ticket_detail(
             "branch_name": ticket.branch_name,
             "pr_url": ticket.pr_url,
             "original_id": ticket.original_id,
-            "parent_id": parent_id,
+            "parent_id": parent_pk,
             "parent_full_id": parent_full_id,
         },
     )
 
 
+@router.get("/ticket/{ticket_ref}", response_class=HTMLResponse)
+async def ticket_detail_legacy(
+    request: Request,
+    ticket_ref: str,
+    ticket_service: TicketService = Depends(get_ticket_service),
+) -> RedirectResponse:
+    """Legacy alias for the detail page: redirects to the designator URL.
+
+    Pre-epic URLs (and PK guesses like ``/ticket/28``) redirect to the
+    ticket's designator URL so the address bar shows the one public
+    identifier; the canonical ``/tickets/{designator}`` route keeps the
+    bare-integer trap a 422 instead of silently rendering a different
+    ticket. An unknown ref answers 404.
+    """
+    try:
+        ticket = ticket_service.get_ticket_by_designator(ticket_ref)
+    except DesignatorFormatError:
+        # Legacy form: a bare integer addressed the internal PK.
+        ticket = ticket_service.get_ticket(int(ticket_ref)) if ticket_ref.isdigit() else None
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return RedirectResponse(url=f"/tickets/{ticket.full_id}", status_code=307)
+
+
 # Child-creation web routes (JRB-010): Epic-only "Create Child" affordance on the
 # ticket detail page. Registered after the literal /tickets/new and /tickets/search
-# paths above so those static routes keep precedence over /tickets/{ticket_id}.
-@router.get("/tickets/{parent_id}/children/new", response_class=HTMLResponse)
+# paths above so those static routes keep precedence over /tickets/{ticket_designator}.
+@router.get("/tickets/{parent_designator}/children/new", response_class=HTMLResponse)
 async def ticket_create_child_modal(
     request: Request,
-    parent_id: int,
+    parent_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     project_service: ProjectService = Depends(get_project_service),
     sprint_service: SprintService = Depends(get_sprint_service),
@@ -1374,12 +1428,13 @@ async def ticket_create_child_modal(
     """Render the New Ticket modal partial in child mode.
 
     Returns the ``ticket_form_partial.html`` modal pre-filled for child
-    creation: parent_id in the form action, title "New Child Ticket", default
-    type Story, and the parent Epic's project pre-selected. 404 if the parent
-    is absent or not an Epic (children are Epic-only).
+    creation: the parent's PK in the form context, title "New Child Ticket",
+    default type Story, and the parent Epic's project pre-selected. 404 if the
+    designator names no ticket or the parent is not an Epic (children are
+    Epic-only).
     """
-    parent = ticket_service.get_ticket(parent_id)
-    if not parent or parent.type != TicketType.EPIC:
+    parent = _ticket_from_designator(parent_designator, ticket_service)
+    if parent.type != TicketType.EPIC:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     projects = project_service.list_projects()
@@ -1422,32 +1477,28 @@ def _criteria_section_response(
     )
 
 
-@router.get("/tickets/{ticket_id}/criteria", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/criteria", response_class=HTMLResponse)
 async def ticket_criteria_section(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     criteria_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     """Render the ticket's acceptance-criteria checklist partial."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
     return _criteria_section_response(request, ticket, criteria_service)
 
 
-@router.get("/tickets/{ticket_id}/criteria/edit", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/criteria/edit", response_class=HTMLResponse)
 async def ticket_criteria_edit_form(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     add: bool = Query(False),
     ticket_service: TicketService = Depends(get_ticket_service),
     criteria_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     """Render the inline acceptance-criteria editor for an editable ticket."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
     if ticket.status not in (TicketStatus.OPEN, TicketStatus.GROOMED):
         raise HTTPException(
             status_code=400,
@@ -1472,18 +1523,16 @@ async def ticket_criteria_edit_form(
     )
 
 
-@router.patch("/tickets/{ticket_id}/criteria", response_class=HTMLResponse)
+@router.patch("/tickets/{ticket_designator}/criteria", response_class=HTMLResponse)
 async def ticket_criteria_update(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     criteria_update: CriteriaReplace,
     ticket_service: TicketService = Depends(get_ticket_service),
     criteria_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     """Replace the ticket's full criteria list and return the refreshed section."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     try:
         criteria_service.replace_criteria(ticket, criteria_update.criteria, skip_if_unchanged=True)
@@ -1516,30 +1565,26 @@ def _fields_section_response(
     )
 
 
-@router.get("/tickets/{ticket_id}/fields", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/fields", response_class=HTMLResponse)
 async def ticket_fields_section(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Markdown-rendered description + collapsible groomed fields partial."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
     return _fields_section_response(request, ticket)
 
 
-@router.get("/tickets/{ticket_id}/fields/{field_name}/edit", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/fields/{field_name}/edit", response_class=HTMLResponse)
 async def ticket_field_edit_form(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     field_name: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Inline edit form for a single groomed field."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     field_def = next(((n, label) for n, label in GROOMED_FIELD_DEFS if n == field_name), None)
     if field_def is None:
@@ -1564,10 +1609,10 @@ async def ticket_field_edit_form(
     )
 
 
-@router.patch("/tickets/{ticket_id}/fields/{field_name}", response_class=HTMLResponse)
+@router.patch("/tickets/{ticket_designator}/fields/{field_name}", response_class=HTMLResponse)
 async def ticket_field_update(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     field_name: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
@@ -1576,9 +1621,7 @@ async def ticket_field_update(
     Returns the refreshed fields section on success; on validation failure
     re-renders the edit form with an error message.
     """
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     field_def = next(((n, label) for n, label in GROOMED_FIELD_DEFS if n == field_name), None)
     if field_def is None:
@@ -1609,27 +1652,25 @@ def _sprint_section_response(
     )
 
 
-@router.get("/tickets/{ticket_id}/sprint-section", response_class=HTMLResponse)
+@router.get("/tickets/{ticket_designator}/sprint-section", response_class=HTMLResponse)
 async def ticket_sprint_section(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
     """Sprint link / 'Unassigned' + assign-to-sprint dropdown partial."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     sprint = sprint_service.get_sprint(ticket.sprint_id) if ticket.sprint_id else None
     sprints = [] if sprint else sprint_service.assignable_sprints()
     return _sprint_section_response(request, ticket, sprint, sprints)
 
 
-@router.post("/tickets/{ticket_id}/assign-sprint", response_class=HTMLResponse)
+@router.post("/tickets/{ticket_designator}/assign-sprint", response_class=HTMLResponse)
 async def ticket_assign_sprint(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
@@ -1638,9 +1679,7 @@ async def ticket_assign_sprint(
     Returns the refreshed sprint section partial so the dropdown swaps to the
     sprint link in place.
     """
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     form = await request.form()
     raw_sprint_id = form.get("sprint_id")
@@ -1652,7 +1691,7 @@ async def ticket_assign_sprint(
         raise HTTPException(status_code=400, detail="sprint_id must be an integer") from e
 
     try:
-        sprint_service.assign_ticket_to_sprint(sprint_id, ticket_id)
+        sprint_service.assign_ticket_to_sprint(sprint_id, cast(int, ticket.id))
     except SprintNotAssignableError as e:
         # A completed sprint takes no new tickets (JRB-030).
         raise HTTPException(status_code=409, detail=str(e)) from e
@@ -1663,21 +1702,19 @@ async def ticket_assign_sprint(
     return _sprint_section_response(request, ticket, sprint, [])
 
 
-@router.post("/tickets/{ticket_id}/unassign-sprint", response_class=HTMLResponse)
+@router.post("/tickets/{ticket_designator}/unassign-sprint", response_class=HTMLResponse)
 async def ticket_unassign_sprint(
     request: Request,
-    ticket_id: int,
+    ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
     """HTMX form submit: remove the ticket from its sprint."""
-    ticket = ticket_service.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = _ticket_from_designator(ticket_designator, ticket_service)
 
     if ticket.sprint_id is not None:
         try:
-            sprint_service.unassign_ticket_from_sprint(ticket.sprint_id, ticket_id)
+            sprint_service.unassign_ticket_from_sprint(ticket.sprint_id, cast(int, ticket.id))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 

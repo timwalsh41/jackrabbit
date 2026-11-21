@@ -10,10 +10,10 @@
             <p class="text-gray-600 mt-1" id="ticket-meta">{{ ticket_type }} • {{ ticket_status }} • {{ ticket_priority }}{% if ticket_story_points %} • {{ ticket_story_points }} pts{% endif %}</p>
         </div>
         <div class="flex items-center gap-2">
-            <a href="/tickets/{{ ticket_id }}/edit" class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Edit</a>
+            <a href="/tickets/{{ full_id }}/edit" class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Edit</a>
             <button type="button"
                     class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-                    hx-get="/tickets/{{ ticket_id }}/move-project/modal"
+                    hx-get="/tickets/{{ full_id }}/move-project/modal"
                     hx-target="#ticket-modal"
                     hx-swap="innerHTML"
                     title="Move to another project">
@@ -29,7 +29,7 @@
                Backlog sits below it, left-aligned in the actions column. #}
             <div class="flex flex-col items-start gap-1">
                 {% if parent_id %}
-                <a href="/tickets/{{ parent_id }}" id="parent-backlink" class="text-indigo-600 hover:text-indigo-800 text-sm" title="Back to parent issue {{ parent_full_id }}">↑ Parent: {{ parent_full_id }}</a>
+                <a href="/tickets/{{ parent_full_id }}" id="parent-backlink" class="text-indigo-600 hover:text-indigo-800 text-sm" title="Back to parent issue {{ parent_full_id }}">↑ Parent: {{ parent_full_id }}</a>
                 {% endif %}
                 <a href="/backlog" class="text-indigo-600 hover:text-indigo-800 text-sm">← Back to Backlog</a>
             </div>
@@ -46,7 +46,7 @@
             <div>
                 <h4 class="text-sm font-medium text-gray-900 mb-1">Sprint</h4>
                 <div id="sprint-section"
-                     hx-get="/tickets/{{ ticket_id }}/sprint-section"
+                     hx-get="/tickets/{{ full_id }}/sprint-section"
                      hx-trigger="load"
                      hx-swap="outerHTML">
                     <span class="text-sm text-gray-400">Loading…</span>
@@ -265,13 +265,13 @@
             
             // Special handling for transitions that need modals
             if (t.forward && t.status === 'Groomed') {
-                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/groomed/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+                buttonAttrs = `hx-get="/tickets/${ticket.full_id}/transition/groomed/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
             } else if (t.forward && t.status === 'In Progress') {
-                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/in-progress/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+                buttonAttrs = `hx-get="/tickets/${ticket.full_id}/transition/in-progress/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
             } else if (t.forward && t.status === 'Ready for Review') {
-                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/ready-for-review/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+                buttonAttrs = `hx-get="/tickets/${ticket.full_id}/transition/ready-for-review/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
             } else if (t.forward && t.status === 'Complete') {
-                buttonAttrs = `hx-get="/tickets/${ticket.id}/transition/complete/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
+                buttonAttrs = `hx-get="/tickets/${ticket.full_id}/transition/complete/modal" hx-target="#ticket-modal" hx-swap="innerHTML"`;
             } else {
                 // Direct (non-modal) transitions still POST JSON to the API —
                 // json-enc encodes the hx-vals object, the header keeps FastAPI happy.
@@ -395,7 +395,7 @@
         // inline-editable) and loaded into this placeholder via HTMX.
         const fieldsSection = `
             <div id="ticket-fields-section"
-                 hx-get="/tickets/${ticket.id}/fields"
+                 hx-get="/tickets/${ticket.full_id}/fields"
                  hx-trigger="load"
                  hx-swap="outerHTML">
                 <div class="text-center text-gray-400 py-4 text-sm">Loading fields…</div>
@@ -403,7 +403,7 @@
         `;
         const criteriaSection = `
             <div id="criteria-section"
-                 hx-get="/tickets/${ticket.id}/criteria"
+                 hx-get="/tickets/${ticket.full_id}/criteria"
                  hx-trigger="load"
                  hx-swap="outerHTML">
                 <div class="text-center text-gray-400 py-4 text-sm">Loading acceptance criteria…</div>
@@ -478,7 +478,7 @@
 
                 <!-- Links Section -->
                 <div id="links-section-container">
-                    <div hx-get="/tickets/${ticket.id}/links"
+                    <div hx-get="/tickets/${ticket.full_id}/links"
                          hx-target="#links-section-container"
                          hx-swap="outerHTML"
                          hx-trigger="load"></div>
@@ -486,7 +486,7 @@
 
                 <!-- Labels Section -->
                 <div id="labels-section-container">
-                    <div hx-get="/tickets/${ticket.id}/labels"
+                    <div hx-get="/tickets/${ticket.full_id}/labels"
                          hx-target="#labels-section-container"
                          hx-swap="outerHTML"
                          hx-trigger="load"></div>

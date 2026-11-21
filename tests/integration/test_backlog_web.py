@@ -507,14 +507,14 @@ class TestNewTicketForm:
 class TestEditTicketForm:
     async def test_edit_full_page_uses_patch(self, client, backlog_tickets):
         t = backlog_tickets["high"]
-        r = await _get(client, f"/tickets/{t.id}/edit")
+        r = await _get(client, f"/tickets/{t.full_id}/edit")
         assert r.status_code == 200
         assert f'hx-patch="/api/v1/tickets/{t.full_id}"' in r.text
         assert f'value="{t.title}"' in r.text
 
     async def test_edit_modal_htmx_targets_row(self, client, backlog_tickets):
         t = backlog_tickets["high"]
-        r = await _get(client, f"/tickets/{t.id}/edit", headers={"HX-Request": "true"})
+        r = await _get(client, f"/tickets/{t.full_id}/edit", headers={"HX-Request": "true"})
         assert r.status_code == 200
         assert f'hx-patch="/api/v1/tickets/{t.full_id}"' in r.text
         assert f'hx-target="#ticket-row-{t.id}"' in r.text
@@ -522,7 +522,7 @@ class TestEditTicketForm:
         assert f'value="{t.title}"' in r.text
 
     async def test_edit_404(self, client):
-        r = await _get(client, "/tickets/99999/edit")
+        r = await _get(client, "/tickets/UNS-99999/edit")
         assert r.status_code == 404
 
 
@@ -559,7 +559,7 @@ class TestPatchReturnsRow:
             content=json.dumps(payload),
             headers={"Content-Type": "application/json", "HX-Request": "true"},
         )
-        assert r.headers.get("HX-Redirect") == f"/tickets/{t.id}"
+        assert r.headers.get("HX-Redirect") == f"/tickets/{t.full_id}"
 
     async def test_patch_json_still_returns_json(self, client, backlog_tickets):
         t = backlog_tickets["low"]

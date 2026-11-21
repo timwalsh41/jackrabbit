@@ -32,14 +32,14 @@ async def test_sprint_list_page_shows_planned_and_actual_dates(
     assert "2026-01-05" in content  # planned start
     assert "2026-01-06" in content  # actual start
     assert "In Progress" in content  # persisted status backfilled from actual_start
-    assert 'href="/sprints/1/edit"' in content
+    assert 'href="/sprints/2601/edit"' in content
 
 
 async def test_sprint_detail_renders_board(client_with_seeds: AsyncClient) -> None:
     """JRB-031: GET /sprints/{id}/detail is the canonical URL for the sprint board."""
     sprint = await _create_sprint(client_with_seeds, number=2601, name="Board Sprint")
 
-    response = await client_with_seeds.get(f"/sprints/{sprint['id']}/detail")
+    response = await client_with_seeds.get(f"/sprints/{sprint['number']}/detail")
     assert response.status_code == 200
     content = response.text
     assert "Board Sprint" in content
@@ -55,7 +55,7 @@ async def test_legacy_sprint_url_redirects_to_canonical(
 
     response = await client_with_seeds.get(f"/sprint/{sprint['id']}", follow_redirects=False)
     assert response.status_code == 307
-    assert response.headers["location"] == f"/sprints/{sprint['id']}/detail"
+    assert response.headers["location"] == f"/sprints/{sprint['number']}/detail"
 
 
 async def test_legacy_sprint_url_follows_redirect_to_board(
@@ -82,7 +82,7 @@ async def test_sprint_list_row_has_board_link(client_with_seeds: AsyncClient) ->
     response = await client_with_seeds.get("/sprints")
     assert response.status_code == 200
     content = response.text
-    assert f'href="/sprints/{sprint["id"]}/detail"' in content
+    assert f'href="/sprints/{sprint["number"]}/detail"' in content
     assert "Board" in content
 
 
@@ -115,7 +115,7 @@ async def test_edit_sprint_form_uses_hx_patch(
         planned_duration_days=14,
     )
 
-    response = await client_with_seeds.get(f"/sprints/{sprint['id']}/edit")
+    response = await client_with_seeds.get(f"/sprints/{sprint['number']}/edit")
     assert response.status_code == 200
     content = response.text
     assert f'hx-patch="/api/v1/sprints/{sprint["number"]}"' in content
@@ -154,7 +154,7 @@ async def test_sprint_edit_form_renders_actual_dates_read_only(
         client_with_seeds, actual_start="2026-01-06T00:00:00", actual_finish="2026-01-20T00:00:00"
     )
 
-    response = await client_with_seeds.get(f"/sprints/{sprint['id']}/edit")
+    response = await client_with_seeds.get(f"/sprints/{sprint['number']}/edit")
     assert response.status_code == 200
     content = response.text
     # Disabled, read-only inputs with the transition note
@@ -172,13 +172,13 @@ async def test_sprint_board_shows_start_action_and_transition(
     re-renders it In Progress with the action history (JRB-029)."""
     sprint = await _create_sprint(client_with_seeds, name="Board Sprint")
 
-    response = await client_with_seeds.get(f"/sprints/{sprint['id']}/detail")
+    response = await client_with_seeds.get(f"/sprints/{sprint['number']}/detail")
     content = response.text
     assert "Not Started" in content
     assert "Start Sprint" in content
 
     response = await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition",
+        f"/sprints/{sprint['number']}/transition",
         data={"to_status": "In Progress"},
     )
     assert response.status_code == 200
@@ -196,10 +196,10 @@ async def test_sprint_board_blocked_completion_shows_why(
     await _make_ticket_in_sprint(client_with_seeds, sprint["id"], "Blocking ticket")
 
     await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition", data={"to_status": "In Progress"}
+        f"/sprints/{sprint['number']}/transition", data={"to_status": "In Progress"}
     )
     response = await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition", data={"to_status": "Complete"}
+        f"/sprints/{sprint['number']}/transition", data={"to_status": "Complete"}
     )
     assert response.status_code == 200
     assert 'role="alert"' in response.text
@@ -223,11 +223,11 @@ async def test_sprint_board_reopen_action(
         f"/api/v1/sprints/{sprint['number']}/transition", json={"to_status": "Complete"}
     )
 
-    response = await client_with_seeds.get(f"/sprints/{sprint['id']}/detail")
+    response = await client_with_seeds.get(f"/sprints/{sprint['number']}/detail")
     assert "Reopen Sprint" in response.text
 
     response = await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition", data={"to_status": "In Progress"}
+        f"/sprints/{sprint['number']}/transition", data={"to_status": "In Progress"}
     )
     assert response.status_code == 200
     data = (await client_with_seeds.get(f"/api/v1/sprints/{sprint['number']}")).json()
@@ -246,7 +246,7 @@ async def test_sprint_list_row_transition_swaps_row(
     assert "Start" in response.text
 
     response = await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition?view=row",
+        f"/sprints/{sprint['number']}/transition?view=row",
         data={"to_status": "In Progress"},
     )
     assert response.status_code == 200
@@ -257,7 +257,7 @@ async def test_sprint_list_row_transition_swaps_row(
     # A blocked completion from the row shows the reason inline
     await _make_ticket_in_sprint(client_with_seeds, sprint["id"], "Row blocker")
     response = await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition?view=row",
+        f"/sprints/{sprint['number']}/transition?view=row",
         data={"to_status": "Complete"},
     )
     assert response.status_code == 200
@@ -272,16 +272,16 @@ async def test_sprint_list_row_transitions_full_cycle(
     sprint = await _create_sprint(client_with_seeds, name="Cycle Row")
 
     await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition?view=row", data={"to_status": "In Progress"}
+        f"/sprints/{sprint['number']}/transition?view=row", data={"to_status": "In Progress"}
     )
     response = await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition?view=row", data={"to_status": "Complete"}
+        f"/sprints/{sprint['number']}/transition?view=row", data={"to_status": "Complete"}
     )
     assert response.status_code == 200
     assert "Reopen" in response.text
 
     response = await client_with_seeds.post(
-        f"/sprints/{sprint['id']}/transition?view=row",
+        f"/sprints/{sprint['number']}/transition?view=row",
         data={"to_status": "In Progress", "reason": "rework"},
     )
     assert response.status_code == 200

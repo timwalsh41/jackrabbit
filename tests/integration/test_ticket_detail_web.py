@@ -30,9 +30,11 @@ async def create_ticket(client: httpx.AsyncClient, **overrides) -> dict:
     return response.json()
 
 
-async def get_page(client: httpx.AsyncClient, url: str) -> httpx.Response:
+async def get_page(
+    client: httpx.AsyncClient, url: str, follow_redirects: bool = True
+) -> httpx.Response:
     """GET as a browser would (HTML accept header)."""
-    return await client.get(url, headers={"accept": "text/html"})
+    return await client.get(url, headers={"accept": "text/html"}, follow_redirects=follow_redirects)
 
 
 class TestParentBacklink:
@@ -50,11 +52,11 @@ class TestParentBacklink:
         )
         assert link.status_code == 201, link.text
 
-        response = await get_page(client, f"/tickets/{story['id']}")
+        response = await get_page(client, f"/tickets/{story['full_id']}")
 
         assert response.status_code == 200
         assert f"↑ Parent: UNS-{epic['number']:03d}" in response.text
-        assert f'href="/tickets/{epic["id"]}"' in response.text
+        assert f'href="/tickets/{epic["full_id"]}"' in response.text
 
     async def test_backlink_sits_above_back_to_backlog(self, client: httpx.AsyncClient):
         """The parent link takes the top-right spot; Back to Backlog stays below."""
@@ -69,7 +71,7 @@ class TestParentBacklink:
         )
         assert link.status_code == 201, link.text
 
-        response = await get_page(client, f"/tickets/{story['id']}")
+        response = await get_page(client, f"/tickets/{story['full_id']}")
 
         parent_pos = response.text.find("↑ Parent:")
         backlog_pos = response.text.find("← Back to Backlog")
@@ -77,7 +79,7 @@ class TestParentBacklink:
 
     async def test_detail_page_without_parent_has_no_backlink(self, client: httpx.AsyncClient):
         story = await create_ticket(client, title="Orphan Story")
-        response = await get_page(client, f"/tickets/{story['id']}")
+        response = await get_page(client, f"/tickets/{story['full_id']}")
         assert response.status_code == 200
         assert "↑ Parent:" not in response.text
 
@@ -94,7 +96,7 @@ class TestParentBacklink:
         )
         assert link.status_code == 201, link.text
 
-        response = await get_page(client, f"/tickets/{epic['id']}")
+        response = await get_page(client, f"/tickets/{epic['full_id']}")
         assert response.status_code == 200
         assert "↑ Parent:" not in response.text
 
@@ -102,7 +104,7 @@ class TestParentBacklink:
 class TestTicketDetailPage:
     async def test_detail_page_renders_at_tickets_id(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}")
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
         # Header shows the zero-padded full ticket ID (MSC-005 style) and title
@@ -112,19 +114,21 @@ class TestTicketDetailPage:
         assert 'id="ticket-content"' in response.text
 
     async def test_legacy_ticket_alias_still_works(self, client: httpx.AsyncClient):
+        """The legacy PK alias redirects to the canonical designator URL (JRB-039)."""
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/ticket/{ticket['id']}")
-        assert response.status_code == 200
+        response = await get_page(client, f"/ticket/{ticket['id']}", follow_redirects=False)
+        assert response.status_code == 307
+        assert response.headers["location"] == f"/tickets/{ticket['full_id']}"
 
     async def test_detail_page_is_deep_linkable(self, client: httpx.AsyncClient):
         """A direct hit on the URL returns the full shell (content loads via HTMX)."""
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}")
         assert response.status_code == 200
         assert 'id="ticket-content"' in response.text
 
     async def test_404_page_for_nonexistent_ticket(self, client: httpx.AsyncClient):
-        response = await get_page(client, "/tickets/99999")
+        response = await get_page(client, "/tickets/UNS-99999")
         assert response.status_code == 404
         assert "text/html" in response.headers["content-type"]
         assert "not found" in response.text.lower()
@@ -144,19 +148,19 @@ class TestTicketDetailPage:
 class TestDetailPageSections:
     async def test_page_has_fields_section_container(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}")
         assert "ticket-fields-section" in response.text
 
     async def test_fields_section_renders_description_markdown(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client, description="# Heading\n\nSome **bold** text")
-        response = await get_page(client, f"/tickets/{ticket['id']}/fields")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/fields")
         assert response.status_code == 200
         assert "<h1>Heading</h1>" in response.text
         assert "<strong>bold</strong>" in response.text
 
     async def test_fields_section_escapes_html_in_description(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client, description="evil <script>alert(1)</script> text")
-        response = await get_page(client, f"/tickets/{ticket['id']}/fields")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/fields")
         assert "<script>alert(1)</script>" not in response.text
         assert "&lt;script&gt;" in response.text
 
@@ -171,7 +175,7 @@ class TestDetailPageSections:
             test_plan="unit tests",
             validation_steps="run it",
         )
-        response = await get_page(client, f"/tickets/{ticket['id']}/fields")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/fields")
         assert "<details" in response.text
         assert "Approach" in response.text
         assert "Files to Change" in response.text
@@ -201,14 +205,14 @@ class TestInlineFieldEditing:
         return ticket
 
     async def test_edit_form_partial(self, client: httpx.AsyncClient, groomed: dict):
-        response = await get_page(client, f"/tickets/{groomed['id']}/fields/approach/edit")
+        response = await get_page(client, f"/tickets/{groomed['full_id']}/fields/approach/edit")
         assert response.status_code == 200
         assert "Original approach" in response.text
         assert "textarea" in response.text
 
     async def test_patch_field_updates_value(self, client: httpx.AsyncClient, groomed: dict):
         response = await client.patch(
-            f"/tickets/{groomed['id']}/fields/approach",
+            f"/tickets/{groomed['full_id']}/fields/approach",
             content="value=New+approach+value",
             headers={
                 "content-type": "application/x-www-form-urlencoded",
@@ -223,7 +227,7 @@ class TestInlineFieldEditing:
 
     async def test_patch_rejects_unknown_field(self, client: httpx.AsyncClient, groomed: dict):
         response = await client.patch(
-            f"/tickets/{groomed['id']}/fields/not_a_field",
+            f"/tickets/{groomed['full_id']}/fields/not_a_field",
             content="x",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -252,12 +256,12 @@ class TestInlineFieldEditing:
             json={"to_status": "Complete", "reason": "done"},
         )
         assert response.status_code == 200, response.text
-        response = await get_page(client, f"/tickets/{groomed['id']}/fields")
+        response = await get_page(client, f"/tickets/{groomed['full_id']}/fields")
         # Edit affordances removed for Complete tickets
-        assert f"/tickets/{groomed['id']}/fields/approach/edit" not in response.text
+        assert f"/tickets/{groomed['full_id']}/fields/approach/edit" not in response.text
 
         response = await client.patch(
-            f"/tickets/{groomed['id']}/fields/approach",
+            f"/tickets/{groomed['full_id']}/fields/approach",
             content="hack",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -269,7 +273,7 @@ class TestInlineFieldEditing:
             json={"to_status": "Rejected", "reason": "nope"},
         )
         response = await client.patch(
-            f"/tickets/{groomed['id']}/fields/approach",
+            f"/tickets/{groomed['full_id']}/fields/approach",
             content="hack",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -278,7 +282,7 @@ class TestInlineFieldEditing:
     async def test_field_edit_preserves_status(self, client: httpx.AsyncClient, groomed: dict):
         """Inline field edit must not be usable to change status."""
         response = await client.patch(
-            f"/tickets/{groomed['id']}/fields/status",
+            f"/tickets/{groomed['full_id']}/fields/status",
             content="Complete",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -321,7 +325,7 @@ class TestLinkModalPartial:
         ticket = await create_ticket(client, type=TicketType.EPIC)
 
         response = await client.get(
-            f"/tickets/{ticket['id']}/links/modal",
+            f"/tickets/{ticket['full_id']}/links/modal",
             headers={"HX-Request": "true"},
         )
 
@@ -332,7 +336,7 @@ class TestLinkModalPartial:
         assert response.text.count('onclick="closeModal()"') == 3
         assert "document.addEventListener('keydown'" in response.text
         assert "event.key === 'Escape'" in response.text
-        assert f'hx-get="/tickets/{ticket["id"]}/links"' not in response.text
+        assert f'hx-get="/tickets/{ticket["full_id"]}/links"' not in response.text
 
 
 class TestSprintAssignmentPartial:
@@ -344,16 +348,16 @@ class TestSprintAssignmentPartial:
 
     async def test_unassigned_shows_dropdown(self, client: httpx.AsyncClient, sprint: dict):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/sprint-section")
         assert response.status_code == 200
         assert "Unassigned" in response.text
         assert "assign-sprint" in response.text
-        assert str(sprint["id"]) in response.text
+        assert str(sprint["number"]) in response.text
 
     async def test_assign_sprint_via_htmx_partial(self, client: httpx.AsyncClient, sprint: dict):
         ticket = await create_ticket(client)
         response = await client.post(
-            f"/tickets/{ticket['id']}/assign-sprint",
+            f"/tickets/{ticket['full_id']}/assign-sprint",
             content=f"sprint_id={sprint['id']}",
             headers={
                 "content-type": "application/x-www-form-urlencoded",
@@ -361,7 +365,7 @@ class TestSprintAssignmentPartial:
             },
         )
         assert response.status_code == 200
-        assert f"/sprints/{sprint['id']}/detail" in response.text
+        assert f"/sprints/{sprint['number']}/detail" in response.text
         # Persisted
         detail = (await client.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
         assert detail["sprint_id"] == sprint["id"]
@@ -371,12 +375,12 @@ class TestSprintAssignmentPartial:
     ):
         ticket = await create_ticket(client)
         await client.post(
-            f"/tickets/{ticket['id']}/assign-sprint",
+            f"/tickets/{ticket['full_id']}/assign-sprint",
             content=f"sprint_id={sprint['id']}",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
-        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
-        assert f"/sprints/{sprint['id']}/detail" in response.text
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/sprint-section")
+        assert f"/sprints/{sprint['number']}/detail" in response.text
         assert "unassign-sprint" in response.text
 
     async def test_assigned_section_shows_sprint_status(self, client: httpx.AsyncClient, test_db):
@@ -398,18 +402,18 @@ class TestSprintAssignmentPartial:
         )
         await client.post(f"/api/v1/tickets/{ticket['full_id']}/criteria", json={"text": "Done"})
         await client.post(
-            f"/tickets/{ticket['id']}/assign-sprint",
+            f"/tickets/{ticket['full_id']}/assign-sprint",
             content=f"sprint_id={sprint.id}",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
 
         # Before the sprint starts the section shows its Not Started status.
-        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/sprint-section")
         assert response.status_code == 200
         assert "Not Started" in response.text
 
         sprint_service.transition(sprint.id, SprintStatus.IN_PROGRESS)
-        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/sprint-section")
         assert response.status_code == 200
         assert "In Progress" in response.text
 
@@ -430,19 +434,19 @@ class TestSprintAssignmentPartial:
             assert done.status_code == 200, done.text
 
         sprint_service.transition(sprint.id, SprintStatus.COMPLETE)
-        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/sprint-section")
         assert response.status_code == 200
         assert "Complete" in response.text
 
     async def test_unassign_sprint_via_htmx_partial(self, client: httpx.AsyncClient, sprint: dict):
         ticket = await create_ticket(client)
         await client.post(
-            f"/tickets/{ticket['id']}/assign-sprint",
+            f"/tickets/{ticket['full_id']}/assign-sprint",
             content=f"sprint_id={sprint['id']}",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
         response = await client.post(
-            f"/tickets/{ticket['id']}/unassign-sprint",
+            f"/tickets/{ticket['full_id']}/unassign-sprint",
             headers={"accept": "text/html"},
         )
         assert response.status_code == 200
@@ -461,7 +465,7 @@ class TestSprintAssignmentPartial:
         sprint_service.transition(completed.id, SprintStatus.COMPLETE)
 
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}/sprint-section")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/sprint-section")
         assert response.status_code == 200
         assert f'value="{open_sprint.id}"' in response.text
         assert f'value="{completed.id}"' not in response.text
@@ -479,7 +483,7 @@ class TestSprintAssignmentPartial:
 
         ticket = await create_ticket(client)
         response = await client.post(
-            f"/tickets/{ticket['id']}/assign-sprint",
+            f"/tickets/{ticket['full_id']}/assign-sprint",
             content=f"sprint_id={completed.id}",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -491,7 +495,7 @@ class TestSprintAssignmentPartial:
     async def test_assign_with_invalid_sprint(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
         response = await client.post(
-            f"/tickets/{ticket['id']}/assign-sprint",
+            f"/tickets/{ticket['full_id']}/assign-sprint",
             content="sprint_id=99999",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -500,7 +504,7 @@ class TestSprintAssignmentPartial:
     async def test_assign_missing_sprint_param(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
         response = await client.post(
-            f"/tickets/{ticket['id']}/assign-sprint",
+            f"/tickets/{ticket['full_id']}/assign-sprint",
             content="",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -510,20 +514,20 @@ class TestSprintAssignmentPartial:
 class TestDetailPageActions:
     async def test_delete_action_present_with_confirm(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}")
         assert response.status_code == 200
         assert f'hx-delete="/api/v1/tickets/{ticket["full_id"]}"' in response.text
         assert "hx-confirm" in response.text
 
     async def test_edit_action_links_to_edit_page(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}")
-        assert f"/tickets/{ticket['id']}/edit" in response.text
+        response = await get_page(client, f"/tickets/{ticket['full_id']}")
+        assert f"/tickets/{ticket['full_id']}/edit" in response.text
 
     async def test_move_project_action_present(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}")
-        assert f"/tickets/{ticket['id']}/move-project/modal" in response.text
+        response = await get_page(client, f"/tickets/{ticket['full_id']}")
+        assert f"/tickets/{ticket['full_id']}/move-project/modal" in response.text
 
     async def test_project_metadata_links_to_project_scoped_backlog(
         self, client: httpx.AsyncClient
@@ -531,7 +535,7 @@ class TestDetailPageActions:
         """The project link on the ticket detail now scopes the backlog via
         ?project_id= (the /projects/{id}/tickets route was removed)."""
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}")
         assert f"/backlog?project_id={ticket['project_id']}" in response.text
 
     async def test_transition_history_via_api_data(
@@ -562,16 +566,18 @@ class TestCreateChildWeb:
         """The Create Child button lives in the links-section partial that the
         Epic detail page loads (GET /tickets/{id}/links)."""
         epic = await create_ticket(client, title="Epic for child button", type="Epic")
-        response = await client.get(f"/tickets/{epic['id']}/links", headers={"accept": "text/html"})
+        response = await client.get(
+            f"/tickets/{epic['full_id']}/links", headers={"accept": "text/html"}
+        )
         assert response.status_code == 200
         assert "Create Child" in response.text
-        assert f'hx-get="/tickets/{epic["id"]}/children/new"' in response.text
+        assert f'hx-get="/tickets/{epic["full_id"]}/children/new"' in response.text
         assert 'hx-target="#ticket-modal"' in response.text
 
     async def test_create_child_button_absent_on_story_detail(self, client: httpx.AsyncClient):
         story = await create_ticket(client, title="Story without child button")
         response = await client.get(
-            f"/tickets/{story['id']}/links", headers={"accept": "text/html"}
+            f"/tickets/{story['full_id']}/links", headers={"accept": "text/html"}
         )
         assert response.status_code == 200
         assert "Create Child" not in response.text
@@ -579,7 +585,7 @@ class TestCreateChildWeb:
     async def test_children_new_modal_partial_for_epic(self, client: httpx.AsyncClient):
         epic = await create_ticket(client, title="Epic for child modal", type="Epic")
         response = await client.get(
-            f"/tickets/{epic['id']}/children/new",
+            f"/tickets/{epic['full_id']}/children/new",
             headers={"HX-Request": "true", "accept": "text/html"},
         )
         assert response.status_code == 200
@@ -596,10 +602,12 @@ class TestCreateChildWeb:
     async def test_children_new_returns_404_for_story(self, client: httpx.AsyncClient):
         story = await create_ticket(client, title="Story non-epic parent")
         response = await client.get(
-            f"/tickets/{story['id']}/children/new", headers={"HX-Request": "true"}
+            f"/tickets/{story['full_id']}/children/new", headers={"HX-Request": "true"}
         )
         assert response.status_code == 404
 
     async def test_children_new_returns_404_for_missing_ticket(self, client: httpx.AsyncClient):
-        response = await client.get("/tickets/99999/children/new", headers={"HX-Request": "true"})
+        response = await client.get(
+            "/tickets/UNS-99999/children/new", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 404

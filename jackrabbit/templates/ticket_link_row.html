@@ -40,7 +40,7 @@
         </span>
         
         {# Target ticket link #}
-        <a href="/ticket/{{ other_ticket.id }}" 
+        <a href="/ticket/{{ other_ticket.full_id }}" 
            class="font-mono text-indigo-600 hover:text-indigo-900 font-medium truncate block max-w-xs"
            title="{{ other_ticket.title }}">
             {{ other_ticket.project.prefix }}-{{ '%03d'|format(other_ticket.number) }}

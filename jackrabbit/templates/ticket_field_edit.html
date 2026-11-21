@@ -2,7 +2,7 @@
    Swapped into #field-{name}; a successful save swaps the whole fields
    section back in (server re-renders it with the new value). #}
 <form class="mt-1 space-y-2"
-      hx-patch="/tickets/{{ ticket.id }}/fields/{{ field.name }}"
+      hx-patch="/tickets/{{ ticket.full_id }}/fields/{{ field.name }}"
       hx-target="#ticket-fields-section"
       hx-swap="outerHTML">
     {% if error %}
@@ -17,7 +17,7 @@
             Save
         </button>
         <button type="button"
-                hx-get="/tickets/{{ ticket.id }}/fields"
+                hx-get="/tickets/{{ ticket.full_id }}/fields"
                 hx-target="#ticket-fields-section"
                 hx-swap="outerHTML"
                 class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
