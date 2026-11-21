@@ -1,7 +1,7 @@
 # ADR-0005: Ticket Renumbering on Project Move
 
 ## Status
-Accepted
+Accepted (amended by JRB-037: numbers are never reused)
 
 ## Context
 When a ticket moves from one project to another (e.g., `MSC-005` → `WEB`), what happens to its number? Options:
@@ -29,6 +29,20 @@ When a ticket moves from one project to another (e.g., `MSC-005` → `WEB`), wha
 - Store `original_id` on ticket (e.g., `MSC-005`) for traceability
 - Display "formerly MSC-005" in UI when moved
 - Git commits reference the ticket at time of commit — that's acceptable
+
+## Amendment (JRB-037, stable ticket numbers)
+
+JRB-037 replaced the per-project ``MAX(number) + 1`` allocation with a
+monotone per-project ``next_number`` counter. Consequences for this ADR:
+
+- "Next available in target" now means the next **never-before-used** serial
+  in the target project; numbers are never reissued, not after deletes and
+  not after a move frees a serial in the source project.
+- Source project numbering is unchanged by a move: the vacated serial stays
+  allocated, so "no gaps in source" no longer holds (gaps are permanent).
+- ``MAX(number) + 1`` is no longer the allocation rule anywhere; the counter
+  on the project row is the single source of truth (seeded by migration
+  ``f1a2b3c4d5e6`` for pre-existing data).
 
 ## Alternatives Considered
 - **Preserve serial**: Rejected — creates gaps in target (`WEB-001`, `WEB-002`, `WEB-006` looks odd).

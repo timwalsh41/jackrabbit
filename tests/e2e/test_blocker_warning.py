@@ -53,10 +53,10 @@ class TestBlockerWarningTerminalBlockers:
         # suite seeds data), so the story really is blocked.
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
             response = api.post(
-                f"/api/v1/tickets/{blocker['id']}/links",
+                f"/api/v1/tickets/{blocker['full_id']}/links",
                 json={
-                    "source_id": blocker["id"],
-                    "target_id": story["id"],
+                    "source_id": blocker["full_id"],
+                    "target_id": story["full_id"],
                     "link_type": "blocks",
                 },
             )
@@ -82,7 +82,7 @@ class TestBlockerWarningTerminalBlockers:
         # via the app's own API here.
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
             response = api.post(
-                f"/api/v1/tickets/{blocker['id']}/criteria",
+                f"/api/v1/tickets/{blocker['full_id']}/criteria",
                 json={"text": "Blocker is resolved"},
             )
             assert response.status_code == 201, response.text
@@ -146,10 +146,10 @@ class TestBlockerWarningTerminalBlockers:
 
         with httpx.Client(base_url=base_url, timeout=30.0) as api:
             response = api.post(
-                f"/api/v1/tickets/{blocker['id']}/links",
+                f"/api/v1/tickets/{blocker['full_id']}/links",
                 json={
-                    "source_id": blocker["id"],
-                    "target_id": story["id"],
+                    "source_id": blocker["full_id"],
+                    "target_id": story["full_id"],
                     "link_type": "blocks",
                 },
             )

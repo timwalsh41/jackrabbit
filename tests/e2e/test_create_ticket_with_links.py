@@ -29,7 +29,7 @@ class TestCreateTicketWithLinks:
         result = row.locator(".ticket-search-result").first
         expect(result).to_have_attribute("data-ticket-type", "Epic", timeout=10000)
         result.click()
-        expect(row.locator("[data-link-target-id]")).to_have_value(str(epic["id"]))
+        expect(row.locator("[data-link-target-id]")).to_have_value(epic["full_id"])
 
         page.click("#ticket-modal button:has-text('Create Ticket')")
         expect(page.locator("#ticket-modal form")).to_have_count(0, timeout=10000)
@@ -59,6 +59,6 @@ class TestCreateTicketWithLinks:
             page.locator("tr[id^='ticket-row']").filter(has_text="Plain ticket without links")
         ).to_be_visible(timeout=10000)
         created = response_info.value.json()
-        links_response = page.request.get(f"{base_url}/api/v1/tickets/{created['id']}/links")
+        links_response = page.request.get(f"{base_url}/api/v1/tickets/{created['full_id']}/links")
         assert links_response.status == 200
         assert links_response.json() == []

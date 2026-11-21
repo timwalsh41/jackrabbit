@@ -259,7 +259,9 @@ def make_ticket(base_url):
                     "description": "Created by E2E test factory",
                 },
             ).json()
-            tid = ticket["id"]
+            # Designator-only API (JRB-038): every subsequent call addresses
+            # the ticket by its full_id; bare ints are rejected with 422.
+            tid = ticket["full_id"]
 
             # Drive through the status chain up to the requested status.
             if status in ("Groomed", "In Progress", "Ready for Review", "Complete"):

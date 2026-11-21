@@ -247,10 +247,9 @@
                         target_id: row.querySelector('[data-link-target-id]').value
                     };
                 })
-                .filter(function(link) { return link.link_type && link.target_id; })
-                .map(function(link) {
-                    return {link_type: link.link_type, target_id: Number(link.target_id)};
-                });
+                .filter(function(link) { return link.link_type && link.target_id; });
+                // target_id stays the designator string (JRB-038); the API rejects
+                // bare integers, so no Number() coercion here.
         }
 
         // HTMX gathers parameters before its submit handler finishes bubbling,

@@ -139,7 +139,7 @@ class TestLabelsInTheTicketForm:
         added = _unique_label("added")
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            client.post(f"/api/v1/tickets/{ticket['id']}/labels", json={"name": existing})
+            client.post(f"/api/v1/tickets/{ticket['full_id']}/labels", json={"name": existing})
 
         page.goto(f"{base_url}/backlog")
         page.wait_for_load_state("networkidle")
@@ -169,5 +169,5 @@ class TestLabelsInTheTicketForm:
         page.wait_for_timeout(1000)
 
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
-            updated = client.get(f"/api/v1/tickets/{ticket['id']}").json()
+            updated = client.get(f"/api/v1/tickets/{ticket['full_id']}").json()
         assert [item["name"] for item in updated["labels"]] == [added]
