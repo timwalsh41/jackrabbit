@@ -28,8 +28,8 @@ Attach the label by name through the generic labels API (created on demand):
 
 Detach with `DELETE /api/v1/tickets/<id>/labels/<label_id>`, or replace the label set
 via ticket update (`PATCH /api/v1/tickets/<id>` with `labels`). There is no
-dedicated triage endpoint; the former `GET/POST /tickets/<id>/triage` and
-`GET /triage/roles` endpoints were removed (JRB-032).
+dedicated triage endpoint (JRB-032 removed it); this document is the single
+source of truth for the role names.
 
 ## Reading a role
 
