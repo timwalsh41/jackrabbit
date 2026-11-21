@@ -41,6 +41,7 @@ from jackrabbit.services import (
     SprintService,
     SprintTransitionError,
     TicketService,
+    ticket_from_designator_or_http,
 )
 
 router = APIRouter()
@@ -113,28 +114,6 @@ def get_label_service(session: Session = Depends(get_session)) -> LabelService:
     return LabelService(session)
 
 
-def _ticket_from_designator(
-    ticket_designator: str,
-    ticket_service: TicketService,
-    not_found_detail: str = "Ticket not found",
-) -> Ticket:
-    """Resolve a web path param designator to its row (JRB-039).
-
-    Mirrors the API contract (JRB-038): the path param is the project-scoped
-    designator (e.g. ``WEB-028``); a malformed identifier — including a bare
-    integer, the wrong-guess trap this epic kills — answers 422, a
-    well-formed but unknown prefix/number 404. Resolution happens once, to
-    the internal PK the services use.
-    """
-    try:
-        ticket = ticket_service.get_ticket_by_designator(ticket_designator)
-    except DesignatorFormatError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    if ticket is None:
-        raise HTTPException(status_code=404, detail=not_found_detail)
-    return ticket
-
-
 @router.get("/")
 async def index(request: Request) -> RedirectResponse:
     """Redirect to the backlog (spec Web Routes: GET / -> /backlog)."""
@@ -203,7 +182,7 @@ async def ticket_edit(
     the editor read-only); the modal partial (ticket_edit_modal.html) does
     not include the criteria editor.
     """
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     projects = project_service.list_projects()
     # The edit form's sprint dropdown offers only assignable sprints (JRB-030);
@@ -489,7 +468,7 @@ async def ticket_links_section(
     ticket_service: TicketService = Depends(get_ticket_service),
     link_service: LinkService = Depends(get_link_service),
 ) -> HTMLResponse:
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _links_section_response(request, cast(int, ticket.id), ticket_service, link_service)
 
 
@@ -499,7 +478,7 @@ async def ticket_link_modal(
     ticket_designator: str,
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     # Get all tickets for the modal search
     all_tickets, _ = ticket_service.list_tickets(page_size=1000)
@@ -549,7 +528,7 @@ async def ticket_labels_section(
     label_service: LabelService = Depends(get_label_service),
 ) -> HTMLResponse:
     """The ticket page's labels section: chips, remove buttons, add button."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _labels_section_response(request, cast(int, ticket.id), ticket_service, label_service)
 
 
@@ -561,7 +540,7 @@ async def ticket_label_modal(
     label_service: LabelService = Depends(get_label_service),
 ) -> HTMLResponse:
     """Modal for adding a label, offering the labels already in use."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1159,7 +1138,7 @@ async def ticket_move_project_modal(
     ticket_service: TicketService = Depends(get_ticket_service),
     project_service: ProjectService = Depends(get_project_service),
 ) -> HTMLResponse:
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     project = project_service.get_project(ticket.project_id)
     projects = project_service.list_projects()
@@ -1194,7 +1173,7 @@ async def ticket_transition_groomed_modal(
     existing criterion texts pre-filled into the editor; ``criteria_editable``
     is False once the ticket is past Groomed, rendering the editor read-only.
     """
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1216,7 +1195,7 @@ async def ticket_transition_in_progress_modal(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Modal for transitioning to In Progress with branch name field."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     # Generate suggested branch name
     from jackrabbit.services import generate_branch_name
@@ -1242,7 +1221,7 @@ async def ticket_transition_ready_for_review_modal(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Modal for transitioning to Ready for Review with PR URL field."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1260,7 +1239,7 @@ async def ticket_transition_complete_modal(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Modal for transitioning to Complete with a reason field."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     return templates.TemplateResponse(
         request,
@@ -1344,7 +1323,7 @@ async def ticket_detail(
     markdown/fields section, the sprint-assignment partial and the links
     section. Non-existent tickets render the HTML 404 page.
     """
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     # Resolve the project prefix while the session is open (plain scalars for
     # the template, so rendering never depends on lazy relationship loads).
@@ -1433,7 +1412,7 @@ async def ticket_create_child_modal(
     designator names no ticket or the parent is not an Epic (children are
     Epic-only).
     """
-    parent = _ticket_from_designator(parent_designator, ticket_service)
+    parent = ticket_from_designator_or_http(parent_designator, ticket_service)
     if parent.type != TicketType.EPIC:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -1485,7 +1464,7 @@ async def ticket_criteria_section(
     criteria_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     """Render the ticket's acceptance-criteria checklist partial."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _criteria_section_response(request, ticket, criteria_service)
 
 
@@ -1498,7 +1477,7 @@ async def ticket_criteria_edit_form(
     criteria_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     """Render the inline acceptance-criteria editor for an editable ticket."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     if ticket.status not in (TicketStatus.OPEN, TicketStatus.GROOMED):
         raise HTTPException(
             status_code=400,
@@ -1532,7 +1511,7 @@ async def ticket_criteria_update(
     criteria_service: CriterionService = Depends(get_criterion_service),
 ) -> HTMLResponse:
     """Replace the ticket's full criteria list and return the refreshed section."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     try:
         criteria_service.replace_criteria(ticket, criteria_update.criteria, skip_if_unchanged=True)
@@ -1572,7 +1551,7 @@ async def ticket_fields_section(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Markdown-rendered description + collapsible groomed fields partial."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _fields_section_response(request, ticket)
 
 
@@ -1584,7 +1563,7 @@ async def ticket_field_edit_form(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> HTMLResponse:
     """Inline edit form for a single groomed field."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     field_def = next(((n, label) for n, label in GROOMED_FIELD_DEFS if n == field_name), None)
     if field_def is None:
@@ -1621,7 +1600,7 @@ async def ticket_field_update(
     Returns the refreshed fields section on success; on validation failure
     re-renders the edit form with an error message.
     """
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     field_def = next(((n, label) for n, label in GROOMED_FIELD_DEFS if n == field_name), None)
     if field_def is None:
@@ -1660,7 +1639,7 @@ async def ticket_sprint_section(
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
     """Sprint link / 'Unassigned' + assign-to-sprint dropdown partial."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     sprint = sprint_service.get_sprint(ticket.sprint_id) if ticket.sprint_id else None
     sprints = [] if sprint else sprint_service.assignable_sprints()
@@ -1679,7 +1658,7 @@ async def ticket_assign_sprint(
     Returns the refreshed sprint section partial so the dropdown swaps to the
     sprint link in place.
     """
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     form = await request.form()
     raw_sprint_id = form.get("sprint_id")
@@ -1710,7 +1689,7 @@ async def ticket_unassign_sprint(
     sprint_service: SprintService = Depends(get_sprint_service),
 ) -> HTMLResponse:
     """HTMX form submit: remove the ticket from its sprint."""
-    ticket = _ticket_from_designator(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
 
     if ticket.sprint_id is not None:
         try:

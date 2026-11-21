@@ -77,6 +77,7 @@ from jackrabbit.services import (
     SprintService,
     SprintTransitionError,
     TicketService,
+    ticket_from_designator_or_http,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -110,25 +111,6 @@ def get_criterion_service(session: Session = Depends(get_session)) -> CriterionS
 def _label_reads(labels: list[Any]) -> list[LabelRead]:
     """Convert label rows into their API representation."""
     return [LabelRead.model_validate(label) for label in labels]
-
-
-def _ticket_from_path(
-    ticket_designator: str, service: TicketService, not_found_detail: str = "Ticket not found"
-) -> Ticket:
-    """Resolve a ticket path param to its row (JRB-038).
-
-    The path param is the project-scoped designator (e.g. ``WEB-028``): a
-    malformed identifier (including a bare integer) answers 422 with the
-    designator form named; a well-formed but unknown prefix/number answers
-    404. Resolution happens once, to the internal PK used by the services.
-    """
-    try:
-        ticket = service.get_ticket_by_designator(ticket_designator)
-    except DesignatorFormatError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    if ticket is None:
-        raise HTTPException(status_code=404, detail=not_found_detail)
-    return ticket
 
 
 def _sprint_from_path(sprint_number: int, service: SprintService) -> Sprint:
@@ -399,7 +381,7 @@ def assign_ticket_to_sprint(
 ) -> dict | Response:
     sprint = _sprint_from_path(sprint_number, service)
     sprint_id = cast(int, sprint.id)
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     ticket_id = cast(int, ticket.id)
     try:
         ticket = service.assign_ticket_to_sprint(sprint_id, ticket_id)
@@ -434,7 +416,7 @@ def unassign_ticket_from_sprint(
 ) -> dict | Response:
     sprint = _sprint_from_path(sprint_number, service)
     sprint_id = cast(int, sprint.id)
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     ticket_id = cast(int, ticket.id)
     try:
         ticket = service.unassign_ticket_from_sprint(sprint_id, ticket_id)
@@ -611,7 +593,9 @@ def create_child_ticket(
     - HTMX (HX-Request) -> refreshed links-section partial that swaps
       #links-section in place; otherwise the created child as a TicketRead (201).
     """
-    parent = _ticket_from_path(parent_designator, ticket_service, "Parent ticket not found")
+    parent = ticket_from_designator_or_http(
+        parent_designator, ticket_service, "Parent ticket not found"
+    )
     parent_id = cast(int, parent.id)
     if parent.type != TicketType.EPIC:
         raise HTTPException(
@@ -759,7 +743,7 @@ def get_ticket(
     link_service: LinkService = Depends(get_link_service),
     label_service: LabelService = Depends(get_label_service),
 ) -> TicketReadWithDetails:
-    ticket = _ticket_from_path(ticket_designator, service)
+    ticket = ticket_from_designator_or_http(ticket_designator, service)
     ticket_id = cast(int, ticket.id)
     result = service.get_ticket_with_details(ticket_id, link_service)
     if not result:
@@ -820,7 +804,7 @@ def update_ticket(
     label_service: LabelService = Depends(get_label_service),
     criterion_service: CriterionService = Depends(get_criterion_service),
 ) -> TicketRead | Response:
-    ticket = _ticket_from_path(ticket_designator, service)
+    ticket = ticket_from_designator_or_http(ticket_designator, service)
     ticket_id = cast(int, ticket.id)
 
     update_data = ticket_in.model_dump(exclude_unset=True)
@@ -918,7 +902,7 @@ def delete_ticket(
     ticket_designator: str,
     service: TicketService = Depends(get_ticket_service),
 ) -> None:
-    ticket = _ticket_from_path(ticket_designator, service)
+    ticket = ticket_from_designator_or_http(ticket_designator, service)
     if not service.delete_ticket(cast(int, ticket.id)):
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -930,7 +914,7 @@ def check_can_transition(
     to_status: TicketStatus = Query(...),
     service: TicketService = Depends(get_ticket_service),
 ) -> CanTransitionResponse:
-    ticket = _ticket_from_path(ticket_designator, service)
+    ticket = ticket_from_designator_or_http(ticket_designator, service)
     can_transition, error = service.can_transition(ticket, to_status)
     return CanTransitionResponse(can_transition=can_transition, error_message=error)
 
@@ -943,7 +927,7 @@ def transition_ticket(
     request: TransitionRequest,
     service: TicketService = Depends(get_ticket_service),
 ) -> TransitionResponse:
-    ticket = _ticket_from_path(ticket_designator, service)
+    ticket = ticket_from_designator_or_http(ticket_designator, service)
     try:
         from_status = ticket.status
 
@@ -994,7 +978,7 @@ async def move_ticket_project(
     Accepts `project_id` (and the documented alias `target_project_id`) so both
     JSON API clients and htmx form posts work.
     """
-    ticket = _ticket_from_path(ticket_designator, service)
+    ticket = ticket_from_designator_or_http(ticket_designator, service)
     ticket_id = cast(int, ticket.id)
 
     payload = await _parse_move_payload(request)
@@ -1044,8 +1028,12 @@ def create_link(
 ) -> TicketLinkRead | HTMLResponse:
     # Resolve source and target designators to the internal PKs the link
     # service works with (JRB-038).
-    source = _ticket_from_path(source_designator, ticket_service, "Source ticket not found")
-    target = _ticket_from_path(link_in.target_id, ticket_service, "Target ticket not found")
+    source = ticket_from_designator_or_http(
+        source_designator, ticket_service, "Source ticket not found"
+    )
+    target = ticket_from_designator_or_http(
+        link_in.target_id, ticket_service, "Target ticket not found"
+    )
     source_id = cast(int, source.id)
     target_id = cast(int, target.id)
 
@@ -1086,7 +1074,9 @@ def delete_link(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> None:
     # Verify source ticket exists
-    source = _ticket_from_path(source_designator, ticket_service, "Source ticket not found")
+    source = ticket_from_designator_or_http(
+        source_designator, ticket_service, "Source ticket not found"
+    )
     source_id = cast(int, source.id)
 
     # Verify link exists and belongs to this ticket
@@ -1106,7 +1096,7 @@ def get_ticket_links(
     service: LinkService = Depends(get_link_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketLinkRead]:
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _link_reads(service.get_links_for_ticket(cast(int, ticket.id)), ticket_service)
 
 
@@ -1116,7 +1106,7 @@ def get_ticket_blockers(
     service: LinkService = Depends(get_link_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketLinkRead]:
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _link_reads(service.get_blockers(cast(int, ticket.id)), ticket_service)
 
 
@@ -1126,7 +1116,7 @@ def get_ticket_blocked(
     service: LinkService = Depends(get_link_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketLinkRead]:
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _link_reads(service.get_blocked(cast(int, ticket.id)), ticket_service)
 
 
@@ -1174,7 +1164,7 @@ def get_ticket_labels(
     service: LabelService = Depends(get_label_service),
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[LabelRead]:
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return _label_reads(service.labels_for_ticket(cast(int, ticket.id)))
 
 
@@ -1187,7 +1177,7 @@ def attach_label(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> LabelRead | Response:
     """Attach a label to a ticket by name, creating the label on demand."""
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     ticket_id = cast(int, ticket.id)
 
     try:
@@ -1215,7 +1205,7 @@ def detach_label(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> Response:
     """Detach a label from a ticket."""
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     ticket_id = cast(int, ticket.id)
 
     if not service.detach(ticket_id, label_id):
@@ -1237,7 +1227,7 @@ def get_ticket_criteria(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketCriterion]:
     """The ticket's acceptance criteria in ordinal order."""
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     return criterion_service.list_criteria(ticket)
 
 
@@ -1249,7 +1239,7 @@ def add_criterion(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> TicketCriterion:
     """Append an acceptance criterion; rejected once the ticket is In Progress."""
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     try:
         return criterion_service.add_criterion(ticket, criterion_in.text)
     except CriterionLockedError as e:
@@ -1272,7 +1262,7 @@ def update_criterion(
     only while the ticket is In Progress or Ready for Review. Text/position
     edits keep the Open/Groomed gate.
     """
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     try:
         if criterion_in.verified is not None:
             row = criterion_service.sign_off(ticket, criterion_id, criterion_in.verified)
@@ -1302,7 +1292,7 @@ def delete_criterion(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> Response:
     """Delete an acceptance criterion; rejected once the ticket is In Progress."""
-    ticket = _ticket_from_path(ticket_designator, ticket_service)
+    ticket = ticket_from_designator_or_http(ticket_designator, ticket_service)
     try:
         deleted = criterion_service.delete_criterion(ticket, criterion_id)
     except CriterionLockedError as e:

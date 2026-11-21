@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, time
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
+from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
@@ -99,6 +100,29 @@ def parse_ticket_designator(designator: str) -> tuple[str, int]:
             "form PREFIX-NUMBER (e.g. WEB-028); bare numeric ids are not accepted"
         )
     return match["prefix"], int(match["number"])
+
+
+def ticket_from_designator_or_http(
+    designator: str,
+    service: TicketService,
+    not_found_detail: str = "Ticket not found",
+) -> Ticket:
+    """Resolve a path-param designator to its ticket row, mapping HTTP errors.
+
+    Shared transport mapping for both routers (JSON api.py and server-rendered
+    web.py; JRB-036): the path param is the project-scoped designator
+    (e.g. ``WEB-028``) — a malformed identifier (including a bare integer,
+    the wrong-guess trap the designator epic kills) answers 422 with the
+    designator form named; a well-formed but unknown prefix/number answers
+    404. Resolution happens once, to the internal PK used by the services.
+    """
+    try:
+        ticket = service.get_ticket_by_designator(designator)
+    except DesignatorFormatError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    return ticket
 
 
 # The only legal sprint lifecycle moves (JRB-029, ADR-0026). Anything not in
@@ -439,11 +463,15 @@ class TicketService:
         ids = set(ticket_ids)
         if not ids:
             return {}
-        tickets = self.session.exec(select(Ticket).where(Ticket.id.in_(ids))).all()
+        tickets = self.session.exec(
+            select(Ticket).where(Ticket.id.in_(ids))  # type: ignore[union-attr]
+        ).all()
         prefix_by_project = {
             cast(int, project.id): project.prefix
             for project in self.session.exec(
-                select(Project).where(Project.id.in_({cast(int, t.project_id) for t in tickets}))
+                select(Project).where(
+                    Project.id.in_({cast(int, t.project_id) for t in tickets})  # type: ignore[union-attr]
+                )
             ).all()
         }
         return {
