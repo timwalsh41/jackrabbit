@@ -235,6 +235,37 @@ class TestTicketLookup:
         assert ticket_service.get_ticket_by_full_id("WEB", 99) is None
 
 
+class TestFullIdsFor:
+    """Batch designator resolution for list serialization (JRB-036).
+
+    ``full_ids_for`` replaces per-row ``full_id_for`` calls, which fetched
+    each ticket individually and lazy-loaded its project — the N+1 the
+    coding standards call out on list serialization.
+    """
+
+    def test_maps_ticket_pks_to_designators_across_projects(self, ticket_service, setup_projects):
+        web = ticket_service.create_ticket(project_id=setup_projects["web"].id, title="Web one")
+        api = ticket_service.create_ticket(project_id=setup_projects["api"].id, title="API one")
+        designators = ticket_service.full_ids_for([web.id, api.id])
+        assert designators == {
+            web.id: f"WEB-{web.number:03d}",
+            api.id: f"API-{api.number:03d}",
+        }
+
+    def test_matches_full_id_for(self, ticket_service, sample_ticket):
+        assert ticket_service.full_ids_for([sample_ticket.id]) == {
+            sample_ticket.id: ticket_service.full_id_for(sample_ticket.id)
+        }
+
+    def test_unknown_ids_are_omitted(self, ticket_service, sample_ticket):
+        assert ticket_service.full_ids_for([sample_ticket.id, 9999]) == {
+            sample_ticket.id: sample_ticket.full_id
+        }
+
+    def test_empty_input_returns_empty_map(self, ticket_service):
+        assert ticket_service.full_ids_for([]) == {}
+
+
 class TestTicketUpdates:
     """Tests for update_ticket and legacy update_status."""
 

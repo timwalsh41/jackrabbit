@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime, time
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
@@ -426,6 +426,32 @@ class TicketService:
         if ticket is None:
             raise ValueError(f"Ticket {ticket_id} not found")
         return ticket.full_id
+
+    def full_ids_for(self, ticket_ids: Iterable[int]) -> dict[int, str]:
+        """Designators for many ticket PKs, batch-loaded (JRB-036).
+
+        Two fixed queries — one for the tickets, one for their projects —
+        instead of a per-row ``full_id_for`` whose ``Ticket.full_id``
+        lazy-loads the project for every ticket (CODING_STANDARDS: catch N+1
+        with explicit eager loading). Same ``UNK`` fallback as ``full_id``
+        for a row whose project is missing.
+        """
+        ids = set(ticket_ids)
+        if not ids:
+            return {}
+        tickets = self.session.exec(select(Ticket).where(Ticket.id.in_(ids))).all()
+        prefix_by_project = {
+            cast(int, project.id): project.prefix
+            for project in self.session.exec(
+                select(Project).where(Project.id.in_({cast(int, t.project_id) for t in tickets}))
+            ).all()
+        }
+        return {
+            cast(
+                int, ticket.id
+            ): f"{prefix_by_project.get(ticket.project_id, 'UNK')}-{ticket.number:03d}"
+            for ticket in tickets
+        }
 
     def get_ticket_with_details(
         self, ticket_id: int, link_service: LinkService | None = None
