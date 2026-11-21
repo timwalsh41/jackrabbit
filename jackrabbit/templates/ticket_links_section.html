@@ -6,7 +6,7 @@
             {% if ticket.type == 'Epic' %}
             <button 
                 class="btn btn-primary btn-sm"
-                hx-get="/tickets/{{ ticket.id }}/children/new"
+                hx-get="/tickets/{{ ticket.full_id }}/children/new"
                 hx-target="#ticket-modal"
                 hx-swap="innerHTML"
                 title="Create a child ticket under this Epic"
@@ -19,7 +19,7 @@
             {% endif %}
             <button 
                 class="btn btn-primary btn-sm"
-                hx-get="/tickets/{{ ticket.id }}/links/modal"
+                hx-get="/tickets/{{ ticket.full_id }}/links/modal"
                 hx-target="#link-modal-container"
                 hx-swap="innerHTML"
             >
@@ -110,7 +110,7 @@
                     {% for blocker in open_blockers %}
                     {% set blocker_ticket = blocker.source %}
                     <li class="text-sm text-yellow-700">
-                        <a href="/ticket/{{ blocker_ticket.id }}" class="font-medium underline hover:text-yellow-900">
+                        <a href="/ticket/{{ blocker_ticket.full_id }}" class="font-medium underline hover:text-yellow-900">
                             {{ blocker_ticket.project.prefix }}-{{ '%03d'|format(blocker_ticket.number) }}
                         </a>
                         : {{ blocker_ticket.title }}

@@ -10,7 +10,7 @@
       labels  {"start", "complete", "reopen"} button texts
       classes {"start", "complete", "reopen"} button CSS classes -#}
 {% if status == 'Not Started' %}
-<form hx-post="/sprints/{{ sprint.id }}/transition?view={{ view }}"
+<form hx-post="/sprints/{{ sprint.number }}/transition?view={{ view }}"
       hx-target="{{ target }}"
       hx-swap="outerHTML"
       class="inline">
@@ -18,7 +18,7 @@
     <button type="submit" class="{{ classes.start }}">{{ labels.start }}</button>
 </form>
 {% elif status == 'In Progress' %}
-<form hx-post="/sprints/{{ sprint.id }}/transition?view={{ view }}"
+<form hx-post="/sprints/{{ sprint.number }}/transition?view={{ view }}"
       hx-target="{{ target }}"
       hx-swap="outerHTML"
       class="inline">
@@ -26,7 +26,7 @@
     <button type="submit" class="{{ classes.complete }}">{{ labels.complete }}</button>
 </form>
 {% elif status == 'Complete' %}
-<form hx-post="/sprints/{{ sprint.id }}/transition?view={{ view }}"
+<form hx-post="/sprints/{{ sprint.number }}/transition?view={{ view }}"
       hx-target="{{ target }}"
       hx-swap="outerHTML"
       class="inline">

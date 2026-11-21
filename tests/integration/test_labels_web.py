@@ -31,7 +31,7 @@ class TestLabelsSection:
         ticket = await _ticket(client_with_seeds)
         await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/labels")
         assert response.status_code == 200
         assert _chip_names(response.text) == ["Backend"]
 
@@ -39,7 +39,7 @@ class TestLabelsSection:
         self, client_with_seeds: AsyncClient
     ):
         ticket = await _ticket(client_with_seeds)
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/labels")
         assert response.status_code == 200
         assert "No labels yet" in response.text
 
@@ -47,7 +47,7 @@ class TestLabelsSection:
         ticket = await _ticket(client_with_seeds)
         label = (await _attach(client_with_seeds, ticket["full_id"], "Backend")).json()
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/labels")
         hx_delete = f'hx-delete="/api/v1/tickets/{ticket["full_id"]}/labels/{label["id"]}"'
         assert hx_delete in response.text
 
@@ -58,7 +58,7 @@ class TestLabelsSection:
         await _attach(client_with_seeds, other["full_id"], "Frontend")
         ticket = await _ticket(client_with_seeds)
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels/modal")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/labels/modal")
         assert response.status_code == 200
         assert "Frontend" in response.text
 
@@ -68,7 +68,7 @@ class TestAddLabelModal:
 
     async def test_the_modal_has_a_name_input(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels/modal")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/labels/modal")
         assert response.status_code == 200
         assert 'name="name"' in response.text
 
@@ -79,12 +79,12 @@ class TestAddLabelModal:
         await _attach(client_with_seeds, other["full_id"], "Frontend")
         ticket = await _ticket(client_with_seeds)
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels/modal")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/labels/modal")
         assert 'value="Frontend"' in response.text
 
     async def test_the_modal_posts_to_the_label_endpoint(self, client_with_seeds: AsyncClient):
         ticket = await _ticket(client_with_seeds)
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/labels/modal")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/labels/modal")
         assert f'hx-post="/api/v1/tickets/{ticket["full_id"]}/labels"' in response.text
 
 
@@ -125,7 +125,7 @@ class TestLabelsInTheTicketForm:
         ticket = await _ticket(client_with_seeds)
         await _attach(client_with_seeds, ticket["full_id"], "Backend")
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/edit")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/edit")
         assert response.status_code == 200
         assert 'name="labels"' in response.text
         assert 'value="Backend"' in response.text

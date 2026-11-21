@@ -42,25 +42,25 @@ async def get_page(client: httpx.AsyncClient, url: str) -> httpx.Response:
 class TestEditFormBackLinks:
     async def test_edit_page_back_link_points_to_ticket_detail(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}/edit")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/edit")
         assert response.status_code == 200
         assert "<html" in response.text.lower()
         assert "← Back to Ticket Detail" in response.text
-        assert f'href="/tickets/{ticket["id"]}"' in response.text
+        assert f'href="/tickets/{ticket["full_id"]}"' in response.text
         assert "← Back to Backlog" not in response.text
 
     async def test_edit_page_cancel_points_to_ticket_detail(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}/edit")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/edit")
         assert response.status_code == 200
         # The form's Cancel link must go back to the ticket detail page.
-        cancel = f'<a href="/tickets/{ticket["id"]}"\n                   class="px-4 py-2'
+        cancel = f'<a href="/tickets/{ticket["full_id"]}"\n                   class="px-4 py-2'
         assert cancel in response.text
 
     async def test_top_nav_backlog_link_still_present(self, client: httpx.AsyncClient):
         """The top link bar keeps a direct route to the backlog."""
         ticket = await create_ticket(client)
-        response = await get_page(client, f"/tickets/{ticket['id']}/edit")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/edit")
         assert response.status_code == 200
         assert '<a href="/backlog" class="text-gray-700' in response.text
 
@@ -90,7 +90,7 @@ class TestEditSaveRedirect:
             },
         )
         assert r.status_code == 200, r.text
-        assert r.headers.get("HX-Redirect") == f"/tickets/{ticket['id']}"
+        assert r.headers.get("HX-Redirect") == f"/tickets/{ticket['full_id']}"
 
     async def test_patch_htmx_row_target_still_returns_row(
         self, client_with_seeds: httpx.AsyncClient
@@ -109,7 +109,7 @@ class TestEditSaveRedirect:
         )
         assert r.status_code == 200, r.text
         assert "HX-Redirect" not in r.headers
-        assert f'hx-get="/tickets/{ticket["id"]}/edit"' in r.text
+        assert f'hx-get="/tickets/{ticket["full_id"]}/edit"' in r.text
 
     async def test_patch_without_htmx_returns_json(self, client_with_seeds: httpx.AsyncClient):
         ticket = await create_ticket(client_with_seeds)
@@ -153,7 +153,7 @@ class TestEditFormCriteria:
         self, client: httpx.AsyncClient
     ):
         ticket = await self._story_with_criteria(client, ["Write the report"])
-        response = await get_page(client, f"/tickets/{ticket['id']}/edit")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/edit")
         assert response.status_code == 200
         html = response.text
         assert "Acceptance criteria" in html
@@ -166,7 +166,7 @@ class TestEditFormCriteria:
         ticket = await self._story_with_criteria(
             client, [], type="Epic", title="Epic edit criteria"
         )
-        response = await get_page(client, f"/tickets/{ticket['id']}/edit")
+        response = await get_page(client, f"/tickets/{ticket['full_id']}/edit")
         assert response.status_code == 200
         html = response.text
         assert "Acceptance criteria" in html
@@ -201,7 +201,7 @@ class TestEditFormCriteria:
             },
         )
         assert response.status_code == 200, response.text
-        response = await get_page(client_with_seeds, f"/tickets/{ticket['id']}/edit")
+        response = await get_page(client_with_seeds, f"/tickets/{ticket['full_id']}/edit")
         assert response.status_code == 200
         html = response.text
         assert "Locked criterion" in html

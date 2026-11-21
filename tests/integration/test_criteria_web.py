@@ -33,7 +33,7 @@ class TestCriteriaEditorRoute:
     ):
         ticket = await _create_story(client_with_seeds, ["First criterion", "Second criterion"])
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/criteria/edit")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/criteria/edit")
 
         assert response.status_code == 200
         assert 'value="First criterion"' in response.text
@@ -59,7 +59,7 @@ class TestCriteriaEditorRoute:
         )
         assert groomed.status_code == 200, groomed.text
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/criteria/edit")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/criteria/edit")
 
         assert response.status_code == 200
         assert 'value="Groomed criterion"' in response.text
@@ -69,7 +69,9 @@ class TestCriteriaEditorRoute:
     ):
         ticket = await _create_story(client_with_seeds, ["Existing criterion"])
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/criteria/edit?add=true")
+        response = await client_with_seeds.get(
+            f"/tickets/{ticket['full_id']}/criteria/edit?add=true"
+        )
 
         assert response.status_code == 200
         assert 'value="Existing criterion"' in response.text
@@ -81,7 +83,7 @@ class TestCriteriaEditorRoute:
         ticket = await _create_story(client_with_seeds, ["Old criterion", "Remove this"])
 
         response = await client_with_seeds.patch(
-            f"/tickets/{ticket['id']}/criteria", json={"criteria": [" First ", "Second"]}
+            f"/tickets/{ticket['full_id']}/criteria", json={"criteria": [" First ", "Second"]}
         )
 
         assert response.status_code == 200, response.text
@@ -92,7 +94,7 @@ class TestCriteriaEditorRoute:
         assert [row["text"] for row in rows] == ["First", "Second"]
 
         unchanged = await client_with_seeds.patch(
-            f"/tickets/{ticket['id']}/criteria", json={"criteria": ["First", "Second"]}
+            f"/tickets/{ticket['full_id']}/criteria", json={"criteria": ["First", "Second"]}
         )
         assert unchanged.status_code == 200, unchanged.text
         unchanged_rows = (
@@ -104,7 +106,7 @@ class TestCriteriaEditorRoute:
         ticket = await _create_story(client_with_seeds, ["Remove me"])
 
         response = await client_with_seeds.patch(
-            f"/tickets/{ticket['id']}/criteria", json={"criteria": []}
+            f"/tickets/{ticket['full_id']}/criteria", json={"criteria": []}
         )
 
         assert response.status_code == 200, response.text
@@ -137,7 +139,7 @@ class TestCriteriaEditorRoute:
         assert started.status_code == 200, started.text
 
         response = await client_with_seeds.patch(
-            f"/tickets/{ticket['id']}/criteria", json={"criteria": ["Changed"]}
+            f"/tickets/{ticket['full_id']}/criteria", json={"criteria": ["Changed"]}
         )
 
         assert response.status_code == 409
@@ -166,7 +168,7 @@ class TestCriteriaEditorRoute:
         )
         assert started.status_code == 200, started.text
 
-        response = await client_with_seeds.get(f"/tickets/{ticket['id']}/criteria/edit")
+        response = await client_with_seeds.get(f"/tickets/{ticket['full_id']}/criteria/edit")
 
         assert response.status_code == 400
         assert "Criteria are locked" in response.json()["detail"]

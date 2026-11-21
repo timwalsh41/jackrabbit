@@ -1,6 +1,6 @@
 <tr class="hover:bg-gray-50" id="ticket-row-{{ ticket.id }}">
     <td class="px-4 py-3">
-        <a href="/ticket/{{ ticket.id }}"
+        <a href="/ticket/{{ ticket.full_id }}"
            class="font-mono text-indigo-600 hover:text-indigo-900 font-medium"
            title="{% if ticket.project %}{{ ticket.project.prefix }}{% else %}UNK{% endif %}-{{ '%03d'|format(ticket.number) }}{% if ticket.original_id %} (Formerly {{ ticket.original_id }}){% endif %}">
             {% if ticket.project %}
@@ -14,7 +14,7 @@
         {% endif %}
     </td>
     <td class="px-4 py-3">
-        <a href="/ticket/{{ ticket.id }}"
+        <a href="/ticket/{{ ticket.full_id }}"
            class="text-gray-900 hover:text-indigo-600 font-medium truncate block max-w-xs">
             {{ ticket.title }}
         </a>
@@ -103,7 +103,7 @@
     <td class="px-4 py-3">
         <div class="flex items-center gap-2">
             <button class="btn btn-sm btn-outline"
-                    hx-get="/tickets/{{ ticket.id }}/edit"
+                    hx-get="/tickets/{{ ticket.full_id }}/edit"
                     hx-target="#ticket-modal"
                     hx-swap="innerHTML"
                     title="Edit">

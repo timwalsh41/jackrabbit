@@ -23,7 +23,7 @@
                     <h4 class="text-sm font-medium text-gray-900">{{ field.label }}</h4>
                     {% if editable %}
                     <button type="button"
-                            hx-get="/tickets/{{ ticket.id }}/fields/{{ field.name }}/edit"
+                            hx-get="/tickets/{{ ticket.full_id }}/fields/{{ field.name }}/edit"
                             hx-target="#field-{{ field.name }}"
                             hx-swap="innerHTML"
                             class="text-xs px-2 py-0.5 text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-100 transition-colors"

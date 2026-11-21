@@ -32,7 +32,7 @@ class TestTicketDetailErrorDisplay:
     async def test_detail_page_has_htmx_error_handler(self, client: httpx.AsyncClient):
         """The ticket detail page wires an htmx:responseError handler."""
         ticket = await _create_ticket(client)
-        response = await client.get(f"/ticket/{ticket['id']}")
+        response = await client.get(f"/tickets/{ticket['full_id']}")
         assert response.status_code == 200
         assert "htmx:responseError" in response.text
         assert 'id="transition-error"' in response.text
@@ -41,7 +41,7 @@ class TestTicketDetailErrorDisplay:
         """Each guarded-transition modal has a #modal-error container."""
         ticket = await _create_ticket(client)
         for slug in ("groomed", "in-progress", "ready-for-review", "complete"):
-            response = await client.get(f"/tickets/{ticket['id']}/transition/{slug}/modal")
+            response = await client.get(f"/tickets/{ticket['full_id']}/transition/{slug}/modal")
             assert response.status_code == 200, f"modal {slug} failed to render"
             assert 'id="modal-error"' in response.text, f"modal {slug} lacks #modal-error"
 
@@ -134,7 +134,7 @@ class TestGroomedModalPrefill:
         assert response.status_code == 200, response.text
 
         # Fetch the modal
-        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        response = await client.get(f"/tickets/{ticket['full_id']}/transition/groomed/modal")
         assert response.status_code == 200
         html = response.text
         assert "Existing approach" in html
@@ -150,7 +150,7 @@ class TestCompleteModal:
         """The Complete transition modal renders with a Reason field and the
         error container, mirroring the other transition modals."""
         ticket = await _create_ticket(client)
-        response = await client.get(f"/tickets/{ticket['id']}/transition/complete/modal")
+        response = await client.get(f"/tickets/{ticket['full_id']}/transition/complete/modal")
         assert response.status_code == 200
         html = response.text
         assert 'name="to_status" value="Complete"' in html
@@ -163,7 +163,7 @@ class TestCompleteModal:
         """The ticket detail page routes the Complete transition through the
         modal (hx-get) instead of a browser prompt()."""
         ticket = await _create_ticket(client)
-        response = await client.get(f"/ticket/{ticket['id']}")
+        response = await client.get(f"/tickets/{ticket['full_id']}")
         assert response.status_code == 200
         assert "/transition/complete/modal" in response.text
 
@@ -192,7 +192,7 @@ class TestEpicTransitionModals:
 
     async def test_epic_groomed_modal_has_no_required_fields(self, client: httpx.AsyncClient):
         epic = await _create_epic_ticket(client)
-        response = await client.get(f"/tickets/{epic['id']}/transition/groomed/modal")
+        response = await client.get(f"/tickets/{epic['full_id']}/transition/groomed/modal")
         assert response.status_code == 200
         html = response.text
         # The four gating fields must not be required for an Epic.
@@ -206,7 +206,7 @@ class TestEpicTransitionModals:
 
     async def test_story_groomed_modal_still_requires_fields(self, client: httpx.AsyncClient):
         ticket = await _create_ticket(client)
-        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        response = await client.get(f"/tickets/{ticket['full_id']}/transition/groomed/modal")
         assert response.status_code == 200
         html = response.text
         assert "required" in html
@@ -214,7 +214,7 @@ class TestEpicTransitionModals:
 
     async def test_epic_in_progress_modal_branch_not_required(self, client: httpx.AsyncClient):
         epic = await _create_epic_ticket(client)
-        response = await client.get(f"/tickets/{epic['id']}/transition/in-progress/modal")
+        response = await client.get(f"/tickets/{epic['full_id']}/transition/in-progress/modal")
         assert response.status_code == 200
         html = response.text
         # The branch input must not be HTML-required for an Epic.
@@ -247,7 +247,7 @@ class TestGroomedModalCriteria:
         and remove controls, and a fresh empty row to fill in."""
         ticket = await _create_ticket(client, project_id=1)
         await client.patch(f"/api/v1/tickets/{ticket['full_id']}", json={"type": ticket_type})
-        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        response = await client.get(f"/tickets/{ticket['full_id']}/transition/groomed/modal")
         assert response.status_code == 200
         html = response.text
         assert "Acceptance criteria" in html
@@ -277,7 +277,7 @@ class TestGroomedModalCriteria:
         response = await client.post("/api/v1/tickets", json=payload)
         assert response.status_code in (200, 201)
         ticket = response.json()
-        modal = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        modal = await client.get(f"/tickets/{ticket['full_id']}/transition/groomed/modal")
         assert modal.status_code == 200
         html = modal.text
         assert "Acceptance criteria" in html
@@ -291,7 +291,7 @@ class TestGroomedModalCriteria:
         """Criteria authored before the modal opens are pre-filled as
         editable text-input rows."""
         ticket = await self._story_with_criteria(client, ["First criterion", "Second criterion"])
-        response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
+        response = await client.get(f"/tickets/{ticket['full_id']}/transition/groomed/modal")
         assert response.status_code == 200
         html = response.text
         assert 'value="First criterion"' in html

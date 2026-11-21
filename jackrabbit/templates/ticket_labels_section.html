@@ -4,7 +4,7 @@
         <h2 class="text-lg font-semibold text-gray-900">Labels</h2>
         <button
             class="btn btn-primary btn-sm"
-            hx-get="/tickets/{{ ticket.id }}/labels/modal"
+            hx-get="/tickets/{{ ticket.full_id }}/labels/modal"
             hx-target="#label-modal-container"
             hx-swap="innerHTML"
         >
