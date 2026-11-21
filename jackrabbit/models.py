@@ -175,6 +175,16 @@ class Ticket(SQLModel, table=True):
         prefix = self.project.prefix if self.project else "UNK"
         return f"{prefix}-{self.number:03d}"
 
+    @property
+    def project_prefix(self) -> str:
+        """The owning project's prefix; the designator's left half (JRB-038).
+
+        Exposed on the row model so TicketRead (from_attributes) can carry
+        ``project_prefix``/``full_id`` on every ticket response without a
+        per-endpoint lookup.
+        """
+        return self.project.prefix if self.project else "UNK"
+
     incoming_links: list["TicketLink"] = Relationship(
         back_populates="target", sa_relationship_kwargs={"foreign_keys": "TicketLink.target_id"}
     )

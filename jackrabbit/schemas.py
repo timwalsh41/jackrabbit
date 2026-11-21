@@ -385,24 +385,27 @@ class TicketRead(TicketBase):
     story_points: int | None = None
     # The ticket's labels, each with its id, name and colour.
     labels: list[LabelRead] = []
+    # The owning project's prefix; every ticket response self-identifies via
+    # project_prefix/full_id so clients never need the internal PK (JRB-038).
+    project_prefix: str
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def full_id(self) -> str:
+        """The designator form of the ticket, e.g. ``WEB-001`` (JRB-038)."""
+        return f"{self.project_prefix}-{self.number:03d}"
 
 
 class TicketReadWithDetails(TicketRead):
     """Ticket with links, transitions, criteria and criteria history for the
     detailed view (ADR-0025)."""
 
-    project_prefix: str
     links: list["TicketLinkRead"] = []
     transitions: list[dict] = []
     criteria: list["CriterionRead"] = []
     criteria_history: list["CriterionHistoryRead"] = []
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def full_id(self) -> str:
-        return f"{self.project_prefix}-{self.number:03d}"
 
 
 class PaginatedResponse(BaseModel):
