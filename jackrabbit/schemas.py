@@ -278,10 +278,14 @@ class LabelWithUsage(LabelRead):
 
 
 class LinkSpec(BaseModel):
-    """A requested ticket link; the new ticket is always the source."""
+    """A requested ticket link; the new ticket is always the source.
+
+    The target is addressed by its designator (e.g. ``WEB-028``, JRB-038);
+    the API resolves it to the internal PK before creating the link.
+    """
 
     link_type: LinkType
-    target_id: int
+    target_id: str
 
 
 class TicketCreate(TicketBase):
@@ -418,23 +422,32 @@ class PaginatedResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class TicketLinkBase(BaseModel):
-    source_id: int
-    target_id: int
+class TicketLinkCreate(BaseModel):
+    """Create a link from the path ticket to ``target_id``.
+
+    The target is addressed by its designator (e.g. ``WEB-028``, JRB-038);
+    the API resolves it to the internal PK. JRB-019: when the ticket already
+    has a parent, re-parent it instead of rejecting the link with a conflict
+    (only meaningful for parent/child).
+    """
+
+    target_id: str
     link_type: LinkType
-
-
-class TicketLinkCreate(TicketLinkBase):
-    # JRB-019: when the ticket already has a parent, re-parent it instead of
-    # rejecting the link with a conflict. Only meaningful for parent/child.
     replace_parent: bool = False
 
 
-class TicketLinkRead(TicketLinkBase):
-    id: int
-    created_at: datetime
+class TicketLinkRead(BaseModel):
+    """A link as returned to clients (JRB-038).
 
-    model_config = ConfigDict(from_attributes=True)
+    ``source_id``/``target_id`` carry the tickets' designators (``WEB-028``),
+    never the internal PKs.
+    """
+
+    id: int
+    source_id: str
+    target_id: str
+    link_type: LinkType
+    created_at: datetime
 
 
 class CriteriaReplace(BaseModel):

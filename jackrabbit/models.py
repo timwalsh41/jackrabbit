@@ -185,13 +185,20 @@ class Ticket(SQLModel, table=True):
         """
         return self.project.prefix if self.project else "UNK"
 
+    # Deleting the ticket removes its links (both directions) and transition
+    # audit rows with it; without the ORM cascade the NOT NULL FKs on
+    # TicketLink/Transition made any such delete fail (JRB-038).
     incoming_links: list["TicketLink"] = Relationship(
-        back_populates="target", sa_relationship_kwargs={"foreign_keys": "TicketLink.target_id"}
+        back_populates="target",
+        sa_relationship_kwargs={"foreign_keys": "TicketLink.target_id"},
+        cascade_delete=True,
     )
     outgoing_links: list["TicketLink"] = Relationship(
-        back_populates="source", sa_relationship_kwargs={"foreign_keys": "TicketLink.source_id"}
+        back_populates="source",
+        sa_relationship_kwargs={"foreign_keys": "TicketLink.source_id"},
+        cascade_delete=True,
     )
-    transitions: list["Transition"] = Relationship(back_populates="ticket")
+    transitions: list["Transition"] = Relationship(back_populates="ticket", cascade_delete=True)
     # Label attachments. Deleting the ticket removes the attachments with it
     # (the labels themselves stay in the registry). The links (and the labels
     # behind them) are loaded eagerly, so rendering a list of tickets does not

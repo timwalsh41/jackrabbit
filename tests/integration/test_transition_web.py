@@ -53,7 +53,7 @@ class TestGuardFailureErrorContract:
         exactly what the HTMX error handler surfaces in the UI."""
         ticket = await _create_ticket(client)
         response = await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={"to_status": "Groomed"},
             headers={"HX-Request": "true"},
         )
@@ -69,7 +69,7 @@ class TestGuardFailureErrorContract:
         ticket = await _create_ticket(client)
         # Drive to In Progress via API
         await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={
                 "to_status": "Groomed",
                 "approach": "a",
@@ -80,11 +80,11 @@ class TestGuardFailureErrorContract:
             },
         )
         await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={"to_status": "In Progress", "branch_name": "feature/test-001"},
         )
         response = await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={"to_status": "Ready for Review"},
         )
         assert response.status_code == 200
@@ -96,7 +96,7 @@ class TestGuardFailureErrorContract:
         ticket = await _create_ticket(client)
         # Drive to In Progress via API
         await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={
                 "to_status": "Groomed",
                 "approach": "a",
@@ -107,11 +107,11 @@ class TestGuardFailureErrorContract:
             },
         )
         await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={"to_status": "In Progress", "branch_name": "feature/test-001"},
         )
         response = await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={"to_status": "Ready for Review", "pr_url": "not-a-url"},
         )
         assert response.status_code == 400
@@ -130,7 +130,7 @@ class TestGroomedModalPrefill:
             "test_plan": "Existing test plan",
             "validation_steps": "Existing validation steps",
         }
-        response = await client.patch(f"/api/v1/tickets/{ticket['id']}", json=patch_payload)
+        response = await client.patch(f"/api/v1/tickets/{ticket['full_id']}", json=patch_payload)
         assert response.status_code == 200, response.text
 
         # Fetch the modal
@@ -233,7 +233,9 @@ class TestGroomedModalCriteria:
 
     async def _story_with_criteria(self, client: httpx.AsyncClient, texts: list[str]) -> dict:
         ticket = await _create_ticket(client)
-        response = await client.patch(f"/api/v1/tickets/{ticket['id']}", json={"criteria": texts})
+        response = await client.patch(
+            f"/api/v1/tickets/{ticket['full_id']}", json={"criteria": texts}
+        )
         assert response.status_code == 200, response.text
         return ticket
 
@@ -244,7 +246,7 @@ class TestGroomedModalCriteria:
         """Story/Bug tickets get the red-asterisk criteria header, the add
         and remove controls, and a fresh empty row to fill in."""
         ticket = await _create_ticket(client, project_id=1)
-        await client.patch(f"/api/v1/tickets/{ticket['id']}", json={"type": ticket_type})
+        await client.patch(f"/api/v1/tickets/{ticket['full_id']}", json={"type": ticket_type})
         response = await client.get(f"/tickets/{ticket['id']}/transition/groomed/modal")
         assert response.status_code == 200
         html = response.text
@@ -304,7 +306,7 @@ class TestGroomedModalCriteria:
         removals made before transitioning persist."""
         ticket = await self._story_with_criteria(client_with_seeds, ["Keep me", "Drop me"])
         response = await client_with_seeds.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={
                 "to_status": "Groomed",
                 "approach": "Approach",
@@ -315,5 +317,5 @@ class TestGroomedModalCriteria:
             },
         )
         assert response.status_code == 200, response.text
-        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+        rows = (await client_with_seeds.get(f"/api/v1/tickets/{ticket['full_id']}/criteria")).json()
         assert [row["text"] for row in rows] == ["Keep me", "Added in the modal"]

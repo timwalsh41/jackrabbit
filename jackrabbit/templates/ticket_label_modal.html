@@ -23,7 +23,7 @@
                 </button>
             </div>
 
-            <form hx-post="/api/v1/tickets/{{ ticket.id }}/labels"
+            <form hx-post="/api/v1/tickets/{{ ticket.full_id }}/labels"
                   hx-target="#labels-section"
                   hx-swap="outerHTML"
                   hx-ext="json-enc"

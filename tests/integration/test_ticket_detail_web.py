@@ -42,7 +42,7 @@ class TestParentBacklink:
         epic = await create_ticket(client, title="Parent Epic", type=TicketType.EPIC)
         story = await create_ticket(client, title="Child Story")
         link = await client.post(
-            f"/api/v1/tickets/{epic['id']}/links",
+            f"/api/v1/tickets/{epic['full_id']}/links",
             json={
                 "source_id": epic["id"],
                 "target_id": story["id"],
@@ -62,7 +62,7 @@ class TestParentBacklink:
         epic = await create_ticket(client, title="Parent Epic", type=TicketType.EPIC)
         story = await create_ticket(client, title="Child Story")
         link = await client.post(
-            f"/api/v1/tickets/{epic['id']}/links",
+            f"/api/v1/tickets/{epic['full_id']}/links",
             json={
                 "source_id": epic["id"],
                 "target_id": story["id"],
@@ -88,7 +88,7 @@ class TestParentBacklink:
         epic = await create_ticket(client, title="Parent Epic", type=TicketType.EPIC)
         story = await create_ticket(client, title="Child Story")
         link = await client.post(
-            f"/api/v1/tickets/{epic['id']}/links",
+            f"/api/v1/tickets/{epic['full_id']}/links",
             json={
                 "source_id": epic["id"],
                 "target_id": story["id"],
@@ -196,7 +196,7 @@ class TestInlineFieldEditing:
             validation_steps="manual",
         )
         response = await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={"to_status": "Groomed", "reason": "ready", "criteria": ["It works"]},
         )
         assert response.status_code == 200
@@ -220,7 +220,7 @@ class TestInlineFieldEditing:
         assert response.status_code == 200
         assert "New approach value" in response.text
         # Persisted
-        detail = (await client.get(f"/api/v1/tickets/{groomed['id']}")).json()
+        detail = (await client.get(f"/api/v1/tickets/{groomed['full_id']}")).json()
         assert detail["approach"] == "New approach value"
 
     async def test_patch_rejects_unknown_field(self, client: httpx.AsyncClient, groomed: dict):
@@ -237,18 +237,20 @@ class TestInlineFieldEditing:
             {"to_status": "In Progress", "branch_name": "feature/branch"},
             {"to_status": "Ready for Review", "pr_url": "https://github.com/x/y/pull/1"},
         ):
-            response = await client.post(f"/api/v1/tickets/{groomed['id']}/transition", json=step)
+            response = await client.post(
+                f"/api/v1/tickets/{groomed['full_id']}/transition", json=step
+            )
             assert response.status_code == 200, response.text
         # The Complete guard (ADR-0025) needs every criterion verified first.
-        rows = (await client.get(f"/api/v1/tickets/{groomed['id']}/criteria")).json()
+        rows = (await client.get(f"/api/v1/tickets/{groomed['full_id']}/criteria")).json()
         for row in rows:
             signed = await client.patch(
-                f"/api/v1/tickets/{groomed['id']}/criteria/{row['id']}",
+                f"/api/v1/tickets/{groomed['full_id']}/criteria/{row['id']}",
                 json={"verified": True},
             )
             assert signed.status_code == 200, signed.text
         response = await client.post(
-            f"/api/v1/tickets/{groomed['id']}/transition",
+            f"/api/v1/tickets/{groomed['full_id']}/transition",
             json={"to_status": "Complete", "reason": "done"},
         )
         assert response.status_code == 200, response.text
@@ -265,7 +267,7 @@ class TestInlineFieldEditing:
 
     async def test_edit_blocked_when_rejected(self, client: httpx.AsyncClient, groomed: dict):
         await client.post(
-            f"/api/v1/tickets/{groomed['id']}/transition",
+            f"/api/v1/tickets/{groomed['full_id']}/transition",
             json={"to_status": "Rejected", "reason": "nope"},
         )
         response = await client.patch(
@@ -283,7 +285,7 @@ class TestInlineFieldEditing:
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
         assert response.status_code in (400, 404, 422)
-        detail = (await client.get(f"/api/v1/tickets/{groomed['id']}")).json()
+        detail = (await client.get(f"/api/v1/tickets/{groomed['full_id']}")).json()
         assert detail["status"] == TicketStatus.GROOMED
 
 
@@ -363,7 +365,7 @@ class TestSprintAssignmentPartial:
         assert response.status_code == 200
         assert f"/sprints/{sprint['id']}/detail" in response.text
         # Persisted
-        detail = (await client.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        detail = (await client.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
         assert detail["sprint_id"] == sprint["id"]
 
     async def test_assigned_section_shows_sprint_link(
@@ -396,7 +398,7 @@ class TestSprintAssignmentPartial:
             test_plan="Run tests",
             validation_steps="All green",
         )
-        await client.post(f"/api/v1/tickets/{ticket['id']}/criteria", json={"text": "Done"})
+        await client.post(f"/api/v1/tickets/{ticket['full_id']}/criteria", json={"text": "Done"})
         await client.post(
             f"/tickets/{ticket['id']}/assign-sprint",
             content=f"sprint_id={sprint.id}",
@@ -417,14 +419,14 @@ class TestSprintAssignmentPartial:
         for status in ("Groomed", "In Progress", "Ready for Review", "Complete"):
             if status == "Ready for Review":
                 # Sign off the criterion so the Complete guard can pass.
-                rows = (await client.get(f"/api/v1/tickets/{ticket['id']}/criteria")).json()
+                rows = (await client.get(f"/api/v1/tickets/{ticket['full_id']}/criteria")).json()
                 verified = await client.patch(
-                    f"/api/v1/tickets/{ticket['id']}/criteria/{rows[0]['id']}",
+                    f"/api/v1/tickets/{ticket['full_id']}/criteria/{rows[0]['id']}",
                     json={"verified": True},
                 )
                 assert verified.status_code == 200, verified.text
             done = await client.post(
-                f"/api/v1/tickets/{ticket['id']}/transition",
+                f"/api/v1/tickets/{ticket['full_id']}/transition",
                 json={"to_status": status, "reason": "Finished before sprint close"},
             )
             assert done.status_code == 200, done.text
@@ -447,7 +449,7 @@ class TestSprintAssignmentPartial:
         )
         assert response.status_code == 200
         assert "Unassigned" in response.text
-        detail = (await client.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        detail = (await client.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
         assert detail["sprint_id"] is None
 
     async def test_dropdown_excludes_completed_sprint(self, client: httpx.AsyncClient, test_db):
@@ -485,7 +487,7 @@ class TestSprintAssignmentPartial:
         )
         assert response.status_code == 409
         assert "Complete" in response.text
-        detail = (await client.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        detail = (await client.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
         assert detail["sprint_id"] is None
 
     async def test_assign_with_invalid_sprint(self, client: httpx.AsyncClient):
@@ -540,19 +542,19 @@ class TestDetailPageActions:
         """Transition history endpoint data flows through the existing API."""
         ticket = await create_ticket(client)
         response = await client.post(
-            f"/api/v1/tickets/{ticket['id']}/transition",
+            f"/api/v1/tickets/{ticket['full_id']}/transition",
             json={"to_status": "Rejected", "reason": "duplicate"},
         )
         assert response.status_code == 200, response.text
-        detail = (await client.get(f"/api/v1/tickets/{ticket['id']}")).json()
+        detail = (await client.get(f"/api/v1/tickets/{ticket['full_id']}")).json()
         assert len(detail["transitions"]) == 1
         assert detail["transitions"][0]["reason"] == "duplicate"
 
     async def test_delete_ticket_removes_it(self, client: httpx.AsyncClient):
         ticket = await create_ticket(client)
-        response = await client.delete(f"/api/v1/tickets/{ticket['id']}")
+        response = await client.delete(f"/api/v1/tickets/{ticket['full_id']}")
         assert response.status_code == 204
-        assert (await client.get(f"/api/v1/tickets/{ticket['id']}")).status_code == 404
+        assert (await client.get(f"/api/v1/tickets/{ticket['full_id']}")).status_code == 404
 
 
 class TestCreateChildWeb:

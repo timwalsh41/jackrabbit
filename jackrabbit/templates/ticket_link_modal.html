@@ -19,7 +19,7 @@
             </div>
             
             <form id="link-modal-form"
-                  hx-post="/api/v1/tickets/{{ ticket.id }}/links"
+                  hx-post="/api/v1/tickets/{{ ticket.full_id }}/links"
                   hx-target="#links-section"
                   hx-swap="outerHTML"
                   hx-ext="json-enc"

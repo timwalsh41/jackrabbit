@@ -361,7 +361,7 @@ async def test_plan_web_page_shows_epics_with_children(
         ).json()
         child_ids.append(child)
         link_resp = await client_with_seeds.post(
-            f"/api/v1/tickets/{child['id']}/links",
+            f"/api/v1/tickets/{child['full_id']}/links",
             json={
                 "source_id": child["id"],
                 "target_id": epic["id"],

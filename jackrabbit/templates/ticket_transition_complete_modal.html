@@ -18,10 +18,10 @@
                 </div>
 
                 <form id="complete-form"
-                      hx-post="/api/v1/tickets/{{ ticket.id }}/transition"
+                      hx-post="/api/v1/tickets/{{ ticket.full_id }}/transition"
                       hx-headers='{"Content-Type": "application/json"}'
                       hx-ext="json-enc"
-                      hx-on::after-request="if(event.detail.xhr.status === 200) { closeModal(); htmx.ajax('GET', '/api/v1/tickets/{{ ticket.id }}', {target: '#ticket-content', swap: 'innerHTML'}); }"
+                      hx-on::after-request="if(event.detail.xhr.status === 200) { closeModal(); htmx.ajax('GET', '/api/v1/tickets/{{ ticket.full_id }}', {target: '#ticket-content', swap: 'innerHTML'}); }"
                       class="mt-4">
                     <input type="hidden" name="to_status" value="Complete">
 
