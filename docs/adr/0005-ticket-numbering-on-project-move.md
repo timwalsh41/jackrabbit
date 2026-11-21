@@ -11,15 +11,18 @@ When a ticket moves from one project to another (e.g., `MSC-005` → `WEB`), wha
 - User chooses interactively
 
 ## Decision
-**Next available in target project**. `MSC-005` moving to `WEB` becomes `WEB-001` (or `WEB-003` if `WEB-001`, `WEB-002` exist).
+**Next available in target project**. `MSC-005` moving to `WEB` becomes WEB's next
+never-before-used serial (e.g. `WEB-003` if `WEB-001`, `WEB-002` exist) — see the
+JRB-037 amendment below for what "next available" means under the never-reuse
+counter.
 
 ## Consequences
 
 ### Positive
-- **No gaps in target** — serial numbers stay dense
+- **Automatic allocation** — the target serial comes straight from the project's `next_number` counter (JRB-037). Density is not guaranteed anywhere: numbers are never reissued, so freed serials leave permanent gaps in both projects
 - **Clean UX** — user doesn't pick numbers; system manages
 - **Source project history preserved** — `MSC-005` stays in MSC history (can show "moved to WEB-001")
-- **Simple implementation** — `MAX(number) + 1` in target project transaction
+- **Simple implementation** — increment the target project's `next_number` counter in the move transaction (JRB-037); `MAX(number) + 1` is no longer the allocation rule anywhere
 
 ### Negative
 - **Number changes** — references in commits, PRs, docs become stale
@@ -45,6 +48,6 @@ monotone per-project ``next_number`` counter. Consequences for this ADR:
   ``f1a2b3c4d5e6`` for pre-existing data).
 
 ## Alternatives Considered
-- **Preserve serial**: Rejected — creates gaps in target (`WEB-001`, `WEB-002`, `WEB-006` looks odd).
+- **Preserve serial**: Rejected — references the old prefix anyway (`WEB-001` arriving with `MSC-005`'s serial is still a new designator, and it would reissue serials the counter has already spent).
 - **Keep number**: Rejected — collision if target already has that number.
 - **User chooses**: Rejected — decision fatigue; user shouldn't manage serial numbers.
