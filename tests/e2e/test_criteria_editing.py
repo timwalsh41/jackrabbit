@@ -22,7 +22,7 @@ class TestInlineCriteriaEditor:
         self, page: Page, base_url: str, make_ticket
     ):
         ticket = make_ticket(title="Clear acceptance criteria")
-        ticket_id = ticket["id"]
+        ticket_id = ticket["full_id"]
         _set_criteria(base_url, ticket["full_id"], ["Remove this criterion"])
 
         page.goto(f"{base_url}/tickets/{ticket_id}")
@@ -57,7 +57,7 @@ class TestInlineCriteriaEditor:
 
     def test_edit_add_and_state_guidance(self, page: Page, base_url: str, make_ticket):
         ticket = make_ticket(title="Inline criteria controls")
-        ticket_id = ticket["id"]
+        ticket_id = ticket["full_id"]
         _set_criteria(base_url, ticket["full_id"], ["Original criterion", "Second criterion"])
 
         page.goto(f"{base_url}/tickets/{ticket_id}")
@@ -136,7 +136,7 @@ class TestInlineCriteriaEditor:
         self, page: Page, base_url: str, make_ticket
     ):
         ticket = make_ticket(title="Optional while open")
-        ticket_id = ticket["id"]
+        ticket_id = ticket["full_id"]
 
         page.goto(f"{base_url}/tickets/{ticket_id}/edit")
         criteria_field = page.locator(".criteria-field")

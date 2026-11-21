@@ -14,7 +14,7 @@ class TestEditSaveReturnsToDetail:
         self, page: Page, base_url: str, seeded_projects, make_ticket
     ):
         ticket = make_ticket()
-        tid = ticket["id"]
+        tid = ticket["full_id"]
 
         page.goto(f"{base_url}/tickets/{tid}")
         page.click(f'a[href="/tickets/{tid}/edit"]')
@@ -34,7 +34,7 @@ class TestEditSaveReturnsToDetail:
         self, page: Page, base_url: str, seeded_projects, make_ticket
     ):
         ticket = make_ticket()
-        tid = ticket["id"]
+        tid = ticket["full_id"]
 
         page.goto(f"{base_url}/tickets/{tid}")
         page.click(f'a[href="/tickets/{tid}/edit"]')

@@ -81,7 +81,7 @@ class TestSprintWorkflow:
         page.wait_for_load_state("networkidle")
 
         # The canonical board URL renders with its status columns
-        assert f"/sprints/{sprint['id']}/detail" in page.url
+        assert f"/sprints/{sprint['number']}/detail" in page.url
         expect(page.locator("#column-open")).to_be_visible(timeout=10000)
         expect(page.locator("body")).to_contain_text("E2E Sprint", timeout=10000)
 
@@ -104,7 +104,7 @@ class TestSprintWorkflow:
         page.click("#sprint-section a")
         page.wait_for_load_state("networkidle")
 
-        assert f"/sprints/{sprint['id']}/detail" in page.url
+        assert f"/sprints/{sprint['number']}/detail" in page.url
         expect(page.locator("#column-open")).to_be_visible(timeout=10000)
         expect(page.locator("body")).to_contain_text("Sprint Link Ticket", timeout=10000)
 
@@ -121,7 +121,7 @@ class TestSprintWorkflow:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             client.post(f"/api/v1/sprints/{sprint['number']}/tickets/{ticket['full_id']}")
 
-        page.goto(f"{base_url}/sprints/{sprint['id']}/detail")
+        page.goto(f"{base_url}/sprints/{sprint['number']}/detail")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
@@ -135,7 +135,7 @@ class TestSprintWorkflow:
     def test_sprint_status_derived(self, page: Page, base_url: str, seeded_projects, make_sprint):
         """Sprint detail shows a status badge derived from dates."""
         sprint = make_sprint()
-        page.goto(f"{base_url}/sprints/{sprint['id']}/detail")
+        page.goto(f"{base_url}/sprints/{sprint['number']}/detail")
         page.wait_for_load_state("networkidle")
 
         # Status badge element should be visible
@@ -160,7 +160,7 @@ class TestSprintWorkflow:
             assert resp.status_code == 200
 
         # Ticket starts in the Open column
-        page.goto(f"{base_url}/sprints/{sprint['id']}/detail")
+        page.goto(f"{base_url}/sprints/{sprint['number']}/detail")
         page.wait_for_load_state("networkidle")
         open_col = page.locator("#column-open")
         groomed_col = page.locator("#column-groomed")
@@ -191,7 +191,7 @@ class TestSprintWorkflow:
         )
 
         # The Sprint view now shows the ticket in the Groomed column
-        page.goto(f"{base_url}/sprints/{sprint['id']}/detail")
+        page.goto(f"{base_url}/sprints/{sprint['number']}/detail")
         page.wait_for_load_state("networkidle")
         groomed_col = page.locator("#column-groomed")
         open_col = page.locator("#column-open")

@@ -23,7 +23,7 @@ def test_link_modal_dismiss_controls_close_without_refresh(
         "request",
         lambda request: (
             section_refreshes.append(request.url)
-            if request.url.endswith(f"/tickets/{ticket['id']}/links")
+            if request.url.endswith(f"/tickets/{ticket['full_id']}/links")
             else None
         ),
     )

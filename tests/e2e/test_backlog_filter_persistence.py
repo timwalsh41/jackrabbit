@@ -59,9 +59,13 @@ def _back_via_nav(page: Page) -> None:
     page.wait_for_timeout(500)
 
 
-def _open_ticket_detail(page: Page, ticket_id: int) -> None:
-    """Navigate away from the backlog to a ticket detail page."""
-    page.locator(f"#ticket-row-{ticket_id} a[href='/ticket/{ticket_id}']").first.click()
+def _open_ticket_detail(page: Page, ticket: dict) -> None:
+    """Navigate away from the backlog to a ticket detail page.
+
+    The row link carries the designator (JRB-039); the row id stays the
+    internal PK.
+    """
+    page.locator(f"#ticket-row-{ticket['id']} a[href='/ticket/{ticket['full_id']}']").first.click()
     page.wait_for_load_state("networkidle")
 
 
@@ -86,7 +90,7 @@ class TestBacklogFilterPersistence:
         assert page.locator(f"#ticket-row-{in_uns['id']}").count() == 0
 
         # Leave the backlog for a ticket detail view.
-        _open_ticket_detail(page, in_web["id"])
+        _open_ticket_detail(page, in_web)
 
         # Return through the plain nav link: filters must come back, and the
         # URL must carry the filter query again (hx-push-url rewrites it).
@@ -111,7 +115,7 @@ class TestBacklogFilterPersistence:
         expect(page).to_have_url(__import__("re").compile(r"sort=priority"), timeout=10000)
 
         # Leave and come back through the nav link.
-        _open_ticket_detail(page, first["id"])
+        _open_ticket_detail(page, first)
         _back_via_nav(page)
 
         expect(page).to_have_url(__import__("re").compile(r"sort=priority"), timeout=10000)
@@ -191,7 +195,7 @@ class TestBacklogFilterPersistence:
         expect(page.locator(f"#ticket-row-{canary['id']}")).to_be_visible(timeout=10000)
 
         # Leave and come back through the plain nav link.
-        _open_ticket_detail(page, canary["id"])
+        _open_ticket_detail(page, canary)
         _back_via_nav(page)
 
         # Restored state: page reset to 1, controls consistent with the rows
@@ -233,7 +237,7 @@ class TestBacklogFilterPersistence:
         # Leave and come back through the plain nav link: the scoped query is
         # what must be restored (the form has no project_id field, so the
         # restore pre-checks the matching project_ids option instead).
-        _open_ticket_detail(page, in_uns["id"])
+        _open_ticket_detail(page, in_uns)
         _back_via_nav(page)
         expect(page).to_have_url(re.compile(r"project_ids=1(&|$)"), timeout=10000)
         expect(page.locator(f"#ticket-row-{in_uns['id']}")).to_be_visible(timeout=10000)
@@ -281,7 +285,7 @@ class TestBacklogFilterPersistence:
 
         # Leave and come back through the plain nav link: the OLDER filter
         # (WEB only) is what must be restored, not the newer two-project one.
-        _open_ticket_detail(page, in_web["id"])
+        _open_ticket_detail(page, in_web)
         _back_via_nav(page)
         expect(page).to_have_url(re.compile(rf"project_ids={web['id']}(&|$)"), timeout=10000)
         expect(page.locator(f"#ticket-row-{in_web['id']}")).to_be_visible(timeout=10000)
@@ -311,7 +315,7 @@ class TestBacklogFilterPersistence:
         expect(page.locator(f"#ticket-row-{in_uns['id']}")).to_be_visible(timeout=10000)
 
         # The wiped stash must not resurrect the filters on the next return.
-        _open_ticket_detail(page, in_web["id"])
+        _open_ticket_detail(page, in_web)
         _back_via_nav(page)
         expect(page).to_have_url(f"{base_url}/backlog", timeout=10000)
         expect(page.locator(f"#ticket-row-{in_uns['id']}")).to_be_visible(timeout=10000)
