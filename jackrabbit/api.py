@@ -788,7 +788,7 @@ def get_ticket(
         updated_at=ticket.updated_at,
         completed_at=ticket.completed_at,
         project_prefix=result["project_prefix"],
-        links=[_link_read(link, service) for link in result["links"]],
+        links=_link_reads(result["links"], service),
         transitions=result["transitions"],
         criteria=[CriterionRead.model_validate(row) for row in result["criteria"]],
         criteria_history=[
@@ -1075,7 +1075,7 @@ def create_link(
             TicketService(service.session),
             LinkService(service.session),
         )
-    return _link_read(link, ticket_service)
+    return _link_reads([link], ticket_service)[0]
 
 
 @router.delete("/tickets/{source_designator}/links/{link_id}", status_code=204)
@@ -1107,10 +1107,7 @@ def get_ticket_links(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketLinkRead]:
     ticket = _ticket_from_path(ticket_designator, ticket_service)
-    return [
-        _link_read(link, ticket_service)
-        for link in service.get_links_for_ticket(cast(int, ticket.id))
-    ]
+    return _link_reads(service.get_links_for_ticket(cast(int, ticket.id)), ticket_service)
 
 
 @router.get("/tickets/{ticket_designator}/blockers", response_model=list[TicketLinkRead])
@@ -1120,7 +1117,7 @@ def get_ticket_blockers(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketLinkRead]:
     ticket = _ticket_from_path(ticket_designator, ticket_service)
-    return [_link_read(link, ticket_service) for link in service.get_blockers(cast(int, ticket.id))]
+    return _link_reads(service.get_blockers(cast(int, ticket.id)), ticket_service)
 
 
 @router.get("/tickets/{ticket_designator}/blocked", response_model=list[TicketLinkRead])
@@ -1130,18 +1127,30 @@ def get_ticket_blocked(
     ticket_service: TicketService = Depends(get_ticket_service),
 ) -> list[TicketLinkRead]:
     ticket = _ticket_from_path(ticket_designator, ticket_service)
-    return [_link_read(link, ticket_service) for link in service.get_blocked(cast(int, ticket.id))]
+    return _link_reads(service.get_blocked(cast(int, ticket.id)), ticket_service)
 
 
-def _link_read(link: TicketLink, ticket_service: TicketService) -> TicketLinkRead:
-    """Serialize a link row with designator source/target (JRB-038)."""
-    return TicketLinkRead(
-        id=cast(int, link.id),
-        source_id=ticket_service.full_id_for(link.source_id),
-        target_id=ticket_service.full_id_for(link.target_id),
-        link_type=link.link_type,
-        created_at=link.created_at,
+def _link_reads(links: list[TicketLink], ticket_service: TicketService) -> list[TicketLinkRead]:
+    """Serialize link rows with designator source/target (JRB-038).
+
+    Designators resolve in two batch queries (tickets, then their projects)
+    via ``TicketService.full_ids_for``; per-link ``full_id_for`` calls would
+    lazy-load each involved ticket and its project (CODING_STANDARDS:
+    explicit eager loading on list serialization).
+    """
+    designators = ticket_service.full_ids_for(
+        {end for link in links for end in (link.source_id, link.target_id)}
     )
+    return [
+        TicketLinkRead(
+            id=cast(int, link.id),
+            source_id=designators[link.source_id],
+            target_id=designators[link.target_id],
+            link_type=link.link_type,
+            created_at=link.created_at,
+        )
+        for link in links
+    ]
 
 
 # Label endpoints
