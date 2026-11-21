@@ -262,3 +262,41 @@ async def test_valid_names_are_accepted(client_with_seeds: AsyncClient, name: st
     response = await _attach(client_with_seeds, ticket["id"], name)
     assert response.status_code == 201, response.text
     assert response.json()["name"] == name
+
+
+class TestTriageIsALabelConvention:
+    """Triage roles are plain labels (JRB-032, ADR-0027): recorded through the
+    generic labels API by name, not through dedicated triage endpoints."""
+
+    async def test_a_triage_label_round_trips_through_the_ticket_payload(
+        self, client_with_seeds: AsyncClient
+    ):
+        ticket = await _ticket(client_with_seeds)
+
+        response = await _attach(client_with_seeds, ticket["id"], "triage:ready-for-agent")
+        assert response.status_code == 201, response.text
+        assert response.json()["name"] == "triage:ready-for-agent"
+
+        payload = await client_with_seeds.get(f"/api/v1/tickets/{ticket['id']}")
+        assert [label["name"] for label in payload.json()["labels"]] == ["triage:ready-for-agent"]
+
+    async def test_the_triage_endpoints_are_gone(self, client_with_seeds: AsyncClient):
+        ticket = await _ticket(client_with_seeds)
+        for method, path in (
+            ("GET", "/api/v1/triage/roles"),
+            ("GET", f"/api/v1/tickets/{ticket['id']}/triage"),
+            ("POST", f"/api/v1/tickets/{ticket['id']}/triage"),
+        ):
+            response = await client_with_seeds.request(method, path)
+            assert response.status_code == 404, (method, path, response.text)
+
+    async def test_triage_is_absent_from_the_served_openapi_schema(
+        self, client_with_seeds: AsyncClient
+    ):
+        response = await client_with_seeds.get("/openapi.json")
+        assert response.status_code == 200
+        paths = list(response.json()["paths"])
+        assert not [path for path in paths if "triage" in path]
+        assert not [
+            name for name in response.json()["components"]["schemas"] if name.startswith("Triage")
+        ]

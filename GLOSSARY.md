@@ -47,8 +47,8 @@
 **Priority**
 : One of: `Low`, `Medium`, `High`, `Critical`.
 
-**Triage Role**
-: Where a ticket sits in the triage workflow. One of: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. A role is recorded as a label in the `triage:` namespace (`triage:ready-for-agent`), not as a keyword in the ticket description, so it is visible in the interface and queryable. A ticket carries at most one triage role.
+**Triage Label**
+: One of five canonical label names owned by the mp-skills ecosystem: `triage:needs-triage`, `triage:needs-info`, `triage:ready-for-agent`, `triage:ready-for-human`, `triage:wontfix`. A label-name convention (ADR-0027) over the generic labels feature, not a Jackrabbit construct: recorded and read through the labels API and rendered as an ordinary label chip. At most one triage label per ticket is an mp-skills convention that Jackrabbit does not enforce. See `docs/agents/triage-labels.md`.
 
 ## Technical
 
